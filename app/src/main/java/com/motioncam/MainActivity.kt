@@ -76,7 +76,6 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         prefs = Prefs(this)
         if (prefs.password.isEmpty()) {
             val chars = "abcdefghjkmnpqrstuvwxyz23456789"
@@ -85,8 +84,26 @@ class MainActivity : Activity() {
         buildUi()
     }
 
+    /**
+     * Keeps the screen on while you are adjusting things, but only for 3 minutes after the last touch: a static
+     * picture left on an AMOLED screen for hours can burn in. Monitoring carries on with the screen off.
+     */
+    private val allowSleep = Runnable { window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+
+    private fun keepAwake() {
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        ui.removeCallbacks(allowSleep)
+        ui.postDelayed(allowSleep, 3 * 60_000L)
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) keepAwake()
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onResume() {
         super.onResume()
+        keepAwake()
         resumed = true
         StatusBus.add(statusListener)
         updateFlags()
@@ -104,6 +121,8 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         resumed = false
+        ui.removeCallbacks(allowSleep)
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         ui.removeCallbacks(ticker)
         (getSystemService(DISPLAY_SERVICE) as DisplayManager).unregisterDisplayListener(displayListener)
         FrameHub.overlaySink = null

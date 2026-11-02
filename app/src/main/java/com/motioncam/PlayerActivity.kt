@@ -87,7 +87,6 @@ class PlayerActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
 
         // ---- video area
@@ -256,7 +255,11 @@ class PlayerActivity : Activity() {
         d
     } catch (e: Exception) { 0L }
 
-    override fun onResume() { super.onResume(); ui.post(ticker) }
+    override fun onResume() {
+        super.onResume()
+        if (playing) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        ui.post(ticker)
+    }
 
     override fun onPause() {
         ui.removeCallbacks(ticker)
@@ -376,6 +379,9 @@ class PlayerActivity : Activity() {
 
     private fun setPlaying(p: Boolean) {
         playing = p
+        // screen stays on only while a video is actually playing
+        if (p) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         bigPlay.animate().cancel()
         if (vScale > 1.03f) {
             // zoomed: only a brief indicator, like the 5 s skip labels

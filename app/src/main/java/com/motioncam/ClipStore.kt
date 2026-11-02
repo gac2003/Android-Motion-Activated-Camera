@@ -52,7 +52,10 @@ object ClipStore {
                 ctx.contentResolver.update(p.uri, cv, null, null)
             } catch (e: Exception) {
                 // name clash or rename not allowed: just publish it
-                ctx.contentResolver.update(p.uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+                ctx.contentResolver.update(p.uri, ContentValues().apply {
+                    put(MediaStore.Video.Media.DATE_TAKEN, startMs)
+                    put(MediaStore.Video.Media.IS_PENDING, 0)
+                }, null, null)
             }
         } catch (_: Exception) {}
     }

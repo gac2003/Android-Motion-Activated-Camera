@@ -139,7 +139,9 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     private var rebuildPending = false
 
     // recording
-    private class Armed(val rec: MediaRecorder, val pending: ClipStore.Pending, val rotation: Int)
+    private class Armed(val rec: MediaRecorder, val pending: ClipStore.Pending, val rotation: Int, val audio: Boolean)
+    private var armFailedAt = 0L
+    @Volatile private var hitSizeLimit = false
     private var armed: Armed? = null
     private var recorder: MediaRecorder? = null
     private var pending: ClipStore.Pending? = null
@@ -308,14 +310,11 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         closeCamera()
         retryCount++
         mode = Mode.ERROR
-        if (retryCount > 30 && monitoring) {
-            message = why
-            stopMonitoringBecause("Camera unavailable: $why")
-            return
-        }
-        message = "$why — retrying in 5 s"
+        // keep trying (e.g. another app borrowed the camera); back off from 5 s to 60 s to save power
+        val delay = (5000L * retryCount).coerceAtMost(60_000L)
+        message = "$why — retrying in ${delay / 1000} s"
         publish()
-        h.postDelayed({ if (active && mode == Mode.ERROR) openCamera() }, 5000)
+        h.postDelayed({ if (active && mode == Mode.ERROR) openCamera() }, delay)
     }
 
     private fun restartCamera(why: String) {
@@ -401,8 +400,9 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     /** Prepares the next clip's recorder in advance so motion only has to call start(). */
-    private fun arm() {
+    private fun arm(noAudio: Boolean = false) {
         if (armed != null || !monitoring || mode == Mode.PAUSED_STORAGE) return
+        if (SystemClock.elapsedRealtime() - armFailedAt < 10_000 && !noAudio) return   // don't hammer a failing encoder
         val ps = persistent ?: return
         var p: ClipStore.Pending? = null
         var rec: MediaRecorder? = null
@@ -410,16 +410,36 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             p = ClipStore.create(ctx)
             rec = newRecorder()
             val pend = p
-            configure(rec, audioAllowed(), ps) { it.setOutputFile(pend.pfd.fileDescriptor) }
+            val audio = audioAllowed() && !noAudio
+            configure(rec, audio, ps) { it.setOutputFile(pend.pfd.fileDescriptor) }
             val rot = recordRotation()
             rec.setOrientationHint(rot)
+            // MP4 files over 4 GB are unreliable, and never let a clip eat the last of the phone's storage
+            val cap = minOf(3_800_000_000L, ClipStore.freeBytes() - 400_000_000L).coerceAtLeast(50_000_000L)
+            rec.setMaxFileSize(cap)
+            val r = rec
+            rec.setOnInfoListener { _, what, _ ->
+                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED) h.post { onSizeLimit(r) }
+            }
             rec.prepare()
-            armed = Armed(rec, p, rot)
+            armed = Armed(rec, p, rot, audio)
+            armFailedAt = 0L
         } catch (e: Exception) {
             try { rec?.release() } catch (_: Exception) {}
             p?.let { ClipStore.finish(ctx, it, false, 0) }
+            armFailedAt = SystemClock.elapsedRealtime()
             message = "Cannot prepare recorder: ${e.message}"
         }
+    }
+
+    /** The recorder stopped itself at the size cap: keep that file and continue in a new one if space allows. */
+    private fun onSizeLimit(rec: MediaRecorder) {
+        if (recorder !== rec) return
+        hitSizeLimit = true
+        stopRecording(rearm = false)
+        freeCache = ClipStore.freeBytes()
+        lastFreeCheck = SystemClock.elapsedRealtime()
+        if (freeCache > 600_000_000L) { arm(); startRecording() } else enterStoragePause()
     }
 
     private fun disarm() {
@@ -433,18 +453,34 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     private fun startRecording() {
         if (!monitoring || mode != Mode.WATCHING) return
         if (armed == null) arm()
-        val a = armed ?: return
+        var a = armed ?: return
         armed = null
         try {
             a.rec.start()
         } catch (e: Exception) {
             try { a.rec.release() } catch (_: Exception) {}
             ClipStore.finish(ctx, a.pending, false, 0)
-            message = "Recorder failed: ${e.message}"
-            publish()
-            h.postDelayed({ arm() }, 500)
-            return
+            // the microphone may be busy (phone call): record without sound rather than lose the clip
+            var ok = false
+            if (a.audio) {
+                arm(noAudio = true)
+                val b = armed
+                if (b != null) {
+                    armed = null
+                    try { b.rec.start(); a = b; ok = true } catch (_: Exception) {
+                        try { b.rec.release() } catch (_: Exception) {}
+                        ClipStore.finish(ctx, b.pending, false, 0)
+                    }
+                }
+            }
+            if (!ok) {
+                message = "Recorder failed: ${e.message}"
+                publish()
+                h.postDelayed({ arm() }, 500)
+                return
+            }
         }
+        hitSizeLimit = false
         recorder = a.rec
         pending = a.pending
         recordStartedElapsed = SystemClock.elapsedRealtime()
@@ -462,7 +498,8 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         message = if (monitoring) "Watching for motion" else ""
         pushRepeating()   // stop feeding the encoder first
         var ok = SystemClock.elapsedRealtime() - recordStartedElapsed > 1000
-        try { rec.stop() } catch (_: Exception) { ok = false }
+        try { rec.stop() } catch (_: Exception) { if (!hitSizeLimit) ok = false }   // after a size cap the file is already finalised
+        hitSizeLimit = false
         try { rec.release() } catch (_: Exception) {}
         pending?.let { ClipStore.finish(ctx, it, ok, recordStartedWall) }
         pending = null
@@ -571,6 +608,10 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
 
     private val captureCb = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, res: TotalCaptureResult) {
+            try { readResult(res) } catch (_: Exception) {}
+        }
+
+        private fun readResult(res: TotalCaptureResult) {
             res.get(CaptureResult.SENSOR_SENSITIVITY)?.let { liveIso = it }
             res.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { liveShutterNs = it }
             res.get(CaptureResult.LENS_FOCUS_DISTANCE)?.let { liveFocusDiopter = it }
@@ -771,12 +812,17 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
                     return
                 }
             }
-            // storage
-            if (now - lastFreeCheck > 30_000 || freeCache < 1_000_000_000L) { lastFreeCheck = now; freeCache = ClipStore.freeBytes() }
+            // storage: checked every 30 s, every 5 s while recording, every second when low
+            val every = if (freeCache < 1_000_000_000L) 1_000L else if (mode == Mode.RECORDING) 5_000L else 30_000L
+            if (now - lastFreeCheck >= every) { lastFreeCheck = now; freeCache = ClipStore.freeBytes() }
             val free = freeCache
-            if (free < 300_000_000L && mode == Mode.WATCHING) {
-                if (prefs.autoDeleteLow) maybeCleanup(force = true)
-                else { disarm(); mode = Mode.PAUSED_STORAGE; message = "Phone storage full — not recording" }
+            if (free < 300_000_000L && prefs.autoDeleteLow) maybeCleanup(force = true)
+            if (free < 200_000_000L && (mode == Mode.WATCHING || mode == Mode.RECORDING)) {
+                // never fill the phone completely: stop, keep what was recorded, wait for space
+                if (mode == Mode.RECORDING) stopRecording(rearm = false)
+                enterStoragePause()
+                publish(bat)
+                return
             } else if (mode == Mode.PAUSED_STORAGE && free > 600_000_000L) {
                 mode = Mode.WATCHING; message = "Watching for motion"; arm()
             }
@@ -811,6 +857,13 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         publish(bat)
     }
 
+    private fun enterStoragePause() {
+        disarm()
+        mode = Mode.PAUSED_STORAGE
+        message = if (prefs.autoDeleteLow) "Phone storage full (no deletable clips) — not recording"
+        else "Phone storage full — not recording"
+    }
+
     private class Bat(val pct: Int, val tempC: Float, val charging: Boolean)
 
     private fun batteryInfo(): Bat {
@@ -827,7 +880,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     private fun thermalStatus(): Int =
         try { (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).currentThermalStatus } catch (_: Exception) { 0 }
 
-    private fun publish(bat: Bat = batteryInfo()) {
+    private fun publish(bat: Bat = batteryInfo()) = try {
         StatusBus.publish(
             Status(
                 mode = mode,
@@ -843,7 +896,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
                 charging = bat.charging,
             )
         )
-    }
+    } catch (_: Exception) {}
 
     companion object {
         private val ALL_BLOCKS = BooleanArray(MotionDetector.N) { true }

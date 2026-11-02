@@ -27,6 +27,7 @@ class WebServer(private val ctx: Context, private val prefs: Prefs) {
     private var server: ServerSocket? = null
     private val pool = Executors.newCachedThreadPool()
     @Volatile private var running = false
+    private val slots = java.util.concurrent.Semaphore(12)
 
     fun start(port: Int): Boolean {
         stop()
@@ -39,7 +40,9 @@ class WebServer(private val ctx: Context, private val prefs: Prefs) {
             Thread({
                 while (running) {
                     val s = try { ss.accept() } catch (e: IOException) { break }
-                    pool.execute { handle(s) }
+                    // limit simultaneous connections so a misbehaving client cannot exhaust the phone
+                    if (!slots.tryAcquire()) { try { s.close() } catch (_: Exception) {}; continue }
+                    pool.execute { try { handle(s) } finally { slots.release() } }
                 }
             }, "web-accept").start()
             true
@@ -72,7 +75,9 @@ class WebServer(private val ctx: Context, private val prefs: Prefs) {
             val parts = reqLine.split(" ")
             if (parts.size < 2) return
             val headers = HashMap<String, String>()
+            var lines = 0
             while (true) {
+                if (++lines > 64) return
                 val l = readLine(input) ?: return
                 if (l.isEmpty()) break
                 val i = l.indexOf(':')

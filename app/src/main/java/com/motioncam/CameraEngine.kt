@@ -4,14 +4,17 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.ImageFormat
+import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.hardware.display.DisplayManager
 import android.media.Image
 import android.media.ImageReader
+import android.media.MediaCodec
 import android.media.MediaRecorder
 import android.os.BatteryManager
 import android.os.Build
@@ -24,14 +27,16 @@ import android.util.Size
 import android.view.Display
 import android.view.Surface
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.concurrent.Executor
 import kotlin.math.ceil
 import kotlin.math.max
 
-enum class Mode { STOPPED, STARTING, WATCHING, RECORDING, PAUSED_HOT, PAUSED_STORAGE, ERROR }
+enum class Mode { OFF, STARTING, PREVIEW, WATCHING, RECORDING, PAUSED_HOT, PAUSED_STORAGE, ERROR }
 
 data class Status(
-    val mode: Mode = Mode.STOPPED,
+    val mode: Mode = Mode.OFF,
+    val monitoring: Boolean = false,
     val message: String = "",
     val lens: String = "",
     val format: String = "",
@@ -41,10 +46,9 @@ data class Status(
     val batteryPct: Int = -1,
     val tempC: Float = 0f,
     val charging: Boolean = false,
-    val manualHint: String = "",
 )
 
-/** Global status channel (service -> UI). Listeners run on the engine thread; UI must post to main. */
+/** Status channel (engine -> UI/service). Listeners run on the engine thread. */
 object StatusBus {
     @Volatile var status = Status()
     private val listeners = java.util.concurrent.CopyOnWriteArrayList<(Status) -> Unit>()
@@ -54,93 +58,202 @@ object StatusBus {
 }
 
 /**
- * Owns the camera. Runs one low-resolution YUV stream permanently (for motion detection, on-screen preview and
- * the web stream) and adds the MediaRecorder surface only while a clip is being recorded.
- * Everything happens on a single handler thread.
+ * One camera engine per process, shared by the on-screen preview and the monitoring service, so camera
+ * settings never get out of sync. The camera is open while anyone holds it.
  */
-class CameraEngine(
-    private val ctx: Context,
-    private val prefs: Prefs,
-    private val onFatal: (String) -> Unit,
-) {
+object EngineHost {
+    private var engine: CameraEngine? = null
+    private val holders = HashSet<String>()
+
+    @Synchronized fun get(ctx: Context): CameraEngine =
+        engine ?: CameraEngine(ctx.applicationContext, Prefs(ctx)).also { engine = it }
+
+    @Synchronized fun peek(): CameraEngine? = engine
+
+    @Synchronized fun acquire(ctx: Context, who: String): CameraEngine {
+        holders += who
+        return get(ctx).also { it.setActive(true) }
+    }
+
+    @Synchronized fun release(who: String) {
+        holders -= who
+        if (holders.isEmpty()) engine?.setActive(false)
+    }
+}
+
+/**
+ * Owns the camera. The capture session always contains:
+ *  - a YUV stream (motion detection, focus peaking, web stream),
+ *  - a persistent encoder surface (a MediaRecorder is attached to it per clip),
+ *  - the on-screen preview surface when the UI is visible.
+ * Recording therefore starts by simply adding the encoder surface to the repeating request, using a
+ * MediaRecorder that was prepared in advance ("armed"). No session rebuild, very little latency.
+ * Everything runs on one handler thread; frame analysis runs on a second one.
+ */
+class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     private val mgr = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-    private val thread = HandlerThread("cam-engine").also { it.start() }
-    private val h = Handler(thread.looper)
+    private val h = Handler(HandlerThread("cam-engine").also { it.start() }.looper)
     private val executor = Executor { h.post(it) }
-    private val analysisThread = HandlerThread("cam-analysis").also { it.start() }
-    private val ah = Handler(analysisThread.looper)
+    private val ah = Handler(HandlerThread("cam-analysis").also { it.start() }.looper)
+    private val display: Display? = (ctx.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).getDisplay(Display.DEFAULT_DISPLAY)
 
-    @Volatile var mode = Mode.STOPPED; private set
+    /** Called (engine thread) when monitoring had to stop, e.g. low battery. */
+    @Volatile var onMonitoringStopped: ((String) -> Unit)? = null
+
+    @Volatile var mode = Mode.OFF; private set
+    @Volatile var monitoring = false; private set
     @Volatile var caps: ProCaps? = null; private set
-    @Volatile var lensLabel = ""; private set
-    @Volatile var lastIso = 0; private set
-    @Volatile var lastShutterNs = 0L; private set
-    @Volatile var lastFocusDiopter = 0f; private set
 
-    private var lens: Lens? = null
+    // live values from the camera (for showing what AUTO is doing)
+    @Volatile var liveIso = 0; private set
+    @Volatile var liveShutterNs = 0L; private set
+    @Volatile var liveFocusDiopter = -1f; private set
+    @Volatile var liveKelvin = 0; private set
+    private var lastKelvinCalc = 0L
+
+    private var active = false
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
     private var reader: ImageReader? = null
-    private var sessionGen = 0
-    private var activeSig = ""
-    private var message = ""
-    private var released = false
-
-    // recording
-    private var recorder: MediaRecorder? = null
-    private var pending: ClipStore.Pending? = null
-    private var recSurface: Surface? = null
-    private var recordStartedElapsed = 0L
-    private var recordStartedWall = 0L
+    private var persistent: Surface? = null
     private var recordSize = Size(1920, 1080)
     private var effectiveFps = 30
+    private var sessionGen = 0
+    private var comboIndex = 0
+    @Volatile private var hwPreview = false
+    private var activeSig = ""
+    private var message = ""
+    private var retryCount = 0
+
+    // preview surfaces (owned by the UI's TextureView)
+    @Volatile private var previewSt: SurfaceTexture? = null
+    @Volatile private var sessionSt: SurfaceTexture? = null
+    private val surfaces = HashMap<SurfaceTexture, Surface>()
+    private val deferred = ArrayList<Pair<SurfaceTexture, () -> Unit>>()
+    private var rebuildPending = false
+
+    // recording
+    private class Armed(val rec: MediaRecorder, val pending: ClipStore.Pending, val rotation: Int)
+    private var armed: Armed? = null
+    private var recorder: MediaRecorder? = null
+    private var pending: ClipStore.Pending? = null
+    private var recordStartedElapsed = 0L
+    private var recordStartedWall = 0L
 
     // analysis-thread state
     private val detector = MotionDetector()
     @Volatile private var resetDetector = true
     private var consecutive = 0
     private var lastMotionRun = 0L
-    private var lastPreviewRun = 0L
+    private var lastOverlayRun = 0L
     private var lastJpegRun = 0L
+    private var overlayShown = false
+    private var zonesSrc: String? = null
+    private var zoneBlocks: BooleanArray? = null
     @Volatile private var motionBlocks = 0
     @Volatile private var lastFrameAt = SystemClock.elapsedRealtime()
     @Volatile private var lastMotionElapsed = 0L
     @Volatile private var lastMotionWall = 0L
-    @Volatile private var rotationCache = 0
 
-    // safety
+    // protection
     private var hotSince = 0L
     private var lastCleanup = 0L
-    private var retryCount = 0
+    @Volatile private var cleaning = false
 
-    // ------------------------------------------------------------------ public API
+    // ================================================================== public API (any thread)
 
-    fun start() = h.post { if (!released) openCamera() }
-
-    /** Re-reads settings: restarts the camera only if the recording format/lens changed. */
-    fun applyConfig() = h.post {
-        if (released || mode == Mode.STOPPED) return@post
-        if (signature() != activeSig) restartCamera("Applying new settings") else applyPro()
-    }
-
-    /** Re-sends the repeating request with the current pro controls (no session rebuild). */
-    fun applyPro() = h.post { pushRepeating() }
-
-    fun restart() = h.post { restartCamera("Restarting") }
-
-    fun release() {
-        h.post {
-            released = true
-            if (mode == Mode.RECORDING) stopRecording(restartSession = false)
+    fun setActive(on: Boolean) = h.post {
+        if (on && !active) {
+            active = true
+            openCamera()
+            h.removeCallbacks(tick); h.postDelayed(tick, 1000)
+        } else if (!on && active) {
+            active = false
+            h.removeCallbacks(tick)
+            if (mode == Mode.RECORDING) stopRecording(rearm = false)
             closeCamera()
-            mode = Mode.STOPPED
+            mode = Mode.OFF
+            message = ""
             publish()
-            thread.quitSafely()
-            analysisThread.quitSafely()
         }
     }
 
-    // ------------------------------------------------------------------ camera lifecycle
+    fun setMonitoring(on: Boolean) = h.post { setMonitoringInternal(on) }
+
+    /** UI preview surface (null = UI hidden). The engine never releases it. */
+    fun setPreview(st: SurfaceTexture?) = h.post {
+        if (previewSt === st) return@post
+        previewSt = st
+        rebuildSession()
+    }
+
+    /** The UI's surface is being destroyed; [done] runs once the camera no longer uses it. */
+    fun detachPreview(st: SurfaceTexture, done: () -> Unit) = h.post {
+        val inUse = sessionSt === st && device != null
+        if (previewSt === st) {
+            previewSt = null
+            rebuildSession()
+        }
+        if (inUse) deferred += Pair(st, done) else { surfaces.remove(st)?.release(); done() }
+    }
+
+    /**
+     * Rebuilds the session for a changed preview surface. Never during a clip: the recording keeps
+     * running untouched and the rebuild happens when the clip ends (the UI meanwhile gets a CPU preview).
+     */
+    private fun rebuildSession() {
+        if (device == null) return
+        if (mode == Mode.RECORDING) { rebuildPending = true; return }
+        rebuildPending = false
+        comboIndex = 0
+        startSession()
+    }
+
+    /** Re-reads settings: restarts the camera only if the lens/format changed. */
+    fun applyConfig() = h.post {
+        if (!active) return@post
+        if (signature() != activeSig) restartCamera("Applying new settings") else pushRepeating()
+    }
+
+    /** Re-sends the repeating request with the current pro controls (no interruption). */
+    fun applyPro() = h.post { pushRepeating() }
+
+    // ================================================================== state
+
+    private fun setMonitoringInternal(on: Boolean) {
+        if (on == monitoring) return
+        monitoring = on
+        if (on) {
+            ClipStore.deleteOrphans(ctx)
+            retryCount = 0
+            if (mode == Mode.PREVIEW) {
+                mode = Mode.WATCHING
+                message = "Watching for motion"
+                resetDetector = true
+                arm()
+                pushRepeating()
+            }
+        } else {
+            if (mode == Mode.RECORDING) stopRecording(rearm = false)
+            disarm()
+            when (mode) {
+                Mode.WATCHING, Mode.PAUSED_STORAGE -> { mode = Mode.PREVIEW; message = "" }
+                Mode.PAUSED_HOT -> if (active) openCamera()
+                else -> {}
+            }
+            pushRepeating()
+        }
+        publish()
+    }
+
+    private fun stopMonitoringBecause(why: String) {
+        setMonitoringInternal(false)
+        message = why
+        publish()
+        onMonitoringStopped?.invoke(why)
+    }
+
+    // ================================================================== camera lifecycle
 
     private fun signature() =
         "${prefs.camera}|${prefs.resHeight}|${prefs.fps}|${prefs.hevc}|${prefs.bitrateMbps}|${prefs.audio}"
@@ -148,35 +261,34 @@ class CameraEngine(
     @SuppressLint("MissingPermission")
     private fun openCamera() {
         closeCamera()
+        if (!active) return
+        if (ctx.checkSelfPermission(android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            mode = Mode.ERROR; message = "Camera permission needed"; publish(); return
+        }
         mode = Mode.STARTING
         message = "Opening camera…"
         publish()
         try {
-            val l = Lenses.find(ctx, prefs.camera) ?: throw IllegalStateException("No camera found")
-            lens = l
-            lensLabel = l.label
-            val ctrl = mgr.getCameraCharacteristics(l.logicalId)
-            val lensChars = if (l.physicalId != null) {
-                try { mgr.getCameraCharacteristics(l.physicalId) } catch (e: Exception) { ctrl }
-            } else ctrl
-            caps = ProCaps(ctrl, lensChars)
+            val c = ProCaps.forPrefs(ctx, prefs) ?: throw IllegalStateException("No camera found")
+            caps = c
             activeSig = signature()
-            mgr.openCamera(l.logicalId, object : CameraDevice.StateCallback() {
+            effectiveFps = if (c.supportsFps(prefs.fps)) prefs.fps else 30
+            recordSize = c.recordSize(prefs.resHeight)
+            persistent = createPersistentSurface()
+            comboIndex = 0
+            mgr.openCamera(c.lens.logicalId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
-                    if (released) { camera.close(); return }
+                    if (!active) { camera.close(); return }
                     device = camera
-                    retryCount = 0
-                    startSession(recording = false)
+                    startSession()
                 }
                 override fun onDisconnected(camera: CameraDevice) {
                     camera.close()
-                    if (device === camera) device = null
-                    scheduleRetry("Camera disconnected")
+                    if (device === camera) { device = null; scheduleRetry("Camera disconnected (another app may be using it)") }
                 }
                 override fun onError(camera: CameraDevice, error: Int) {
                     camera.close()
-                    if (device === camera) device = null
-                    scheduleRetry("Camera error $error")
+                    if (device === camera || device == null) { device = null; scheduleRetry("Camera error $error") }
                 }
             }, h)
         } catch (e: Exception) {
@@ -185,30 +297,29 @@ class CameraEngine(
     }
 
     private fun scheduleRetry(why: String) {
-        if (released) return
-        if (mode == Mode.RECORDING) stopRecording(restartSession = false)
+        if (!active) return
+        if (mode == Mode.RECORDING) stopRecording(rearm = false)
         closeCamera()
         retryCount++
-        if (retryCount > 20) {
-            mode = Mode.ERROR
+        mode = Mode.ERROR
+        if (retryCount > 30 && monitoring) {
             message = why
-            publish()
-            onFatal(why)
+            stopMonitoringBecause("Camera unavailable: $why")
             return
         }
-        mode = Mode.ERROR
         message = "$why — retrying in 5 s"
         publish()
-        h.postDelayed({ if (!released && mode == Mode.ERROR) openCamera() }, 5000)
+        h.postDelayed({ if (active && mode == Mode.ERROR) openCamera() }, 5000)
     }
 
     private fun restartCamera(why: String) {
-        if (mode == Mode.RECORDING) stopRecording(restartSession = false)
+        if (mode == Mode.RECORDING) stopRecording(rearm = false)
         message = why
         openCamera()
     }
 
     private fun closeCamera() {
+        disarm()
         sessionGen++
         try { session?.close() } catch (_: Exception) {}
         session = null
@@ -216,107 +327,284 @@ class CameraEngine(
         device = null
         try { reader?.close() } catch (_: Exception) {}
         reader = null
+        try { persistent?.release() } catch (_: Exception) {}
+        persistent = null
+        sessionSt = null
+        hwPreview = false
+        rebuildPending = false
+        runDeferred(keep = null)
     }
 
-    // ------------------------------------------------------------------ session
+    private fun runDeferred(keep: SurfaceTexture?) {
+        val it = deferred.iterator()
+        while (it.hasNext()) {
+            val (st, done) = it.next()
+            if (st === keep) continue
+            it.remove()
+            surfaces.remove(st)?.release()
+            try { done() } catch (_: Exception) {}
+        }
+    }
 
-    private fun startSession(recording: Boolean) {
+    // ================================================================== recorder
+
+    private fun newRecorder(): MediaRecorder =
+        if (Build.VERSION.SDK_INT >= 31) MediaRecorder(ctx) else @Suppress("DEPRECATION") MediaRecorder()
+
+    private fun bitrate(): Int {
+        if (prefs.bitrateMbps > 0) return prefs.bitrateMbps * 1_000_000
+        val r = recordSize.height / 1080f
+        var mbps = 8f * r * r * (effectiveFps / 30f)
+        if (prefs.hevc) mbps *= 0.6f
+        return (mbps.coerceIn(1.5f, 60f) * 1_000_000).toInt()
+    }
+
+    private fun configure(rec: MediaRecorder, audio: Boolean, surface: Surface, output: (MediaRecorder) -> Unit) {
+        if (audio) rec.setAudioSource(MediaRecorder.AudioSource.CAMCORDER)
+        rec.setVideoSource(MediaRecorder.VideoSource.SURFACE)
+        rec.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+        output(rec)
+        rec.setVideoEncodingBitRate(bitrate())
+        rec.setVideoFrameRate(effectiveFps)
+        rec.setVideoSize(recordSize.width, recordSize.height)
+        rec.setVideoEncoder(if (prefs.hevc) MediaRecorder.VideoEncoder.HEVC else MediaRecorder.VideoEncoder.H264)
+        if (audio) {
+            rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            rec.setAudioEncodingBitRate(128_000)
+            rec.setAudioSamplingRate(44_100)
+        }
+        rec.setInputSurface(surface)
+    }
+
+    /** Encoder input surface that stays in the camera session; a throw-away recorder sets its size. */
+    private fun createPersistentSurface(): Surface {
+        val s = MediaCodec.createPersistentInputSurface()
+        val f = File(ctx.cacheDir, "init.mp4")
+        val r = newRecorder()
+        try {
+            configure(r, false, s) { it.setOutputFile(f.path) }
+            r.prepare()
+        } finally {
+            try { r.release() } catch (_: Exception) {}
+            f.delete()
+        }
+        return s
+    }
+
+    private fun audioAllowed() = prefs.audio &&
+        ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    /** Prepares the next clip's recorder in advance so motion only has to call start(). */
+    private fun arm() {
+        if (armed != null || !monitoring || mode == Mode.PAUSED_STORAGE) return
+        val ps = persistent ?: return
+        var p: ClipStore.Pending? = null
+        var rec: MediaRecorder? = null
+        try {
+            p = ClipStore.create(ctx)
+            rec = newRecorder()
+            val pend = p
+            configure(rec, audioAllowed(), ps) { it.setOutputFile(pend.pfd.fileDescriptor) }
+            val rot = recordRotation()
+            rec.setOrientationHint(rot)
+            rec.prepare()
+            armed = Armed(rec, p, rot)
+        } catch (e: Exception) {
+            try { rec?.release() } catch (_: Exception) {}
+            p?.let { ClipStore.finish(ctx, it, false, 0) }
+            message = "Cannot prepare recorder: ${e.message}"
+        }
+    }
+
+    private fun disarm() {
+        val a = armed ?: return
+        armed = null
+        try { a.rec.reset() } catch (_: Exception) {}
+        try { a.rec.release() } catch (_: Exception) {}
+        ClipStore.finish(ctx, a.pending, false, 0)
+    }
+
+    private fun startRecording() {
+        if (!monitoring || mode != Mode.WATCHING) return
+        if (armed == null) arm()
+        val a = armed ?: return
+        armed = null
+        try {
+            a.rec.start()
+        } catch (e: Exception) {
+            try { a.rec.release() } catch (_: Exception) {}
+            ClipStore.finish(ctx, a.pending, false, 0)
+            message = "Recorder failed: ${e.message}"
+            publish()
+            h.postDelayed({ arm() }, 500)
+            return
+        }
+        recorder = a.rec
+        pending = a.pending
+        recordStartedElapsed = SystemClock.elapsedRealtime()
+        recordStartedWall = System.currentTimeMillis()
+        mode = Mode.RECORDING
+        message = "Recording"
+        pushRepeating()
+        publish()
+    }
+
+    private fun stopRecording(rearm: Boolean) {
+        val rec = recorder ?: return
+        recorder = null
+        mode = if (monitoring) Mode.WATCHING else Mode.PREVIEW
+        message = if (monitoring) "Watching for motion" else ""
+        pushRepeating()   // stop feeding the encoder first
+        var ok = SystemClock.elapsedRealtime() - recordStartedElapsed > 1000
+        try { rec.stop() } catch (_: Exception) { ok = false }
+        try { rec.release() } catch (_: Exception) {}
+        pending?.let { ClipStore.finish(ctx, it, ok, recordStartedWall) }
+        pending = null
+        publish()
+        if (rebuildPending) rebuildSession()
+        if (rearm && monitoring) h.post { arm() }
+        maybeCleanup(force = false)
+    }
+
+    private fun maybeCleanup(force: Boolean) {
+        val now = SystemClock.elapsedRealtime()
+        if (cleaning || (!force && now - lastCleanup < 10 * 60_000L)) return
+        if (prefs.keepDays <= 0 && prefs.maxStorageGb <= 0 && !prefs.autoDeleteLow) return
+        lastCleanup = now
+        cleaning = true
+        Thread { try { ClipStore.cleanup(ctx, prefs) } finally { cleaning = false } }.start()
+    }
+
+    // ================================================================== session
+
+    private class Combo(val preview: Size?, val yuv: Size)
+
+    private fun combos(c: ProCaps): List<Combo> {
+        val list = ArrayList<Combo>()
+        if (previewSt != null) {
+            list += Combo(c.previewSize(1920), c.analysisSize(1280))
+            list += Combo(c.previewSize(1280), c.analysisSize(640))
+        }
+        list += Combo(null, c.analysisSize(1280))
+        list += Combo(null, c.analysisSize(640))
+        return list
+    }
+
+    private fun ensureReader(size: Size) {
+        val r = reader
+        if (r != null && r.width == size.width && r.height == size.height) return
+        try { r?.close() } catch (_: Exception) {}
+        reader = ImageReader.newInstance(size.width, size.height, ImageFormat.YUV_420_888, 3).also {
+            it.setOnImageAvailableListener({ rr -> onImage(rr) }, ah)
+        }
+    }
+
+    private fun surfaceFor(st: SurfaceTexture): Surface = surfaces.getOrPut(st) { Surface(st) }
+
+    private fun startSession() {
         val dev = device ?: return
         val c = caps ?: return
-        val l = lens ?: return
-        val gen = ++sessionGen
-        try {
-            session?.let { try { it.close() } catch (_: Exception) {} }
-            session = null
-
-            if (reader == null) {
-                val sz = c.analysisSize() ?: Size(1280, 720)
-                reader = ImageReader.newInstance(sz.width, sz.height, ImageFormat.YUV_420_888, 3).also {
-                    it.setOnImageAvailableListener({ r -> onImage(r) }, ah)
+        val ps = persistent ?: return
+        val phys = c.lens.physicalId
+        try { session?.close() } catch (_: Exception) {}
+        session = null
+        val list = combos(c)
+        while (comboIndex < list.size) {
+            val combo = list[comboIndex]
+            try {
+                ensureReader(combo.yuv)
+                fun oc(s: Surface) = OutputConfiguration(s).also { if (phys != null) it.setPhysicalCameraId(phys) }
+                val outs = arrayListOf(oc(reader!!.surface), oc(ps))
+                var st: SurfaceTexture? = null
+                if (combo.preview != null) {
+                    st = previewSt!!
+                    st.setDefaultBufferSize(combo.preview.width, combo.preview.height)
+                    outs += oc(surfaceFor(st))
                 }
-            }
-            val outs = ArrayList<OutputConfiguration>()
-            outs += OutputConfiguration(reader!!.surface).also { if (l.physicalId != null) it.setPhysicalCameraId(l.physicalId) }
-            if (recording) {
-                val rs = recSurface ?: throw IllegalStateException("recorder not ready")
-                outs += OutputConfiguration(rs).also { if (l.physicalId != null) it.setPhysicalCameraId(l.physicalId) }
-            }
-            val cfg = SessionConfiguration(SessionConfiguration.SESSION_REGULAR, outs, executor,
-                object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(s: CameraCaptureSession) {
-                        if (gen != sessionGen || released) { try { s.close() } catch (_: Exception) {}; return }
-                        session = s
-                        resetDetector = true
-                        consecutive = 0
-                        lastFrameAt = SystemClock.elapsedRealtime()
-                        pushRepeating()
-                        if (recording) {
-                            try {
-                                recorder?.start()
-                                recordStartedElapsed = SystemClock.elapsedRealtime()
-                                recordStartedWall = System.currentTimeMillis()
-                                mode = Mode.RECORDING
-                                message = "Recording"
-                            } catch (e: Exception) {
-                                abortRecording("Recorder failed: ${e.message}")
-                                return
-                            }
-                        } else if (mode == Mode.STARTING || mode == Mode.ERROR) {
-                            mode = Mode.WATCHING
-                            message = "Watching for motion"
-                            h.removeCallbacks(tick)
-                            h.postDelayed(tick, 2000)
+                val gen = ++sessionGen
+                val usedSt = st
+                val cfg = SessionConfiguration(SessionConfiguration.SESSION_REGULAR, outs, executor,
+                    object : CameraCaptureSession.StateCallback() {
+                        override fun onConfigured(s: CameraCaptureSession) = onSessionConfigured(gen, s, usedSt)
+                        override fun onConfigureFailed(s: CameraCaptureSession) {
+                            if (gen != sessionGen) return
+                            comboIndex++
+                            startSession()
                         }
-                        publish()
-                    }
-                    override fun onConfigureFailed(s: CameraCaptureSession) {
-                        if (gen != sessionGen) return
-                        if (recording) abortRecording("Could not configure recording")
-                        else scheduleRetry("Could not configure camera")
-                    }
-                })
-            dev.createCaptureSession(cfg)
-        } catch (e: Exception) {
-            if (recording) abortRecording("Session error: ${e.message}") else scheduleRetry("Session error: ${e.message}")
+                    })
+                val supported = try { dev.isSessionConfigurationSupported(cfg) } catch (e: Exception) { true }
+                if (!supported) { comboIndex++; continue }
+                sessionSt = usedSt
+                hwPreview = usedSt != null
+                dev.createCaptureSession(cfg)
+                return
+            } catch (e: Exception) {
+                comboIndex++
+            }
         }
+        scheduleRetry("No working camera stream combination")
+    }
+
+    private fun onSessionConfigured(gen: Int, s: CameraCaptureSession, st: SurfaceTexture?) {
+        if (gen != sessionGen || !active) { try { s.close() } catch (_: Exception) {}; return }
+        session = s
+        runDeferred(keep = st)
+        resetDetector = true
+        lastFrameAt = SystemClock.elapsedRealtime()
+        retryCount = 0
+        if (mode == Mode.STARTING || mode == Mode.ERROR || mode == Mode.OFF || mode == Mode.PAUSED_HOT) {
+            mode = if (monitoring) Mode.WATCHING else Mode.PREVIEW
+            message = if (monitoring) "Watching for motion" else ""
+        }
+        pushRepeating()
+        if (monitoring && mode == Mode.WATCHING) arm()
+        publish()
     }
 
     private val captureCb = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, res: TotalCaptureResult) {
-            res.get(CaptureResult.SENSOR_SENSITIVITY)?.let { lastIso = it }
-            res.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { lastShutterNs = it }
-            res.get(CaptureResult.LENS_FOCUS_DISTANCE)?.let { lastFocusDiopter = it }
+            res.get(CaptureResult.SENSOR_SENSITIVITY)?.let { liveIso = it }
+            res.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { liveShutterNs = it }
+            res.get(CaptureResult.LENS_FOCUS_DISTANCE)?.let { liveFocusDiopter = it }
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastKelvinCalc > 500 && FrameHub.overlaySink != null) {
+                lastKelvinCalc = now
+                val g = res.get(CaptureResult.COLOR_CORRECTION_GAINS)
+                liveKelvin = if (g != null) caps?.estimateKelvin(g) ?: 0 else 0
+            }
         }
     }
+
+    private fun lowPowerIdle() = monitoring && mode != Mode.RECORDING && sessionSt == null && prefs.lowPowerIdle
 
     private fun pushRepeating() {
         val s = session ?: return
         val dev = device ?: return
         val c = caps ?: return
-        val rec = mode == Mode.RECORDING || recorder != null && recSurface != null && pending != null
+        val rd = reader ?: return
         try {
-            val b = dev.createCaptureRequest(if (rec) CameraDevice.TEMPLATE_RECORD else CameraDevice.TEMPLATE_PREVIEW)
-            b.addTarget(reader!!.surface)
-            if (rec) recSurface?.let { b.addTarget(it) }
+            val b = dev.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
+            b.addTarget(rd.surface)
+            sessionSt?.let { b.addTarget(surfaceFor(it)) }
+            if (mode == Mode.RECORDING) persistent?.let { b.addTarget(it) }
             b.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
 
-            // frame rate
-            b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, pickFpsRange(c, rec))
+            val low = lowPowerIdle()
+            b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, pickFpsRange(c, low))
+            val fps = if (low) 15 else effectiveFps
 
-            // exposure
-            val fps = if (rec) effectiveFps else 15
             if (prefs.exposureAuto || !c.manualSensor) {
                 b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
                 b.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, prefs.evIndex.coerceIn(c.evMin, c.evMax))
             } else {
-                val shutter = prefs.shutterNs.coerceIn(c.expMinNs, c.expMaxNs)
+                val (lo, hi) = c.shutterRange(effectiveFps)
+                val shutter = prefs.shutterNs.coerceIn(lo, hi)
                 b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
                 b.set(CaptureRequest.SENSOR_SENSITIVITY, prefs.iso.coerceIn(c.isoMin, c.isoMax))
                 b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, shutter)
                 b.set(CaptureRequest.SENSOR_FRAME_DURATION, max(1_000_000_000L / fps, shutter))
             }
 
-            // focus
             if (prefs.focusAuto || !c.canManualFocus) {
                 b.set(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
             } else {
@@ -324,15 +612,12 @@ class CameraEngine(
                 b.set(CaptureRequest.LENS_FOCUS_DISTANCE, (1f - prefs.focusPos.coerceIn(0f, 1f)) * c.minFocusDiopter)
             }
 
-            // white balance
             if (prefs.wbAuto) {
                 b.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_AUTO)
             } else {
-                val p = ProCaps.wbPresets.minByOrNull { Math.abs(it.second - prefs.wbKelvin) }!!
-                b.set(CaptureRequest.CONTROL_AWB_MODE, p.third)
+                b.set(CaptureRequest.CONTROL_AWB_MODE, ProCaps.wbPresets[ProCaps.nearestPreset(prefs.wbKelvin)].third)
             }
 
-            // zoom
             if (c.canZoom) b.set(CaptureRequest.CONTROL_ZOOM_RATIO, prefs.zoom.coerceIn(c.zoomMin, c.zoomMax))
 
             s.setRepeatingRequest(b.build(), captureCb, h)
@@ -342,21 +627,33 @@ class CameraEngine(
         }
     }
 
-    private fun pickFpsRange(c: ProCaps, recording: Boolean): Range<Int> {
+    private fun pickFpsRange(c: ProCaps, low: Boolean): Range<Int> {
         val rs = c.fpsRanges.toList()
         if (rs.isEmpty()) return Range(15, 30)
-        if (recording) {
-            rs.firstOrNull { it.lower == effectiveFps && it.upper == effectiveFps }?.let { return it }
-            rs.filter { it.upper == effectiveFps }.maxByOrNull { it.lower }?.let { return it }
-            return rs.minByOrNull { Math.abs(it.upper - effectiveFps) * 100 - it.lower }!!
+        if (low) {
+            val ok = rs.filter { it.upper >= 15 }
+            val minUpper = ok.minOfOrNull { it.upper } ?: return rs.maxByOrNull { it.upper }!!
+            return ok.filter { it.upper == minUpper }.minByOrNull { it.lower }!!
         }
-        // idle: lowest frame rate that still gives a usable ~10 fps preview
-        val ok = rs.filter { it.upper >= 15 }
-        val minUpper = ok.minOfOrNull { it.upper } ?: return rs.maxByOrNull { it.upper }!!
-        return ok.filter { it.upper == minUpper }.minByOrNull { it.lower }!!
+        rs.firstOrNull { it.lower == effectiveFps && it.upper == effectiveFps }?.let { return it }
+        rs.filter { it.upper == effectiveFps }.maxByOrNull { it.lower }?.let { return it }
+        return rs.minByOrNull { Math.abs(it.upper - effectiveFps) * 100 - it.lower }!!
     }
 
-    // ------------------------------------------------------------------ frames
+    // ================================================================== rotation
+
+    private fun displayDeg(): Int = Rot.displayDegrees(display?.rotation ?: Surface.ROTATION_0)
+
+    /** Rotation that makes the image upright on the current screen. */
+    fun displayRotation(): Int {
+        val c = caps ?: return 0
+        return Rot.image(c.sensorOrientation, c.front, displayDeg())
+    }
+
+    /** Rotation stored in recordings / used for the web stream. */
+    fun recordRotation(): Int = if (prefs.rotation >= 0) prefs.rotation else displayRotation()
+
+    // ================================================================== frames (analysis thread)
 
     private fun onImage(r: ImageReader) {
         val img: Image = try { r.acquireLatestImage() } catch (e: Exception) { null } ?: return
@@ -366,209 +663,116 @@ class CameraEngine(
     private fun processFrame(img: Image) {
         val now = SystemClock.elapsedRealtime()
         lastFrameAt = now
-        val rec = mode == Mode.RECORDING
-        val wantPreview = FrameHub.previewSink != null
-        val wantJpeg = FrameHub.clients > 0
-        val motionDue = (mode == Mode.WATCHING || rec) && now - lastMotionRun >= (if (rec) 400 else 250)
-        val previewDue = wantPreview && now - lastPreviewRun >= 100
-        val jpegDue = wantJpeg && now - lastJpegRun >= 200
-        if (!motionDue && !previewDue && !jpegDue) return
+        val m = mode
+        val monitoringNow = m == Mode.WATCHING || m == Mode.RECORDING
+        val sink = FrameHub.overlaySink
+        val showMotion = sink != null && FrameHub.showMotion
+        val peaking = sink != null && FrameHub.peaking
+        // the hardware preview is only on screen if the session uses the UI's *current* surface
+        val hw = hwPreview && sessionSt != null && sessionSt === previewSt
+        val motionDue = (monitoringNow || showMotion) && now - lastMotionRun >= 125
+        val overlayWanted = sink != null && (!hw || peaking || showMotion)
+        val overlayDue = overlayWanted && now - lastOverlayRun >= (if (hw) 100 else 66)
+        val jpegDue = FrameHub.clients > 0 && now - lastJpegRun >= 200
 
-        val f = YuvTools.read(img, color = previewDue || jpegDue)
+        if (sink != null && !overlayWanted && overlayShown) { overlayShown = false; sink(null) }
+        if (!motionDue && !overlayDue && !jpegDue) return
+
+        val f = YuvTools.read(img, color = (overlayDue && !hw) || jpegDue)
 
         if (motionDue) {
             lastMotionRun = now
             if (resetDetector) { detector.reset(); resetDetector = false; consecutive = 0 }
-            val changed = detector.analyze(f, prefs.sensitivity)
-            motionBlocks = changed
-            val need = max(2, ceil(prefs.minAreaPct / 100f * MotionDetector.N).toInt())
-            val hit = changed >= need
+            val z = prefs.zones
+            if (z != zonesSrc) { zonesSrc = z; zoneBlocks = if (z.isEmpty()) null else Zones.blockMask(Zones.parse(z)) }
+            val largest = detector.analyze(f, prefs.sensitivity, prefs.lightFilter, zoneBlocks)
+            motionBlocks = largest
+            val need = max(1, ceil(prefs.minAreaPct / 100f * MotionDetector.N).toInt())
+            val hit = largest >= need
             consecutive = if (hit) consecutive + 1 else 0
-            if (hit) {
-                lastMotionElapsed = now
-                lastMotionWall = System.currentTimeMillis()
-                if (consecutive >= 2 && mode == Mode.WATCHING) h.post { if (mode == Mode.WATCHING) startRecording() }
+            if (monitoringNow && hit) {
+                val needHits = max(1, ceil(prefs.minMotionMs / 125f).toInt())
+                if (m == Mode.RECORDING || consecutive >= needHits) {
+                    lastMotionElapsed = now
+                    lastMotionWall = System.currentTimeMillis()
+                    if (m == Mode.WATCHING) h.post { startRecording() }
+                }
             }
         }
-        if (previewDue) {
-            lastPreviewRun = now
-            val peak = prefs.peaking && !prefs.focusAuto
-            val bmp = YuvTools.toBitmap(f, 2, rotationCache, peak)
-            FrameHub.previewSink?.invoke(bmp)
+        if (overlayDue) {
+            lastOverlayRun = now
+            val bmp = YuvTools.render(
+                f, 2, displayRotation(), base = !hw, peaking = peaking,
+                zones = if (showMotion) (zoneBlocks ?: ALL_BLOCKS) else null,
+                motion = if (showMotion) detector.changed else null,
+            )
+            overlayShown = true
+            FrameHub.overlaySink?.invoke(bmp)
         }
         if (jpegDue) {
             lastJpegRun = now
-            val bmp = YuvTools.toBitmap(f, if (prefs.streamHd) 1 else 2, rotationCache, false)
+            val bmp = YuvTools.render(f, if (prefs.streamHd) 1 else 2, recordRotation(), base = true, peaking = false)
             val bos = ByteArrayOutputStream(64 * 1024)
             bmp.compress(Bitmap.CompressFormat.JPEG, if (prefs.streamHd) 65 else 72, bos)
             FrameHub.publishJpeg(bos.toByteArray())
         }
     }
 
-    // ------------------------------------------------------------------ recording
-
-    private fun effectiveRotation(): Int {
-        val o = prefs.rotation
-        if (o >= 0) return o
-        val c = caps ?: return 0
-        val dm = ctx.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-        val d = dm.getDisplay(Display.DEFAULT_DISPLAY)
-        val deg = when (d?.rotation) {
-            Surface.ROTATION_90 -> 90
-            Surface.ROTATION_180 -> 180
-            Surface.ROTATION_270 -> 270
-            else -> 0
-        }
-        return if (c.front) (c.sensorOrientation + deg) % 360 else (c.sensorOrientation - deg + 360) % 360
-    }
-
-    private fun pickRecordSize(c: ProCaps): Size {
-        val sizes = c.recordSizes16x9()
-        if (sizes.isEmpty()) return Size(1920, 1080)
-        return sizes.lastOrNull { it.height <= prefs.resHeight } ?: sizes.first()
-    }
-
-    private fun bitrate(size: Size, fps: Int): Int {
-        if (prefs.bitrateMbps > 0) return prefs.bitrateMbps * 1_000_000
-        val r = size.height / 1080f
-        var mbps = 8f * r * r * (fps / 30f)
-        if (prefs.hevc) mbps *= 0.6f
-        return (mbps.coerceIn(1.5f, 60f) * 1_000_000).toInt()
-    }
-
-    private fun startRecording() {
-        if (mode != Mode.WATCHING) return
-        val c = caps ?: return
-        if (ClipStore.freeBytes() < 300_000_000L) {
-            mode = Mode.PAUSED_STORAGE; message = "Storage almost full — not recording"; publish(); return
-        }
-        try {
-            recordSize = pickRecordSize(c)
-            effectiveFps = prefs.fps
-            if (c.fpsRanges.none { it.upper == effectiveFps }) effectiveFps = 30
-            val p = ClipStore.create(ctx)
-            pending = p
-            val rec = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(ctx) else @Suppress("DEPRECATION") MediaRecorder()
-            val withAudio = prefs.audio &&
-                ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (withAudio) rec.setAudioSource(MediaRecorder.AudioSource.CAMCORDER)
-            rec.setVideoSource(MediaRecorder.VideoSource.SURFACE)
-            rec.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            rec.setOutputFile(p.pfd.fileDescriptor)
-            rec.setVideoEncodingBitRate(bitrate(recordSize, effectiveFps))
-            rec.setVideoFrameRate(effectiveFps)
-            rec.setVideoSize(recordSize.width, recordSize.height)
-            rec.setVideoEncoder(if (prefs.hevc) MediaRecorder.VideoEncoder.HEVC else MediaRecorder.VideoEncoder.H264)
-            if (withAudio) {
-                rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                rec.setAudioEncodingBitRate(128_000)
-                rec.setAudioSamplingRate(44_100)
-            }
-            rec.setOrientationHint(effectiveRotation())
-            rec.prepare()
-            recorder = rec
-            recSurface = rec.surface
-            mode = Mode.STARTING   // becomes RECORDING once the session is configured
-            message = "Starting clip…"
-            publish()
-            startSession(recording = true)
-        } catch (e: Exception) {
-            abortRecording("Cannot start recording: ${e.message}")
-        }
-    }
-
-    private fun abortRecording(why: String) {
-        releaseRecorder(keep = false)
-        message = why
-        mode = Mode.WATCHING
-        startSession(recording = false)
-        publish()
-    }
-
-    private fun releaseRecorder(keep: Boolean) {
-        val rec = recorder
-        recorder = null
-        recSurface = null
-        var ok = keep
-        if (rec != null) {
-            if (keep) {
-                try { rec.stop() } catch (_: Exception) { ok = false }
-            }
-            try { rec.reset() } catch (_: Exception) {}
-            try { rec.release() } catch (_: Exception) {}
-        }
-        pending?.let { ClipStore.finish(ctx, it, ok) }
-        pending = null
-    }
-
-    private fun stopRecording(restartSession: Boolean) {
-        if (recorder == null) return
-        try { session?.stopRepeating() } catch (_: Exception) {}
-        try { session?.abortCaptures() } catch (_: Exception) {}
-        val longEnough = SystemClock.elapsedRealtime() - recordStartedElapsed > 1500
-        releaseRecorder(keep = longEnough)
-        mode = Mode.WATCHING
-        message = "Watching for motion"
-        if (restartSession) startSession(recording = false)
-        publish()
-        if (SystemClock.elapsedRealtime() - lastCleanup > 60_000) {
-            lastCleanup = SystemClock.elapsedRealtime()
-            Thread { ClipStore.cleanup(ctx, prefs) }.start()
-        }
-    }
-
-    // ------------------------------------------------------------------ periodic housekeeping
+    // ================================================================== housekeeping (every second)
 
     private val tick: Runnable = object : Runnable {
         override fun run() {
-            if (released) return
+            if (!active) return
             try { housekeeping() } catch (_: Exception) {}
-            h.postDelayed(this, 2000)
+            h.postDelayed(this, 1000)
         }
     }
 
     private fun housekeeping() {
         val now = SystemClock.elapsedRealtime()
-        rotationCache = effectiveRotation()
         val bat = batteryInfo()
 
-        // battery protection
-        if (!bat.charging && bat.pct in 0..prefs.minBattery) {
-            if (mode == Mode.RECORDING) stopRecording(restartSession = false)
-            closeCamera()
-            mode = Mode.STOPPED
-            message = "Battery at ${bat.pct}% — monitoring stopped"
-            publish()
-            onFatal(message)
+        if (monitoring) {
+            // battery
+            if (prefs.minBattery > 0 && !bat.charging && bat.pct in 0..prefs.minBattery) {
+                stopMonitoringBecause("Battery at ${bat.pct}% — monitoring stopped")
+                return
+            }
+            // heat
+            if (prefs.maxTempC > 0) {
+                val thermal = thermalStatus()
+                val tooHot = bat.tempC >= prefs.maxTempC || thermal >= PowerManager.THERMAL_STATUS_SEVERE
+                if (tooHot && mode != Mode.PAUSED_HOT) {
+                    if (mode == Mode.RECORDING) stopRecording(rearm = false)
+                    closeCamera()
+                    mode = Mode.PAUSED_HOT
+                    hotSince = now
+                    message = "Phone is hot (${"%.0f".format(bat.tempC)}°C) — camera paused to cool down"
+                    publish()
+                    return
+                }
+                if (mode == Mode.PAUSED_HOT) {
+                    val cooled = bat.tempC <= prefs.maxTempC - 3 && thermal < PowerManager.THERMAL_STATUS_MODERATE
+                    if (cooled && now - hotSince > 60_000) openCamera() else publish()
+                    return
+                }
+            }
+            // storage
+            val free = ClipStore.freeBytes()
+            if (free < 300_000_000L && mode == Mode.WATCHING) {
+                if (prefs.autoDeleteLow) maybeCleanup(force = true)
+                else { disarm(); mode = Mode.PAUSED_STORAGE; message = "Phone storage full — not recording" }
+            } else if (mode == Mode.PAUSED_STORAGE && free > 600_000_000L) {
+                mode = Mode.WATCHING; message = "Watching for motion"; arm()
+            }
+            maybeCleanup(force = false)
+        } else if (mode == Mode.PAUSED_HOT) {
+            openCamera()
             return
-        }
-
-        // heat protection
-        val thermal = thermalStatus()
-        val tooHot = bat.tempC >= prefs.maxTempC || thermal >= PowerManager.THERMAL_STATUS_SEVERE
-        if (tooHot && mode != Mode.PAUSED_HOT && mode != Mode.STOPPED) {
-            if (mode == Mode.RECORDING) stopRecording(restartSession = false)
-            closeCamera()
-            mode = Mode.PAUSED_HOT
-            hotSince = now
-            message = "Phone is hot (${"%.0f".format(bat.tempC)}°C) — cooling down"
-            publish()
-            return
-        }
-        if (mode == Mode.PAUSED_HOT) {
-            val cooled = bat.tempC <= prefs.maxTempC - 3 && thermal < PowerManager.THERMAL_STATUS_MODERATE
-            if (cooled && now - hotSince > 60_000) openCamera()
-            else publish()
-            return
-        }
-
-        // storage
-        if (mode == Mode.PAUSED_STORAGE) {
-            if (ClipStore.freeBytes() > 600_000_000L) { mode = Mode.WATCHING; message = "Watching for motion" }
         }
 
         // stall watchdog
-        if ((mode == Mode.WATCHING || mode == Mode.RECORDING) && now - lastFrameAt > 10_000) {
+        if ((mode == Mode.WATCHING || mode == Mode.RECORDING || mode == Mode.PREVIEW) && now - lastFrameAt > 10_000) {
             restartCamera("Camera stalled — restarting")
             return
         }
@@ -577,42 +781,45 @@ class CameraEngine(
             val sinceMotion = now - max(lastMotionElapsed, recordStartedElapsed)
             val clipLen = now - recordStartedElapsed
             if (sinceMotion >= prefs.stopDelaySec * 1000L) {
-                stopRecording(restartSession = true)
+                stopRecording(rearm = true)
             } else if (clipLen >= prefs.maxClipMin * 60_000L) {
-                // split long events into several files
-                stopRecording(restartSession = false)
-                if (mode == Mode.WATCHING) startRecording()
+                // split long events: stop and immediately continue in a new file
+                stopRecording(rearm = false)
+                arm()
+                startRecording()
             }
+        } else if (mode == Mode.WATCHING) {
+            val a = armed
+            if (a != null && a.rotation != recordRotation()) { disarm(); arm() }   // phone was rotated
+            if (armed == null) arm()
         }
-        publish()
+        publish(bat)
     }
 
     private class Bat(val pct: Int, val tempC: Float, val charging: Boolean)
 
     private fun batteryInfo(): Bat {
-        val i: Intent? = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        if (i == null) return Bat(-1, 0f, true)
+        val i: Intent = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return Bat(-1, 0f, true)
         val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
         val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
-        val pct = if (level >= 0 && scale > 0) level * 100 / scale else -1
-        val temp = i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10f
-        val charging = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
-        return Bat(pct, temp, charging)
+        return Bat(
+            if (level >= 0 && scale > 0) level * 100 / scale else -1,
+            i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10f,
+            i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0,
+        )
     }
 
     private fun thermalStatus(): Int =
         try { (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).currentThermalStatus } catch (_: Exception) { 0 }
 
-    private fun publish() {
-        val bat = batteryInfo()
-        val c = caps
-        val size = if (mode == Mode.RECORDING || c == null) recordSize else pickRecordSize(c)
+    private fun publish(bat: Bat = batteryInfo()) {
         StatusBus.publish(
             Status(
                 mode = mode,
+                monitoring = monitoring,
                 message = message,
-                lens = lensLabel,
-                format = "${size.width}x${size.height} @ ${if (mode == Mode.RECORDING) effectiveFps else prefs.fps} fps",
+                lens = caps?.lens?.label ?: "",
+                format = "${recordSize.width}x${recordSize.height} @ $effectiveFps fps",
                 recordingSinceWall = if (mode == Mode.RECORDING) recordStartedWall else 0,
                 lastMotionWall = lastMotionWall,
                 motionBlocks = motionBlocks,
@@ -621,5 +828,9 @@ class CameraEngine(
                 charging = bat.charging,
             )
         )
+    }
+
+    companion object {
+        private val ALL_BLOCKS = BooleanArray(MotionDetector.N) { true }
     }
 }

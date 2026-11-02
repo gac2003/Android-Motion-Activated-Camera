@@ -14,7 +14,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 
-/** Foreground service that keeps the camera, motion detection and web server alive with the screen off. */
+/** Foreground service: keeps the shared camera engine monitoring with the screen off, plus the web viewer. */
 class CameraService : Service() {
     companion object {
         const val ACTION_STOP = "com.motioncam.STOP"
@@ -22,15 +22,11 @@ class CameraService : Service() {
         private const val NOTIF_ID = 1
         @Volatile var instance: CameraService? = null
 
-        fun start(ctx: Context) {
-            ctx.startForegroundService(Intent(ctx, CameraService::class.java))
-        }
-        fun stop(ctx: Context) {
-            ctx.startService(Intent(ctx, CameraService::class.java).setAction(ACTION_STOP))
-        }
+        fun start(ctx: Context) { ctx.startForegroundService(Intent(ctx, CameraService::class.java)) }
+        fun stop(ctx: Context) { ctx.startService(Intent(ctx, CameraService::class.java).setAction(ACTION_STOP)) }
     }
 
-    var engine: CameraEngine? = null; private set
+    private var engine: CameraEngine? = null
     private var web: WebServer? = null
     private var wake: PowerManager.WakeLock? = null
     private lateinit var prefs: Prefs
@@ -41,13 +37,11 @@ class CameraService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            shutdown()
-            return START_NOT_STICKY
-        }
+        if (intent?.action == ACTION_STOP) { shutdown(); return START_NOT_STICKY }
         if (engine != null) return START_NOT_STICKY
         prefs = Prefs(this)
-        createChannel()
+        getSystemService(NotificationManager::class.java)
+            .createNotificationChannel(NotificationChannel(CHANNEL, "Monitoring", NotificationManager.IMPORTANCE_LOW))
 
         var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
         if (prefs.audio && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
@@ -60,23 +54,18 @@ class CameraService : Service() {
         wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "motioncam:monitor").also { it.acquire() }
 
         StatusBus.add(statusListener)
-        engine = CameraEngine(this, prefs) { why -> main.post { shutdownWithMessage(why) } }.also { it.start() }
+        val e = EngineHost.acquire(this, "service")
+        e.onMonitoringStopped = { why -> main.post { shutdownWithMessage(why) } }
+        e.setMonitoring(true)
+        engine = e
         reloadServer()
         return START_NOT_STICKY
     }
 
-    /** Called by the UI after settings changed. */
-    fun onSettingsChanged() {
-        engine?.applyConfig()
-        reloadServer()
-    }
-
-    private fun reloadServer() {
+    fun reloadServer() {
         web?.stop()
         web = null
-        if (prefs.serverOn && prefs.password.isNotEmpty()) {
-            web = WebServer(this, prefs).also { it.start(prefs.port) }
-        }
+        if (prefs.serverOn && prefs.password.isNotEmpty()) web = WebServer(this, prefs).also { it.start(prefs.port) }
     }
 
     private fun onStatus(s: Status) {
@@ -85,22 +74,14 @@ class CameraService : Service() {
             Mode.WATCHING -> "Watching for motion"
             else -> s.message.ifEmpty { s.mode.name }
         } + if (s.batteryPct >= 0) " · ${s.batteryPct}%" else ""
-        if (text == lastNotifText) return
+        if (text == lastNotifText || instance == null) return
         lastNotifText = text
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIF_ID, notification(text))
-    }
-
-    private fun createChannel() {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Monitoring", NotificationManager.IMPORTANCE_LOW))
+        getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notification(text))
     }
 
     private fun notification(text: String): Notification {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val stop = PendingIntent.getService(
-            this, 1, Intent(this, CameraService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE,
-        )
+        val stop = PendingIntent.getService(this, 1, Intent(this, CameraService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentTitle("MotionCam")
@@ -122,14 +103,17 @@ class CameraService : Service() {
 
     private fun shutdown() {
         StatusBus.remove(statusListener)
-        engine?.release()
+        engine?.let {
+            it.onMonitoringStopped = null
+            it.setMonitoring(false)
+            EngineHost.release("service")
+        }
         engine = null
         web?.stop()
         web = null
         try { wake?.release() } catch (_: Exception) {}
         wake = null
         instance = null
-        StatusBus.publish(Status(mode = Mode.STOPPED, message = "Stopped"))
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }

@@ -17,7 +17,11 @@ data class Lens(
 object Lenses {
     private const val FULL_FRAME_DIAG_MM = 43.27f
 
-    fun list(ctx: Context): List<Lens> {
+    @Volatile private var cached: List<Lens>? = null
+
+    fun list(ctx: Context): List<Lens> = cached ?: scan(ctx).also { if (it.isNotEmpty()) cached = it }
+
+    private fun scan(ctx: Context): List<Lens> {
         val mgr = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val ids = try { mgr.cameraIdList.toList() } catch (e: Exception) { emptyList() }
         val out = ArrayList<Lens>()

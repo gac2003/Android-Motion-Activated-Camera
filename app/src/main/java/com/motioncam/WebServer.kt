@@ -160,7 +160,7 @@ class WebServer(private val ctx: Context, private val prefs: Prefs) {
         val sb = StringBuilder(PAGE_HEAD)
         sb.append("<a href='/'>&larr; Live</a><h2>Recorded clips</h2><table>")
         for (c in ClipStore.list(ctx)) {
-            sb.append("<tr><td>").append(df.format(Date(c.addedSec * 1000))).append("</td><td>")
+            sb.append("<tr><td>").append(df.format(Date(c.startMs))).append("</td><td>")
                 .append(c.size / 1_000_000).append(" MB</td><td>").append(c.durationMs / 1000).append(" s</td><td>")
                 .append("<a href='/clip/").append(c.id).append("'>play</a> · <a href='/clip/").append(c.id).append("?dl=1'>download</a></td></tr>")
         }

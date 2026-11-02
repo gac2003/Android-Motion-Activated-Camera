@@ -8,7 +8,9 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
+import android.view.Gravity
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.widget.*
 import kotlin.math.roundToInt
 
@@ -28,6 +30,11 @@ class SettingsActivity : Activity() {
         scroll.addView(box)
         setContentView(scroll)
 
+        title("Preview")
+        toggle("Show live camera preview", prefs.previewOn) { prefs.previewOn = it }
+        toggle("Focus peaking (green edges) while adjusting FOCUS", prefs.peaking) { prefs.peaking = it }
+        toggle("Low-power mode while monitoring with the screen off (15 fps between clips)", prefs.lowPowerIdle) { prefs.lowPowerIdle = it }
+
         title("Recording")
         choice("Resolution", listOf("720p", "1080p (FHD)", "4K"), listOf(720, 1080, 2160).indexOf(prefs.resHeight).coerceAtLeast(1)) {
             prefs.resHeight = listOf(720, 1080, 2160)[it]
@@ -35,25 +42,34 @@ class SettingsActivity : Activity() {
         choice("Frame rate", listOf("24 fps", "30 fps", "60 fps"), listOf(24, 30, 60).indexOf(prefs.fps).coerceAtLeast(1)) {
             prefs.fps = listOf(24, 30, 60)[it]
         }
-        choice("Codec", listOf("H.264 (compatible)", "HEVC / H.265 (smaller files)"), if (prefs.hevc) 1 else 0) { prefs.hevc = it == 1 }
-        seek("Bitrate (0 = automatic)", 0, 50, prefs.bitrateMbps, { if (it == 0) "auto" else "$it Mbps" }) { prefs.bitrateMbps = it }
+        choice("Codec", listOf("H.264 (most compatible)", "HEVC / H.265 (smaller files)"), if (prefs.hevc) 1 else 0) { prefs.hevc = it == 1 }
+        number("Bitrate", "Mbps", 0, 100, prefs.bitrateMbps, offLabel = "auto") { prefs.bitrateMbps = it }
         toggle("Record audio", prefs.audio) { prefs.audio = it }
         choice("Video rotation", listOf("Auto (follow phone)", "0°", "90°", "180°", "270°"), listOf(-1, 0, 90, 180, 270).indexOf(prefs.rotation).coerceAtLeast(0)) {
             prefs.rotation = listOf(-1, 0, 90, 180, 270)[it]
         }
-        note("Tip: for a phone fixed on a stand, set the rotation explicitly so clips are always upright, even with the screen locked.")
+        note("For a phone fixed on a stand, set the rotation explicitly so clips are always upright, even with the screen locked.")
 
         title("Motion detection")
-        seek("Sensitivity", 1, 10, prefs.sensitivity, { "$it" }) { prefs.sensitivity = it }
-        seek("Minimum moving area", 2, 100, (prefs.minAreaPct * 10).roundToInt(), { "%.1f %% of frame".format(it / 10f) }) { prefs.minAreaPct = it / 10f }
-        seek("Stop recording after no motion for", 10, 120, prefs.stopDelaySec, { "$it s" }) { prefs.stopDelaySec = it }
-        seek("Split long events into clips of", 1, 60, prefs.maxClipMin, { "$it min" }) { prefs.maxClipMin = it }
+        number("Sensitivity (1 = least, 10 = most)", "", 1, 10, prefs.sensitivity) { prefs.sensitivity = it }
+        choice("Light filter", listOf("Off (any brightness change)", "Normal — ignore lights turning on/off, exposure changes", "Strong — also ignore glare and reflections (peepholes, windows)"), prefs.lightFilter) {
+            prefs.lightFilter = it
+        }
+        decimal("Minimum moving area", "% of frame", 0.2f, 20f, prefs.minAreaPct) { prefs.minAreaPct = it }
+        number("Motion must last at least", "ms", 0, 3000, prefs.minMotionMs) { prefs.minMotionMs = it }
+        number("Stop recording after no motion for", "s", 5, 600, prefs.stopDelaySec) { prefs.stopDelaySec = it }
+        number("Split long events into clips of", "min", 1, 60, prefs.maxClipMin) { prefs.maxClipMin = it }
+        note("Draw detection zones with the ZONES button on the main screen: red = moving, dark = ignored. " +
+            "For a peephole, mask everything outside the lens circle and pick the Strong light filter.")
 
-        title("Storage and protection")
-        seek("Storage limit", 1, 200, prefs.maxStorageGb, { "$it GB" }) { prefs.maxStorageGb = it }
-        seek("Delete clips older than", 1, 60, prefs.keepDays, { "$it days" }) { prefs.keepDays = it }
-        seek("Stop if battery (unplugged) falls below", 5, 50, prefs.minBattery, { "$it %" }) { prefs.minBattery = it }
-        seek("Pause camera if battery temperature above", 35, 50, prefs.maxTempC, { "$it °C" }) { prefs.maxTempC = it }
+        title("Storage")
+        number("Delete clips older than", "days", 0, 365, prefs.keepDays, offLabel = "never") { prefs.keepDays = it }
+        number("Storage limit for clips", "GB", 0, 500, prefs.maxStorageGb, offLabel = "no limit") { prefs.maxStorageGb = it }
+        toggle("When the phone is nearly full, delete the oldest clips (otherwise recording pauses)", prefs.autoDeleteLow) { prefs.autoDeleteLow = it }
+
+        title("Protection")
+        number("Stop monitoring when unplugged battery falls to", "%", 0, 50, prefs.minBattery, offLabel = "off") { prefs.minBattery = it }
+        number("Pause the camera when battery temperature reaches", "°C", 0, 70, prefs.maxTempC, offLabel = "off", minActive = 35) { prefs.maxTempC = it }
         button("Exempt from battery optimisation (recommended)") {
             try {
                 val pm = getSystemService(POWER_SERVICE) as PowerManager
@@ -66,79 +82,165 @@ class SettingsActivity : Activity() {
         }
 
         title("Remote viewing")
-        toggle("Enable web viewer", prefs.serverOn) { prefs.serverOn = it }
-        edit("Port", prefs.port.toString(), InputType.TYPE_CLASS_NUMBER) { it.toIntOrNull()?.let { p -> if (p in 1024..65535) prefs.port = p } }
-        edit("Password (user name is: admin)", prefs.password, InputType.TYPE_CLASS_TEXT) { if (it.length >= 4) prefs.password = it }
+        toggle("Enable web viewer while monitoring", prefs.serverOn) { prefs.serverOn = it }
+        number("Port", "", 1024, 65535, prefs.port, slider = false) { prefs.port = it }
+        text("Password (user name: admin, min. 4 characters)", prefs.password) { if (it.length >= 4) prefs.password = it }
         toggle("Higher quality stream (uses more data)", prefs.streamHd) { prefs.streamHd = it }
         val addrs = WebServer.localAddresses()
         note(
             "Open one of these in a browser on the device you view from:\n" +
                 (if (addrs.isEmpty()) "(no network link right now)\n" else addrs.joinToString("\n") { "  http://${it.second}:${prefs.port}    [${it.first}]" } + "\n") +
                 "\nNo Wi-Fi needed:\n" +
-                "• USB: turn on Settings → Connections → Mobile Hotspot and Tethering → USB tethering, then open the phone's tether address above on the PC.\n" +
-                "• USB debugging: run  adb forward tcp:${prefs.port} tcp:${prefs.port}  then open http://localhost:${prefs.port} on the PC.\n" +
-                "• Bluetooth: pair, enable Bluetooth tethering; low frame rate but works.\n" +
+                "• USB: Settings → Connections → Mobile Hotspot and Tethering → USB tethering, then open the tether address above on the PC.\n" +
+                "• USB debugging: run  adb forward tcp:${prefs.port} tcp:${prefs.port}  then open http://localhost:${prefs.port}.\n" +
+                "• Bluetooth: pair, enable Bluetooth tethering (low frame rate).\n" +
                 "• Or join the phone's own hotspot from your laptop."
         )
     }
 
     override fun onPause() {
         super.onPause()
-        CameraService.instance?.onSettingsChanged()
+        currentFocus?.clearFocus()   // commits a value still being typed
+        EngineHost.peek()?.applyConfig()
+        CameraService.instance?.reloadServer()
     }
 
     // ------------------------------------------------------------------ row builders
 
     private fun title(s: String) {
-        val t = Ui.label(this, s.uppercase(), 13f, Ui.ACCENT)
-        t.setPadding(0, Ui.dp(this, 22), 0, Ui.dp(this, 6))
-        box.addView(t)
+        box.addView(Ui.label(this, s.uppercase(), 13f, Ui.ACCENT).apply { setPadding(0, Ui.dp(this@SettingsActivity, 22), 0, Ui.dp(this@SettingsActivity, 4)) })
     }
 
     private fun note(s: String) {
-        val t = Ui.label(this, s, 12f, 0xFFB0B4BA.toInt())
-        t.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 6))
-        box.addView(t)
+        box.addView(Ui.label(this, s, 12f, 0xFFB0B4BA.toInt()).apply { setPadding(0, Ui.dp(this@SettingsActivity, 6), 0, Ui.dp(this@SettingsActivity, 6)) })
     }
 
     private fun toggle(label: String, value: Boolean, set: (Boolean) -> Unit) {
-        val s = Switch(this)
-        s.text = label
-        s.setTextColor(Color.WHITE)
-        s.isChecked = value
-        s.setOnCheckedChangeListener { _, b -> set(b) }
-        s.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 8))
-        box.addView(s)
+        box.addView(Switch(this).apply {
+            text = label
+            setTextColor(Color.WHITE)
+            isChecked = value
+            setOnCheckedChangeListener { _, b -> set(b) }
+            setPadding(0, Ui.dp(this@SettingsActivity, 8), 0, Ui.dp(this@SettingsActivity, 8))
+        })
     }
 
     private fun button(label: String, click: () -> Unit) {
-        val b = Ui.chip(this, label)
-        b.setOnClickListener { click() }
-        val lp = LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) }
-        box.addView(b, lp)
+        box.addView(Ui.chip(this, label).apply { setOnClickListener { click() } },
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
     }
 
-    private fun seek(label: String, min: Int, max: Int, value: Int, fmt: (Int) -> String, set: (Int) -> Unit) {
-        val t = Ui.label(this, "$label: ${fmt(value)}", 14f)
-        t.setPadding(0, Ui.dp(this, 10), 0, 0)
-        val sb = SeekBar(this)
-        sb.max = max - min
-        sb.progress = (value - min).coerceIn(0, max - min)
+    private fun numberField(initial: String, decimal: Boolean): EditText = EditText(this).apply {
+        setText(initial)
+        setTextColor(Color.WHITE)
+        gravity = Gravity.END
+        inputType = if (decimal) InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL else InputType.TYPE_CLASS_NUMBER
+        imeOptions = EditorInfo.IME_ACTION_DONE
+        setSingleLine()
+        setSelectAllOnFocus(true)
+        minWidth = Ui.dp(this@SettingsActivity, 72)
+    }
+
+    /**
+     * Integer setting with slider + exact text entry. If [offLabel] is given, 0 means "off" and
+     * values between 1 and [minActive]-1 are raised to [minActive].
+     */
+    private fun number(
+        label: String, unit: String, min: Int, max: Int, value: Int,
+        offLabel: String? = null, minActive: Int = 1, slider: Boolean = true, set: (Int) -> Unit,
+    ) {
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val t = Ui.label(this, label, 14f)
+        val u = Ui.label(this, unit, 13f, Ui.GREY)
+        val field = numberField(if (offLabel != null && value == 0) "" else "$value", false)
+        if (offLabel != null) field.hint = offLabel
+        head.addView(t, LinearLayout.LayoutParams(0, -2, 1f))
+        head.addView(field)
+        head.addView(u)
+        head.setPadding(0, Ui.dp(this, 10), 0, 0)
+        box.addView(head)
+
+        var sb: SeekBar? = null
+        var syncing = false
+        fun normalise(v: Int): Int {
+            if (offLabel != null && v <= 0) return 0
+            return v.coerceIn(maxOf(min, if (offLabel != null) minActive else min), max)
+        }
+        fun show(v: Int) {
+            syncing = true
+            field.setText(if (offLabel != null && v == 0) "" else "$v")
+            sb?.progress = (if (offLabel != null && v == 0) min else v) - min
+            syncing = false
+        }
+        if (slider) {
+            sb = SeekBar(this).apply {
+                this.max = max - min
+                progress = (value - min).coerceIn(0, max - min)
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) {
+                        if (!fromUser || syncing) return
+                        val v = normalise(p + min)
+                        set(v)
+                        syncing = true
+                        field.setText(if (offLabel != null && v == 0) "" else "$v")
+                        syncing = false
+                    }
+                    override fun onStartTrackingTouch(s: SeekBar) {}
+                    override fun onStopTrackingTouch(s: SeekBar) {}
+                })
+            }
+            box.addView(sb)
+        }
+        fun commit() {
+            if (syncing) return
+            val v = normalise(field.text.toString().trim().toIntOrNull() ?: if (offLabel != null) 0 else value)
+            set(v)
+            show(v)
+        }
+        field.setOnEditorActionListener { _, _, _ -> commit(); field.clearFocus(); false }
+        field.setOnFocusChangeListener { _, has -> if (!has) commit() }
+    }
+
+    /** Decimal setting (one decimal place) with slider + exact text entry. */
+    private fun decimal(label: String, unit: String, min: Float, max: Float, value: Float, set: (Float) -> Unit) {
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val field = numberField("%.1f".format(value), true)
+        head.addView(Ui.label(this, label, 14f), LinearLayout.LayoutParams(0, -2, 1f))
+        head.addView(field)
+        head.addView(Ui.label(this, unit, 13f, Ui.GREY))
+        head.setPadding(0, Ui.dp(this, 10), 0, 0)
+        box.addView(head)
+        var syncing = false
+        val sb = SeekBar(this).apply {
+            this.max = ((max - min) * 10).roundToInt()
+            progress = ((value - min) * 10).roundToInt().coerceIn(0, this.max)
+        }
         sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) {
-                t.text = "$label: ${fmt(p + min)}"
-                if (fromUser) set(p + min)
+                if (!fromUser || syncing) return
+                val v = min + p / 10f
+                set(v)
+                syncing = true; field.setText("%.1f".format(v)); syncing = false
             }
             override fun onStartTrackingTouch(s: SeekBar) {}
             override fun onStopTrackingTouch(s: SeekBar) {}
         })
-        box.addView(t)
         box.addView(sb)
+        fun commit() {
+            if (syncing) return
+            val v = (field.text.toString().trim().replace(',', '.').toFloatOrNull() ?: value).coerceIn(min, max)
+            set(v)
+            syncing = true
+            field.setText("%.1f".format(v))
+            sb.progress = ((v - min) * 10).roundToInt()
+            syncing = false
+        }
+        field.setOnEditorActionListener { _, _, _ -> commit(); field.clearFocus(); false }
+        field.setOnFocusChangeListener { _, has -> if (!has) commit() }
     }
 
     private fun choice(label: String, options: List<String>, current: Int, set: (Int) -> Unit) {
-        val t = Ui.label(this, label, 14f)
-        t.setPadding(0, Ui.dp(this, 10), 0, 0)
+        box.addView(Ui.label(this, label, 14f).apply { setPadding(0, Ui.dp(this@SettingsActivity, 10), 0, 0) })
         val sp = Spinner(this)
         sp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
         sp.setSelection(current)
@@ -150,24 +252,21 @@ class SettingsActivity : Activity() {
             }
             override fun onNothingSelected(p: AdapterView<*>?) {}
         }
-        box.addView(t)
         box.addView(sp)
     }
 
-    private fun edit(label: String, value: String, inputType: Int, set: (String) -> Unit) {
-        val t = Ui.label(this, label, 14f)
-        t.setPadding(0, Ui.dp(this, 10), 0, 0)
-        val e = EditText(this)
-        e.setText(value)
-        e.setTextColor(Color.WHITE)
-        e.inputType = inputType
-        e.setSingleLine()
-        e.addTextChangedListener(object : android.text.TextWatcher {
-            override fun afterTextChanged(s: android.text.Editable?) { set(s?.toString() ?: "") }
-            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+    private fun text(label: String, value: String, set: (String) -> Unit) {
+        box.addView(Ui.label(this, label, 14f).apply { setPadding(0, Ui.dp(this@SettingsActivity, 10), 0, 0) })
+        box.addView(EditText(this).apply {
+            setText(value)
+            setTextColor(Color.WHITE)
+            inputType = InputType.TYPE_CLASS_TEXT
+            setSingleLine()
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun afterTextChanged(s: android.text.Editable?) { set(s?.toString() ?: "") }
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            })
         })
-        box.addView(t)
-        box.addView(e)
     }
 }

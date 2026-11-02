@@ -217,6 +217,9 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         startSession()
     }
 
+    /** The UI's preview surface was resized (its frame size reset): reconnect it with the right size. */
+    fun previewResized(st: SurfaceTexture) = h.post { if (sessionSt === st) rebuildSession() }
+
     /** Re-reads settings: restarts the camera only if the lens/format changed. */
     fun applyConfig() = h.post {
         if (!active) return@post

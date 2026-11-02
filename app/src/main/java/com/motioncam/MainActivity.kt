@@ -150,7 +150,30 @@ class MainActivity : Activity() {
         attached = true
         FrameHub.overlaySink = { bmp -> overlay.post { overlay.setImageBitmap(bmp) } }
         val e = EngineHost.acquire(this, "ui")
-        st?.let { e.setPreview(it) }
+        st?.let { givePreviewAfterDraw(it) }
+    }
+
+    /**
+     * Hands the preview surface to the camera only after the TextureView has drawn once. When returning to
+     * the app, TextureView rebuilds its layer on the first draw and resets the surface's frame size to the
+     * view size; if the camera connected before that, it picked a non-16:9 size and the preview was stretched.
+     */
+    private fun givePreviewAfterDraw(s: SurfaceTexture) {
+        val vto = texture.viewTreeObserver
+        var done = false
+        val give = Runnable { if (!done) { done = true; if (attached && st === s) engine?.setPreview(s) } }
+        val listener = object : android.view.ViewTreeObserver.OnDrawListener {
+            override fun onDraw() {
+                // runs before the draw: post so we act after the layer has been (re)created
+                texture.post {
+                    if (texture.viewTreeObserver.isAlive) texture.viewTreeObserver.removeOnDrawListener(this)
+                    give.run()
+                }
+            }
+        }
+        vto.addOnDrawListener(listener)
+        texture.invalidate()
+        texture.postDelayed(give, 600)   // safety net if no frame gets drawn
     }
 
     private fun detach() {
@@ -224,9 +247,13 @@ class MainActivity : Activity() {
             override fun onSurfaceTextureAvailable(s: SurfaceTexture, w: Int, h: Int) {
                 st = s
                 updateTransform()
-                if (attached) engine?.setPreview(s)
+                if (attached) givePreviewAfterDraw(s)
             }
-            override fun onSurfaceTextureSizeChanged(s: SurfaceTexture, w: Int, h: Int) { updateTransform() }
+            override fun onSurfaceTextureSizeChanged(s: SurfaceTexture, w: Int, h: Int) {
+                updateTransform()
+                // TextureView resets the surface's frame size when it is resized: reconnect the camera
+                if (attached) engine?.previewResized(s)
+            }
             override fun onSurfaceTextureDestroyed(s: SurfaceTexture): Boolean {
                 if (st === s) st = null
                 val e = engine ?: return true

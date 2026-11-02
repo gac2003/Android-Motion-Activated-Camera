@@ -599,7 +599,7 @@ class MainActivity : Activity() {
                 val sec = (now - s.recordingSinceWall) / 1000
                 "● REC %02d:%02d".format(sec / 60, sec % 60)
             }
-            s.mode == Mode.WATCHING -> "Watching for motion"
+            s.mode == Mode.WATCHING -> if (s.lastMotionWall > 0) "Watching · motion ${ago(now - s.lastMotionWall)} ago" else "Watching for motion"
             s.mode == Mode.PREVIEW -> "Preview · not monitoring"
             s.mode == Mode.OFF -> if (running) "Starting…" else "Not monitoring"
             else -> s.message.ifEmpty { s.mode.name }
@@ -608,13 +608,23 @@ class MainActivity : Activity() {
         caps?.let { sb.append(it.lens.label.substringBefore(" [").removePrefix("Rear ").replace(" · multi-cam", "").replaceFirstChar { ch -> ch.uppercase() }).append(" · ") }
         sb.append("${if (prefs.resHeight >= 2160) "4K" else "${prefs.resHeight}p"} ${prefs.fps}fps")
         if (s.tempC > 0f) sb.append(" · ${"%.0f".format(s.tempC)}°C")
-        if (running && s.lastMotionWall > 0) sb.append(" · motion ${(now - s.lastMotionWall) / 1000}s ago")
         if (running && prefs.serverOn) {
             if (now - addrCacheAt > 10_000) { addrCacheAt = now; addrCache = WebServer.localAddresses() }
             if (addrCache.isNotEmpty()) sb.append("\nRemote: ").append(addrCache.joinToString("  ") { "http://${it.second}:${prefs.port}" })
         }
         if (s.message.isNotEmpty() && s.mode != Mode.RECORDING && s.mode != Mode.WATCHING && statusTv.text != s.message) sb.append("\n").append(s.message)
         infoTv.text = sb.toString()
+    }
+
+    /** Compact "time ago": 45s, 12m, 3h, 2d. */
+    private fun ago(ms: Long): String {
+        val sec = (ms / 1000).coerceAtLeast(0)
+        return when {
+            sec < 60 -> "${sec}s"
+            sec < 3600 -> "${sec / 60}m"
+            sec < 86400 -> "${sec / 3600}h"
+            else -> "${sec / 86400}d"
+        }
     }
 
     // ------------------------------------------------------------------ chips (with live values)

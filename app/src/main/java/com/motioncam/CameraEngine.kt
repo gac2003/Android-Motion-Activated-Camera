@@ -293,7 +293,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             if (prefs.preRecordMs > 0) {
                 pre = try {
                     PreRecorder(recordSize.width, recordSize.height, effectiveFps, bitrate(), prefs.hevc,
-                        prefs.preRecordMs, audioAllowed(), c.realtimeTimestamps)
+                        prefs.preRecordMs, audioAllowed())
                 } catch (e: Exception) { message = "Pre-record unavailable: ${e.message}"; null }
             }
             persistent = pre?.surface ?: createPersistentSurface()

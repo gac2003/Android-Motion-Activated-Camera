@@ -25,8 +25,6 @@ class PreRecorder(
     width: Int, height: Int, fps: Int, bitrate: Int, hevc: Boolean,
     private val preMs: Int,
     private val withAudio: Boolean,
-    /** true if camera timestamps use elapsedRealtime (SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME). */
-    private val realtimeClock: Boolean,
 ) {
     private class Pkt(val data: ByteArray, val ptsUs: Long, val flags: Int) {
         val key get() = flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
@@ -96,7 +94,28 @@ class PreRecorder(
         encoder.start()
     }
 
-    private fun nowNs() = if (realtimeClock) SystemClock.elapsedRealtimeNanos() else System.nanoTime()
+    /**
+     * Which clock the camera stamps frames with: elapsedRealtime (counts deep sleep) or uptime/monotonic
+     * (doesn't). They differ by the total time the phone has slept since boot (often hours), and the camera's
+     * own report of its clock can't be trusted, so it is detected from the incoming frames. Audio is stamped
+     * with the monotonic clock and shifted onto the camera's clock.
+     */
+    @Volatile private var videoRealtime: Boolean? = null
+    private var clockChecks = 0
+
+    private fun detectClock(ptsUs: Long) {
+        if (videoRealtime != null && ++clockChecks % 300 != 0) return
+        val rt = SystemClock.elapsedRealtimeNanos() / 1000
+        val mono = System.nanoTime() / 1000
+        videoRealtime = abs(ptsUs - rt) < abs(ptsUs - mono)
+    }
+
+    /** Offset that moves a monotonic-clock timestamp onto the camera's clock (µs). */
+    private fun audioShiftUs(): Long? = when (videoRealtime) {
+        null -> null
+        true -> (SystemClock.elapsedRealtimeNanos() - System.nanoTime()) / 1000
+        false -> 0L
+    }
 
     /** Buffering (and microphone capture) only while monitoring; clears stale frames when starting. */
     fun setCapturing(on: Boolean) {
@@ -178,6 +197,8 @@ class PreRecorder(
             videoSamples++
         } else {
             if (aTrack < 0 || clipStartPts < 0 || p.ptsUs < clipStartPts || p.ptsUs <= lastAPts) return
+            // safety net: never write audio that is far from the video (would stretch the file's duration)
+            if (lastVPts > 0 && abs(p.ptsUs - lastVPts) > 6_000_000L) return
             lastAPts = p.ptsUs
         }
         info.set(0, p.data.size, p.ptsUs, p.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME)
@@ -188,6 +209,7 @@ class PreRecorder(
     }
 
     private fun onVideo(p: Pkt) = synchronized(lock) {
+        detectClock(p.ptsUs)
         if (wantStart && muxer == null) tryStartLocked()
         if (muxer != null) writeLocked(p, true)
         if (!capturing) return@synchronized
@@ -202,7 +224,9 @@ class PreRecorder(
         while (aq.isNotEmpty() && aq.first().ptsUs < first - 200_000L) aq.removeFirst()
     }
 
-    private fun onAudio(p: Pkt) = synchronized(lock) {
+    private fun onAudio(raw: Pkt) = synchronized(lock) {
+        val shift = audioShiftUs() ?: return@synchronized   // clock not known yet (first few ms only)
+        val p = Pkt(raw.data, raw.ptsUs + shift, raw.flags)
         if (muxer != null) writeLocked(p, false)
         aq.addLast(p)
         while (aq.size > 600) aq.removeFirst()
@@ -236,7 +260,7 @@ class PreRecorder(
             while (capturing) {
                 val n = rec.read(pcm, 0, pcm.size)
                 if (n <= 0) { if (n < 0) break else continue }
-                val now = nowNs()
+                val now = System.nanoTime()
                 val samples = n / 2
                 val expected = now - samples * 1_000_000_000L / sr
                 val predicted = anchorNs + frames * 1_000_000_000L / sr

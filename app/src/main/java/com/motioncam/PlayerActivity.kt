@@ -286,7 +286,8 @@ class PlayerActivity : Activity() {
         if (index !in clips.indices) return
         a.release(); b.release()
         cur = a; nxt = b
-        strip.setCurrent(index)
+        holdAt(offsetMs.toLong())
+        strip.setCurrent(index, atMs = offsetMs.toLong())
         load(cur, index, offsetMs)
     }
 
@@ -305,7 +306,10 @@ class PlayerActivity : Activity() {
                 if (slot.mp !== mp) return@setOnPreparedListener
                 slot.prepared = true
                 if (slot === cur) {
-                    if (offsetMs > 0) mp.seekTo(offsetMs.toLong(), MediaPlayer.SEEK_CLOSEST)
+                    if (offsetMs > 0) {
+                        mp.setOnSeekCompleteListener { releaseHoldIfReached(mp) }
+                        mp.seekTo(offsetMs.toLong(), MediaPlayer.SEEK_CLOSEST)
+                    } else holdMs = -1
                     if (playing) { mp.start(); applySpeed(mp) }
                     show(cur)
                     load(nxt, index + 1)
@@ -422,7 +426,12 @@ class PlayerActivity : Activity() {
 
     private fun scrubTo(index: Int, posMs: Long, final: Boolean) {
         if (index == cur.index && cur.prepared) {
-            try { cur.mp?.seekTo(posMs, if (final) MediaPlayer.SEEK_CLOSEST else MediaPlayer.SEEK_PREVIOUS_SYNC) } catch (_: Exception) {}
+            val m = cur.mp ?: return
+            if (final) {
+                holdAt(posMs)
+                m.setOnSeekCompleteListener { releaseHoldIfReached(m) }
+            }
+            try { m.seekTo(posMs, if (final) MediaPlayer.SEEK_CLOSEST else MediaPlayer.SEEK_PREVIOUS_SYNC) } catch (_: Exception) {}
         } else if (final) startAt(index, posMs.toInt())
     }
 
@@ -453,6 +462,19 @@ class PlayerActivity : Activity() {
     private fun resetZoom() {
         vScale = 1f; vTx = 0f; vTy = 0f
         applyZoom()
+    }
+
+    // ------------------------------------------------------------------ position hold
+
+    private var holdMs = -1L
+    private var holdSince = 0L
+
+    private fun holdAt(ms: Long) { holdMs = ms; holdSince = System.currentTimeMillis() }
+
+    /** The player reports a position again once it has really arrived where we asked. */
+    private fun releaseHoldIfReached(m: MediaPlayer) {
+        val p = try { m.currentPosition.toLong() } catch (_: Exception) { return }
+        if (holdMs < 0 || Math.abs(p - holdMs) < 1500) holdMs = -1
     }
 
     private fun prev() { if (curPos() > 3000) startAt(cur.index, 0) else startAt(maxOf(0, cur.index - 1), 0) }
@@ -519,7 +541,9 @@ class PlayerActivity : Activity() {
     private fun updatePosition() {
         val i = cur.index
         if (i !in clips.indices) return
-        val pos = curPos()
+        // while a jump is still loading/seeking, keep showing where the user landed (no jitter)
+        if (holdMs >= 0 && System.currentTimeMillis() - holdSince > 2500) holdMs = -1
+        val pos = if (holdMs >= 0) holdMs.toInt() else curPos()
         strip.setPosition(pos.toLong())
         stamp.text = stampFmt.format(Date(clips[i].startMs + pos))
         val c = clips[i]

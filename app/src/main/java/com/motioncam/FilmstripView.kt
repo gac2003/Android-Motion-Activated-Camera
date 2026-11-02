@@ -124,11 +124,12 @@ class FilmstripView(ctx: Context) : View(ctx) {
     private fun tileW() = 54 * d * zoom
     private fun pxPerMs() = tileW() / 2500f   // one frame per 2.5 s at normal zoom
 
-    fun setCurrent(index: Int, expand: Boolean? = null) {
+    /** Makes [index] the current clip, positioned at [atMs] (where the user landed, not 0:00). */
+    fun setCurrent(index: Int, expand: Boolean? = null, atMs: Long = 0) {
         if (index == current && (expand == null || expand == expanded)) return
         current = index
         if (expand != null) expanded = expand
-        posMs = 0
+        posMs = atMs
         relayout()
     }
 

@@ -334,7 +334,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(Ui.dp(ctx, 20), 0, Ui.dp(ctx, 12), Ui.dp(ctx, 10))
         }
-        header.addView(Ui.label(ctx, "Touch and hold to move buttons. Tap outside to cancel.", 15f), LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(Ui.label(ctx, "Touch and hold to move buttons.", 15f), LinearLayout.LayoutParams(0, -2, 1f))
         col.addView(header)
         fun pillButton(text: String, color: Int) = Ui.label(ctx, text, 15f).apply {
             gravity = Gravity.CENTER
@@ -363,6 +363,12 @@ class MainActivity : Activity() {
             background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = Ui.dp(ctx, 14).toFloat(); setColor(0xFF101114.toInt()) }
             setPadding(Ui.dp(ctx, 6), Ui.dp(ctx, 6), Ui.dp(ctx, 6), Ui.dp(ctx, 6))
         }
+        // neighbours slide aside while a button is dragged over the strip
+        stripRow.layoutTransition = android.animation.LayoutTransition().apply {
+            disableTransitionType(android.animation.LayoutTransition.APPEARING)
+            disableTransitionType(android.animation.LayoutTransition.DISAPPEARING)
+            setDuration(150)
+        }
         stripScroll.addView(stripRow)
         panel.addView(stripScroll, LinearLayout.LayoutParams(-1, -2))
         val foot = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, Ui.dp(ctx, 12), 0, 0) }
@@ -371,7 +377,9 @@ class MainActivity : Activity() {
         overlay.addView(col, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
 
         var dragging: String? = null
+        var snapshot: List<String> = emptyList()
         lateinit var render: () -> Unit
+        lateinit var tileFn: (String, Boolean) -> View
         fun tile(key: String, inStrip: Boolean): View {
             val c = Chip(ctx, key)
             c.set(chipNames[key] ?: key, false, false)
@@ -382,12 +390,14 @@ class MainActivity : Activity() {
             }
             c.view.setOnLongClickListener { v ->
                 dragging = key
+                snapshot = active.toList()
                 v.startDragAndDrop(null, View.DragShadowBuilder(v), key, 0)
                 v.alpha = 0.3f
                 true
             }
             return c.view
         }
+        tileFn = { k, inStrip -> tile(k, inStrip) }
         render = {
             grid.removeAllViews()
             for (k in Prefs.ALL_CHIPS.filter { it !in active }) {
@@ -401,23 +411,55 @@ class MainActivity : Activity() {
         }
         render()
 
+        fun stripView(key: String): View? = (0 until stripRow.childCount).map { stripRow.getChildAt(it) }.firstOrNull { it.tag == key }
+        /** Where [key] would go for a finger at [x]: number of other buttons whose centre is left of it. */
+        fun slotFor(key: String, x: Float): Int {
+            var idx = 0
+            for (i in 0 until stripRow.childCount) {
+                val ch = stripRow.getChildAt(i)
+                if (ch.tag != key && (ch.left + ch.right) / 2f < x) idx++
+            }
+            return idx
+        }
+        /** Moves the dragged button's placeholder in the strip; the other buttons animate aside. */
+        fun placeAt(key: String, idx: Int) {
+            var v = stripView(key)
+            if (v == null) {
+                v = tileFn(key, true).apply { alpha = 0.3f }
+                stripRow.addView(v, idx.coerceIn(0, stripRow.childCount), LinearLayout.LayoutParams(-2, -2).apply { setMargins(Ui.dp(ctx, 3), 0, Ui.dp(ctx, 3), 0) })
+            } else if (stripRow.indexOfChild(v) != idx) {
+                stripRow.removeView(v)
+                stripRow.addView(v, idx.coerceIn(0, stripRow.childCount))
+            }
+            active.remove(key)
+            active.add(idx.coerceIn(0, active.size), key)
+        }
         stripRow.setOnDragListener { _, e ->
+            val key = e.localState as? String
             when (e.action) {
-                android.view.DragEvent.ACTION_DROP -> {
-                    val key = e.localState as? String ?: return@setOnDragListener false
-                    // insertion point: number of other buttons whose centre lies left of the finger
-                    var idx = 0
-                    for (i in 0 until stripRow.childCount) {
-                        val ch = stripRow.getChildAt(i)
-                        if (ch.tag == key) continue
-                        if ((ch.left + ch.right) / 2f < e.x) idx++
+                android.view.DragEvent.ACTION_DRAG_ENTERED, android.view.DragEvent.ACTION_DRAG_LOCATION -> {
+                    if (key != null) placeAt(key, slotFor(key, e.x))
+                    true
+                }
+                android.view.DragEvent.ACTION_DRAG_EXITED -> {
+                    // dragged out of the strip: a button that came from the grid leaves the strip again
+                    if (key != null && key !in snapshot) {
+                        stripView(key)?.let { stripRow.removeView(it) }
+                        active.remove(key)
                     }
-                    active.remove(key)
-                    active.add(idx.coerceIn(0, active.size), key)
+                    true
+                }
+                android.view.DragEvent.ACTION_DROP -> {
+                    if (key != null) placeAt(key, slotFor(key, e.x))
                     render()
                     true
                 }
-                android.view.DragEvent.ACTION_DRAG_ENDED -> { dragging = null; render(); true }
+                android.view.DragEvent.ACTION_DRAG_ENDED -> {
+                    if (!e.result) { active.clear(); active.addAll(snapshot) }   // dropped nowhere: undo
+                    dragging = null
+                    render()
+                    true
+                }
                 else -> true
             }
         }

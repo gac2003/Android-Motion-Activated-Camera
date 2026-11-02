@@ -118,11 +118,11 @@ class PlayerActivity : Activity() {
         bigPlay = android.widget.ImageView(this).apply {
             setImageDrawable(IconDrawable(IconDrawable.Kind.PLAY))
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x4D000000) }
-            val p = Ui.dp(this@PlayerActivity, 20)
+            val p = Ui.dp(this@PlayerActivity, 10)
             setPadding(p, p, p, p)
             visibility = View.GONE
         }
-        val bp = Ui.dp(this, 72)
+        val bp = Ui.dp(this, 38)
         video.addView(bigPlay, FrameLayout.LayoutParams(bp, bp, Gravity.CENTER))
         skipL = skipLabel("«  5s").also { video.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = Ui.dp(this@PlayerActivity, 40) }) }
         skipR = skipLabel("5s  »").also { video.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = Ui.dp(this@PlayerActivity, 40) }) }
@@ -377,7 +377,14 @@ class PlayerActivity : Activity() {
     private fun setPlaying(p: Boolean) {
         playing = p
         bigPlay.animate().cancel()
-        if (vScale > 1.03f) { bigPlay.visibility = View.GONE; return }   // keep a zoomed picture clean
+        if (vScale > 1.03f) {
+            // zoomed: only a brief indicator, like the 5 s skip labels
+            bigPlay.setImageDrawable(IconDrawable(if (p) IconDrawable.Kind.PAUSE else IconDrawable.Kind.PLAY))
+            bigPlay.visibility = View.VISIBLE
+            bigPlay.alpha = 1f
+            bigPlay.animate().alpha(0f).setStartDelay(450).setDuration(250).withEndAction { bigPlay.visibility = View.GONE }.start()
+            return
+        }
         if (p) { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PAUSE)); bigPlay.visibility = View.VISIBLE; bigPlay.alpha = 1f; bigPlay.animate().alpha(0f).setStartDelay(350).setDuration(250).withEndAction { bigPlay.visibility = View.GONE }.start() }
         else { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PLAY)); bigPlay.alpha = 1f; bigPlay.visibility = View.VISIBLE }
     }
@@ -485,15 +492,22 @@ class PlayerActivity : Activity() {
     }
 
     private fun deleteCurrent(c: Clip) {
-        val i = clips.indexOfFirst { it.id == c.id }
-        a.release(); b.release()
-        ClipStore.delete(this, c)
-        if (i >= 0) clips.removeAt(i)
-        if (clips.isEmpty()) { finish(); return }
-        strip.clips = clips
-        val ni = i.coerceIn(0, clips.size - 1)
-        strip.setCurrent(ni, strip.expanded)
-        startAt(ni, 0)
+        ClipDeleter.delete(this, listOf(c)) { deleted ->
+            if (!deleted) return@delete
+            val i = clips.indexOfFirst { it.id == c.id }
+            a.release(); b.release()
+            if (i >= 0) clips.removeAt(i)
+            if (clips.isEmpty()) { finish(); return@delete }
+            strip.clips = clips
+            val ni = i.coerceIn(0, clips.size - 1)
+            strip.setCurrent(ni, strip.expanded)
+            startAt(ni, 0)
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (!ClipDeleter.onResult(requestCode, resultCode)) @Suppress("DEPRECATION") super.onActivityResult(requestCode, resultCode, data)
     }
 
     private fun updatePosition() {

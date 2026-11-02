@@ -12,16 +12,22 @@ class Prefs(ctx: Context) {
 
     /** Keeps the user's chosen behaviour when the meaning of a stored value changes between versions. */
     private fun migrate() {
-        val v = sp.getInt("prefsVersion", 1)
-        if (v >= 2) return
+        var v = sp.getInt("prefsVersion", 1)
+        if (v >= 3) return
         val e = sp.edit()
         if (sp.contains("sensitivity")) {
-            // v1 threshold: 0.05 + (10-s)*0.024 ; v2: 0.07 + (10-s)*0.03  -> same threshold
-            val old = sp.getInt("sensitivity", 5)
-            val thr = 0.05f + (10 - old) * 0.024f
-            e.putInt("sensitivity", Math.round(10 - (thr - 0.07f) / 0.03f).coerceIn(1, 10))
+            var sens = sp.getInt("sensitivity", 5)
+            if (v < 2) {
+                // v1 threshold: 0.05 + (10-s)*0.024 ; v2: 0.07 + (10-s)*0.03  -> same threshold
+                val thr = 0.05f + (10 - sens) * 0.024f
+                sens = Math.round(10 - (thr - 0.07f) / 0.03f).coerceIn(1, 10)
+            }
+            // v3 shifted the scale by two levels (new 5 = old 3): keep the same behaviour
+            sens = (sens + 2).coerceIn(1, 10)
+            e.putInt("sensitivity", sens)
         }
-        e.putInt("prefsVersion", 2).apply()
+        v = 3
+        e.putInt("prefsVersion", v).apply()
     }
 
     private fun i(k: String, d: Int) = sp.getInt(k, d)

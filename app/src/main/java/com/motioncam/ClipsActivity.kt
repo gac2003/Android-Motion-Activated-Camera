@@ -31,6 +31,23 @@ class ClipsActivity : Activity() {
     private var cols = 3
     private lateinit var list: ListView
     private lateinit var summary: TextView
+    private lateinit var banner: TextView
+
+    /** Permission to see videos this install did not create (e.g. recorded before a reinstall). */
+    private fun videoPermission() =
+        if (android.os.Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_VIDEO
+        else android.Manifest.permission.READ_EXTERNAL_STORAGE
+
+    private fun canSeeAll() = checkSelfPermission(videoPermission()) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        reload()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (!ClipDeleter.onResult(requestCode, resultCode)) @Suppress("DEPRECATION") super.onActivityResult(requestCode, resultCode, data)
+    }
     private val pool = Executors.newFixedThreadPool(2)
     private val thumbs = object : LruCache<Long, Bitmap>((Runtime.getRuntime().maxMemory() / 8).toInt()) {
         override fun sizeOf(key: Long, value: Bitmap) = value.byteCount
@@ -52,6 +69,13 @@ class ClipsActivity : Activity() {
         root.addView(topBar(this, "Clips", playAll))
         summary = Ui.label(this, "", 12f, Ui.GREY).apply { setPadding(Ui.dp(this@ClipsActivity, 52), 0, 0, Ui.dp(this@ClipsActivity, 6)) }
         root.addView(summary)
+        banner = Ui.label(this, "Clips from earlier installs are hidden. Tap to show them.", 13f, Ui.ACCENT).apply {
+            setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8))
+            setBackgroundColor(0xFF2A2416.toInt())
+            setOnClickListener { requestPermissions(arrayOf(videoPermission()), 7) }
+            visibility = View.GONE
+        }
+        root.addView(banner)
         list = ListView(this).apply {
             divider = null
             setBackgroundColor(Ui.BG)
@@ -64,6 +88,7 @@ class ClipsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         timeFmt = Fmt.time(prefs)
+        banner.visibility = if (canSeeAll()) View.GONE else View.VISIBLE
         reload()
     }
 
@@ -73,6 +98,7 @@ class ClipsActivity : Activity() {
     }
 
     private fun reload() {
+        banner.visibility = if (canSeeAll()) View.GONE else View.VISIBLE
         Thread {
             val all = ClipStore.list(this)
             runOnUiThread {
@@ -124,7 +150,7 @@ class ClipsActivity : Activity() {
                     2 -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("video/mp4")
                         .putExtra(Intent.EXTRA_STREAM, c.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share clip"))
                     3 -> AlertDialog.Builder(this).setTitle("Delete this clip?")
-                        .setPositiveButton("Delete") { _, _ -> ClipStore.delete(this, c); reload() }
+                        .setPositiveButton("Delete") { _, _ -> ClipDeleter.delete(this, listOf(c)) { reload() } }
                         .setNegativeButton("Cancel", null).show()
                 }
             }.show()
@@ -136,7 +162,7 @@ class ClipsActivity : Activity() {
                 if (which == 0) h.clips.minByOrNull { it.startMs }?.let { play(it) }
                 else AlertDialog.Builder(this).setTitle("Delete ${h.clips.size} clips?")
                     .setPositiveButton("Delete") { _, _ ->
-                        Thread { h.clips.forEach { ClipStore.delete(this, it) }; runOnUiThread { reload() } }.start()
+                        ClipDeleter.delete(this, h.clips) { reload() }
                     }
                     .setNegativeButton("Cancel", null).show()
             }.show()

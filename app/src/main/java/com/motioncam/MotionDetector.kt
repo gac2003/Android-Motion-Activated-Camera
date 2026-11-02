@@ -63,9 +63,9 @@ class MotionDetector {
         }
         val global = if (lightFilter >= 1 && cnt > 0) median(tmp, cnt) else 0f
 
-        // s=10: 7 %, s=5: 22 %, s=1: 34 % brightness change (default tuned for people/animals)
-        val thr = 0.07f + (10 - s) * 0.03f
-        val patThr = 0.06f + (10 - s) * 0.012f
+        // s=10: 13 %, s=5: 28 %, s=1: 40 % brightness change (default 5 tuned for people/animals)
+        val thr = 0.13f + (10 - s) * 0.03f
+        val patThr = 0.084f + (10 - s) * 0.012f
         for (i in 0 until N) {
             val c = (zones == null || zones[i]) && abs(rel[i] - global) > thr
             changed[i] = c

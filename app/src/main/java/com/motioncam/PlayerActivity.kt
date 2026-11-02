@@ -58,11 +58,18 @@ class PlayerActivity : Activity() {
     private lateinit var strip: FilmstripView
     private lateinit var stamp: TextView
     private lateinit var info: TextView
-    private lateinit var bigPlay: TextView
+    private lateinit var bigPlay: android.widget.ImageView
+    private lateinit var topBar: LinearLayout
+    private lateinit var bar: LinearLayout
+    private lateinit var zoomReset: android.widget.ImageView
+    private var vScale = 1f
+    private var vTx = 0f
+    private var vTy = 0f
+    private var pinching = false
     private lateinit var skipL: TextView
     private lateinit var skipR: TextView
     private lateinit var speedBtn: TextView
-    private lateinit var muteBtn: TextView
+    private lateinit var muteBtn: android.widget.ImageView
     private var playing = true
     private var muted = false
     private var speed = 1f
@@ -108,37 +115,47 @@ class PlayerActivity : Activity() {
         cur = a; nxt = b
         video.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutSlot(a); layoutSlot(b) }
 
-        bigPlay = Ui.label(this, "▶", 34f).apply {
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x88000000.toInt()) }
+        bigPlay = android.widget.ImageView(this).apply {
+            setImageDrawable(IconDrawable(IconDrawable.Kind.PLAY))
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x4D000000) }
+            val p = Ui.dp(this@PlayerActivity, 20)
+            setPadding(p, p, p, p)
             visibility = View.GONE
         }
-        val bp = Ui.dp(this, 76)
+        val bp = Ui.dp(this, 72)
         video.addView(bigPlay, FrameLayout.LayoutParams(bp, bp, Gravity.CENTER))
         skipL = skipLabel("«  5s").also { video.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = Ui.dp(this@PlayerActivity, 40) }) }
         skipR = skipLabel("5s  »").also { video.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = Ui.dp(this@PlayerActivity, 40) }) }
 
         // top overlay: back, time stamp, menu
-        val topBar = LinearLayout(this).apply {
+        topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x99000000.toInt(), 0))
             val p = Ui.dp(this@PlayerActivity, 6)
             setPadding(p, p, p, p * 3)
         }
-        topBar.addView(Ui.label(this, "‹", 30f).apply {
-            setPadding(Ui.dp(this@PlayerActivity, 10), 0, Ui.dp(this@PlayerActivity, 14), Ui.dp(this@PlayerActivity, 4))
-            setOnClickListener { finish() }
-        })
+        topBar.addView(iconButton(this, IconDrawable.Kind.BACK) { finish() })
         stamp = Ui.label(this, "", 15f).apply { setShadowLayer(4f, 0f, 0f, Color.BLACK) }
         topBar.addView(stamp, LinearLayout.LayoutParams(0, -2, 1f))
-        val menuBtn = Ui.label(this, "⋮", 24f).apply { setPadding(Ui.dp(this@PlayerActivity, 14), 0, Ui.dp(this@PlayerActivity, 10), 0) }
-        menuBtn.setOnClickListener { showMenu(menuBtn) }
+        lateinit var menuBtn: View
+        menuBtn = iconButton(this, IconDrawable.Kind.MORE) { showMenu(menuBtn) }
         topBar.addView(menuBtn)
         video.addView(topBar, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+        zoomReset = iconButton(this, IconDrawable.Kind.ZOOM_RESET, 40, 10) { resetZoom() }.apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x66000000) }
+            visibility = View.GONE
+        }
+        video.addView(zoomReset, FrameLayout.LayoutParams(Ui.dp(this, 44), Ui.dp(this, 44), Gravity.BOTTOM or Gravity.END).apply {
+            setMargins(0, 0, Ui.dp(this@PlayerActivity, 14), Ui.dp(this@PlayerActivity, 14))
+        })
 
         val gd = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent) = true
+            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
+                if (vScale > 1.01f && !pinching) { vTx -= dx; vTy -= dy; applyZoom() }
+                return true
+            }
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean { togglePlay(); return true }
             override fun onDoubleTap(e: MotionEvent): Boolean {
                 val w = video.width
@@ -150,7 +167,26 @@ class PlayerActivity : Activity() {
                 return true
             }
         })
-        video.setOnTouchListener { _, e -> gd.onTouchEvent(e) }
+        val sd = android.view.ScaleGestureDetector(this, object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScaleBegin(d: android.view.ScaleGestureDetector): Boolean { pinching = true; return true }
+            override fun onScale(d: android.view.ScaleGestureDetector): Boolean {
+                val ns = (vScale * d.scaleFactor).coerceIn(1f, 6f)
+                // zoom around the fingers
+                val cx = d.focusX - video.width / 2f
+                val cy = d.focusY - video.height / 2f
+                vTx = cx - (cx - vTx) * ns / vScale
+                vTy = cy - (cy - vTy) * ns / vScale
+                vScale = ns
+                applyZoom()
+                return true
+            }
+            override fun onScaleEnd(d: android.view.ScaleGestureDetector) { pinching = false; if (vScale < 1.03f) resetZoom() }
+        })
+        video.setOnTouchListener { _, e ->
+            sd.onTouchEvent(e)
+            if (!pinching && e.pointerCount == 1) gd.onTouchEvent(e)
+            true
+        }
         root.addView(video, LinearLayout.LayoutParams(-1, 0, 1f))
 
         // ---- filmstrip + compact controls
@@ -161,22 +197,22 @@ class PlayerActivity : Activity() {
         }
         root.addView(strip, LinearLayout.LayoutParams(-1, Ui.dp(this, 84)))
 
-        val bar = LinearLayout(this).apply {
+        bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             val p = Ui.dp(this@PlayerActivity, 6)
             setPadding(p * 2, p, p * 2, p * 2)
         }
-        fun btn(t: String, click: () -> Unit) = Ui.label(this, t, 18f).apply {
+        bar.addView(iconButton(this, IconDrawable.Kind.PREV, 48, 12) { prev() })
+        bar.addView(iconButton(this, IconDrawable.Kind.NEXT, 48, 12) { next() })
+        speedBtn = Ui.label(this, "1x", 16f).apply {
             gravity = Gravity.CENTER
             minWidth = Ui.dp(this@PlayerActivity, 48)
-            setPadding(0, Ui.dp(this@PlayerActivity, 6), 0, Ui.dp(this@PlayerActivity, 6))
-            setOnClickListener { click() }
-        }.also { bar.addView(it) }
-        btn("⏮") { prev() }
-        btn("⏭") { next() }
-        speedBtn = btn("1x") { cycleSpeed() }
-        muteBtn = btn("🔊") { toggleMute() }
+            setOnClickListener { cycleSpeed() }
+        }
+        bar.addView(speedBtn)
+        muteBtn = iconButton(this, IconDrawable.Kind.VOLUME, 48, 12) { toggleMute() }
+        bar.addView(muteBtn)
         info = Ui.label(this, "", 12f, Ui.GREY).apply { gravity = Gravity.END }
         bar.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(bar)
@@ -341,8 +377,8 @@ class PlayerActivity : Activity() {
     private fun setPlaying(p: Boolean) {
         playing = p
         bigPlay.animate().cancel()
-        if (p) { bigPlay.text = "⏸"; bigPlay.visibility = View.VISIBLE; bigPlay.alpha = 1f; bigPlay.animate().alpha(0f).setStartDelay(350).setDuration(250).withEndAction { bigPlay.visibility = View.GONE }.start() }
-        else { bigPlay.text = "▶"; bigPlay.alpha = 1f; bigPlay.visibility = View.VISIBLE }
+        if (p) { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PAUSE)); bigPlay.visibility = View.VISIBLE; bigPlay.alpha = 1f; bigPlay.animate().alpha(0f).setStartDelay(350).setDuration(250).withEndAction { bigPlay.visibility = View.GONE }.start() }
+        else { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PLAY)); bigPlay.alpha = 1f; bigPlay.visibility = View.VISIBLE }
     }
 
     private fun togglePlay() {
@@ -376,6 +412,33 @@ class PlayerActivity : Activity() {
         } else if (final) startAt(index, posMs.toInt())
     }
 
+    // ------------------------------------------------------------------ pinch zoom
+
+    private fun applyZoom() {
+        val maxX = (vScale - 1f) * video.width / 2f
+        val maxY = (vScale - 1f) * video.height / 2f
+        vTx = vTx.coerceIn(-maxX, maxX)
+        vTy = vTy.coerceIn(-maxY, maxY)
+        for (s in listOf(a, b)) {
+            s.tv.scaleX = vScale; s.tv.scaleY = vScale
+            s.tv.translationX = vTx; s.tv.translationY = vTy
+        }
+        val zoomed = vScale > 1.03f
+        // like Samsung's player: zooming in hides the controls; a small button restores everything
+        val v = if (zoomed) View.GONE else View.VISIBLE
+        if (topBar.visibility != v) {
+            topBar.visibility = v
+            strip.visibility = v
+            bar.visibility = v
+        }
+        zoomReset.visibility = if (zoomed) View.VISIBLE else View.GONE
+    }
+
+    private fun resetZoom() {
+        vScale = 1f; vTx = 0f; vTy = 0f
+        applyZoom()
+    }
+
     private fun prev() { if (curPos() > 3000) startAt(cur.index, 0) else startAt(maxOf(0, cur.index - 1), 0) }
     private fun next() { if (cur.index + 1 < clips.size) startAt(cur.index + 1, 0) }
 
@@ -388,7 +451,7 @@ class PlayerActivity : Activity() {
 
     private fun toggleMute() {
         muted = !muted
-        muteBtn.text = if (muted) "🔇" else "🔊"
+        muteBtn.setImageDrawable(IconDrawable(if (muted) IconDrawable.Kind.MUTE else IconDrawable.Kind.VOLUME))
         val v = if (muted) 0f else 1f
         for (s in listOf(a, b)) try { s.mp?.setVolume(v, v) } catch (_: Exception) {}
     }

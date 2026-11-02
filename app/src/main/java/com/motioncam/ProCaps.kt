@@ -187,10 +187,13 @@ class ProCaps(val lens: Lens, val ctrl: CameraCharacteristics, val lensChars: Ca
             val l = Lenses.find(ctx, prefs.camera) ?: return null
             cache[l.key]?.let { return it }
             val mgr = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            // Without the CAMERA permission Android hides several keys (e.g. minimum focus distance, colour
+            // calibration), so only remember the result once the permission has been granted.
+            val granted = ctx.checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED
             return try {
                 val ctrl = mgr.getCameraCharacteristics(l.logicalId)
                 val lc = l.physicalId?.let { try { mgr.getCameraCharacteristics(it) } catch (e: Exception) { null } } ?: ctrl
-                ProCaps(l, ctrl, lc).also { cache[l.key] = it }
+                ProCaps(l, ctrl, lc).also { if (granted) cache[l.key] = it }
             } catch (e: Exception) { null }
         }
     }

@@ -19,7 +19,11 @@ object Lenses {
 
     @Volatile private var cached: List<Lens>? = null
 
-    fun list(ctx: Context): List<Lens> = cached ?: scan(ctx).also { if (it.isNotEmpty()) cached = it }
+    /** Cached only once the CAMERA permission is granted (sensor size, used for the mm labels, is hidden before). */
+    fun list(ctx: Context): List<Lens> = cached ?: scan(ctx).also {
+        val granted = ctx.checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (it.isNotEmpty() && granted) cached = it
+    }
 
     private fun scan(ctx: Context): List<Lens> {
         val mgr = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager

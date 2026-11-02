@@ -21,6 +21,7 @@ import android.view.MotionEvent
 import android.view.Surface
 import android.view.TextureView
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.*
 import kotlin.math.exp
@@ -185,8 +186,11 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------------------ UI construction
 
+    private lateinit var rootLayout: FrameLayout
+
     private fun buildUi() {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        rootLayout = root
 
         frame = AspectFrame(this)
         texture = TextureView(this)
@@ -219,12 +223,12 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Ui.PANEL)
             val p = Ui.dp(this@MainActivity, 10)
-            setPadding(p + 2, p - 2, p + 2, p - 2)
+            setPadding(p + 2, p - 4, p, p - 4)
             gravity = Gravity.CENTER_VERTICAL
         }
         val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        statusTv = Ui.label(this, "", 15f)
-        infoTv = Ui.label(this, "", 11f, 0xFFB0B4BA.toInt())
+        statusTv = Ui.label(this, "", 15f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
+        infoTv = Ui.label(this, "", 11f, 0xFFB0B4BA.toInt()).apply { maxLines = 3; includeFontPadding = false }
         texts.addView(statusTv)
         texts.addView(infoTv)
         top.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
@@ -309,50 +313,147 @@ class MainActivity : Activity() {
         refreshChips()
     }
 
-    /** Long-press any control button: choose which buttons are shown and their order (like Samsung's camera). */
+    private var editor: View? = null
+
+    private val chipNames = mapOf("LENS" to "Lens", "FORMAT" to "Format", "EV" to "EV / meter", "ISO" to "ISO",
+        "SPEED" to "Shutter", "FOCUS" to "Focus", "WB" to "White bal.", "ZOOM" to "Zoom", "ZONES" to "Zones")
+
+    /**
+     * Long-press a control button: Samsung-style editor. Touch and hold a button to drag it between the
+     * grid (hidden) and the strip (shown), or to a new position in the strip. Tapping also moves it across.
+     */
     private fun customizeChips() {
-        val visible = visibleChips()
-        val order = (visible + Prefs.ALL_CHIPS.filter { it !in visible }).toMutableList()
-        val shown = order.associateWith { it in visible }.toMutableMap()
-        val names = mapOf("LENS" to "Lens", "FORMAT" to "Resolution / fps", "EV" to "Exposure value / meter", "ISO" to "ISO",
-            "SPEED" to "Shutter speed", "FOCUS" to "Focus", "WB" to "White balance", "ZOOM" to "Zoom", "ZONES" to "Detection zones")
-        val listBox = LinearLayout(this).apply {
+        if (editor != null) return
+        val active = visibleChips().toMutableList()
+        val ctx = this
+        val overlay = FrameLayout(ctx).apply { setBackgroundColor(0x99000000.toInt()); isClickable = true }
+        val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+
+        val header = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(Ui.dp(ctx, 20), 0, Ui.dp(ctx, 12), Ui.dp(ctx, 10))
+        }
+        header.addView(Ui.label(ctx, "Touch and hold to move buttons.", 15f), LinearLayout.LayoutParams(0, -2, 1f))
+        val save = Ui.label(ctx, "Save", 16f).apply {
+            setPadding(Ui.dp(ctx, 22), Ui.dp(ctx, 10), Ui.dp(ctx, 22), Ui.dp(ctx, 10))
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = Ui.dp(ctx, 24).toFloat(); setColor(0xFF6B4A2E.toInt()) }
+        }
+        header.addView(save)
+        col.addView(header)
+
+        val panel = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            val p = Ui.dp(this@MainActivity, 12)
-            setPadding(p, p / 2, p, 0)
+            val p = Ui.dp(ctx, 14)
+            setPadding(p, p, p, p)
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = Ui.dp(ctx, 26).toFloat(); setColor(0xF21B1C20.toInt()) }
         }
-        fun rebuild() {
-            listBox.removeAllViews()
-            order.forEachIndexed { i, key ->
-                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                val cb = CheckBox(this).apply {
-                    text = names[key] ?: key
-                    isChecked = shown[key] == true
-                    setOnCheckedChangeListener { _, b -> shown[key] = b }
+        val grid = GridLayout(ctx).apply { columnCount = 4; minimumHeight = Ui.dp(ctx, 150) }
+        panel.addView(grid, LinearLayout.LayoutParams(-1, -2))
+        panel.addView(Ui.label(ctx, "· · ·", 14f, Ui.GREY).apply { gravity = Gravity.CENTER; setPadding(0, Ui.dp(ctx, 4), 0, Ui.dp(ctx, 4)) },
+            LinearLayout.LayoutParams(-1, -2))
+        val stripScroll = HorizontalScrollView(ctx).apply { isHorizontalScrollBarEnabled = false }
+        val stripRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumWidth = resources.displayMetrics.widthPixels - Ui.dp(ctx, 60)
+            minimumHeight = Ui.dp(ctx, 64)
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = Ui.dp(ctx, 14).toFloat(); setColor(0xFF101114.toInt()) }
+            setPadding(Ui.dp(ctx, 6), Ui.dp(ctx, 6), Ui.dp(ctx, 6), Ui.dp(ctx, 6))
+        }
+        stripScroll.addView(stripRow)
+        panel.addView(stripScroll, LinearLayout.LayoutParams(-1, -2))
+        val foot = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END; setPadding(0, Ui.dp(ctx, 10), 0, 0) }
+        panel.addView(foot, LinearLayout.LayoutParams(-1, -2))
+        col.addView(panel, LinearLayout.LayoutParams(-1, -2).apply { setMargins(Ui.dp(ctx, 12), 0, Ui.dp(ctx, 12), Ui.dp(ctx, 24)) })
+        overlay.addView(col, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+
+        var dragging: String? = null
+        lateinit var render: () -> Unit
+        fun tile(key: String, inStrip: Boolean): View {
+            val c = Chip(ctx, key)
+            c.set(chipNames[key] ?: key, false, false)
+            c.view.tag = key
+            c.view.setOnClickListener {
+                if (inStrip) { if (active.size > 1) active.remove(key) } else active.add(key)
+                render()
+            }
+            c.view.setOnLongClickListener { v ->
+                dragging = key
+                v.startDragAndDrop(null, View.DragShadowBuilder(v), key, 0)
+                v.alpha = 0.3f
+                true
+            }
+            return c.view
+        }
+        render = {
+            grid.removeAllViews()
+            for (k in Prefs.ALL_CHIPS.filter { it !in active }) {
+                grid.addView(tile(k, false), GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED), GridLayout.spec(GridLayout.UNDEFINED, 1f)).apply {
+                    width = 0
+                    setMargins(Ui.dp(ctx, 4), Ui.dp(ctx, 6), Ui.dp(ctx, 4), Ui.dp(ctx, 6))
+                })
+            }
+            stripRow.removeAllViews()
+            for (k in active) stripRow.addView(tile(k, true), LinearLayout.LayoutParams(-2, -2).apply { setMargins(Ui.dp(ctx, 3), 0, Ui.dp(ctx, 3), 0) })
+        }
+        render()
+
+        stripRow.setOnDragListener { _, e ->
+            when (e.action) {
+                android.view.DragEvent.ACTION_DROP -> {
+                    val key = e.localState as? String ?: return@setOnDragListener false
+                    // insertion point: number of other buttons whose centre lies left of the finger
+                    var idx = 0
+                    for (i in 0 until stripRow.childCount) {
+                        val ch = stripRow.getChildAt(i)
+                        if (ch.tag == key) continue
+                        if ((ch.left + ch.right) / 2f < e.x) idx++
+                    }
+                    active.remove(key)
+                    active.add(idx.coerceIn(0, active.size), key)
+                    render()
+                    true
                 }
-                row.addView(cb, LinearLayout.LayoutParams(0, -2, 1f))
-                fun arrow(t: String, enabled: Boolean, move: Int) = Button(this).apply {
-                    text = t
-                    isEnabled = enabled
-                    minWidth = 0; minimumWidth = Ui.dp(this@MainActivity, 44)
-                    setOnClickListener { order.removeAt(i); order.add(i + move, key); rebuild() }
-                }
-                row.addView(arrow("▲", i > 0, -1))
-                row.addView(arrow("▼", i < order.size - 1, 1))
-                listBox.addView(row)
+                android.view.DragEvent.ACTION_DRAG_ENDED -> { dragging = null; render(); true }
+                else -> true
             }
         }
-        rebuild()
-        AlertDialog.Builder(this).setTitle("Customise control buttons")
-            .setView(ScrollView(this).apply { addView(listBox) })
-            .setPositiveButton("Save") { _, _ ->
-                val v = order.filter { shown[it] == true }
-                if (v.isEmpty()) { Toast.makeText(this, "Keep at least one button", Toast.LENGTH_SHORT).show(); return@setPositiveButton }
-                prefs.chipLayout = v.joinToString(",")
-                buildChips()
+        grid.setOnDragListener { _, e ->
+            when (e.action) {
+                android.view.DragEvent.ACTION_DROP -> {
+                    val key = e.localState as? String ?: return@setOnDragListener false
+                    if (active.size > 1) active.remove(key)
+                    render()
+                    true
+                }
+                else -> true
             }
-            .setNeutralButton("Default") { _, _ -> prefs.chipLayout = Prefs.ALL_CHIPS.joinToString(","); buildChips() }
-            .setNegativeButton("Cancel", null).show()
+        }
+
+        fun close() { (overlay.parent as? ViewGroup)?.removeView(overlay); editor = null }
+        foot.addView(Ui.label(ctx, "Default", 14f, Ui.GREY).apply {
+            setPadding(Ui.dp(ctx, 12), Ui.dp(ctx, 8), Ui.dp(ctx, 12), Ui.dp(ctx, 8))
+            setOnClickListener { active.clear(); active.addAll(Prefs.ALL_CHIPS); render() }
+        })
+        foot.addView(Ui.label(ctx, "Cancel", 14f, Ui.GREY).apply {
+            setPadding(Ui.dp(ctx, 12), Ui.dp(ctx, 8), Ui.dp(ctx, 12), Ui.dp(ctx, 8))
+            setOnClickListener { close() }
+        })
+        save.setOnClickListener {
+            prefs.chipLayout = active.joinToString(",")
+            buildChips()
+            close()
+        }
+        rootLayout.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+        editor = overlay
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        val e = editor
+        if (e != null) { (e.parent as? ViewGroup)?.removeView(e); editor = null; return }
+        @Suppress("DEPRECATION") super.onBackPressed()
     }
 
     // ------------------------------------------------------------------ start / stop / permissions
@@ -372,6 +473,9 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         if (!hasCamera()) { Toast.makeText(this, "Camera permission is required", Toast.LENGTH_LONG).show(); return }
+        updateGeometry()
+        if (selected != null) configurePanel()
+        refreshChips()
         attach()
         if (requestCode == 1) launchService()
     }
@@ -400,8 +504,8 @@ class MainActivity : Activity() {
             else -> s.message.ifEmpty { s.mode.name }
         }
         val sb = StringBuilder()
-        caps?.let { sb.append(it.lens.label.substringBefore(" [")).append(" · ") }
-        sb.append(s.format.ifEmpty { "${prefs.resHeight}p ${prefs.fps} fps" })
+        caps?.let { sb.append(it.lens.label.substringBefore(" [").removePrefix("Rear ").replace(" · multi-cam", "").replaceFirstChar { ch -> ch.uppercase() }).append(" · ") }
+        sb.append("${if (prefs.resHeight >= 2160) "4K" else "${prefs.resHeight}p"} ${prefs.fps}fps")
         if (s.tempC > 0f) sb.append(" · ${"%.0f".format(s.tempC)}°C")
         if (running && s.lastMotionWall > 0) sb.append(" · motion ${(now - s.lastMotionWall) / 1000}s ago")
         if (running && prefs.serverOn) {

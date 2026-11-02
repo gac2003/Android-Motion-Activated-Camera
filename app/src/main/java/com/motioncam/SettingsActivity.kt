@@ -51,6 +51,13 @@ class SettingsActivity : Activity() {
         choice("Codec", listOf("H.264 (most compatible)", "HEVC / H.265 (smaller files)"), if (prefs.hevc) 1 else 0) { prefs.hevc = it == 1 }
         number("Bitrate", "Mbps", 0, 100, prefs.bitrateMbps, offLabel = "auto") { prefs.bitrateMbps = it }
         toggle("Record audio", prefs.audio) { prefs.audio = it }
+        val preOpts = listOf(0, 500, 1000, 2000, 3000)
+        choice("Pre-record (video from before the motion)", listOf("Off", "0.5 s", "1 s", "2 s", "3 s"), preOpts.indexOf(prefs.preRecordMs).coerceAtLeast(0)) {
+            prefs.preRecordMs = preOpts[it]
+        }
+        note("Pre-record keeps the video encoder running while monitoring, so each clip starts before the moment " +
+            "motion was detected. It uses noticeably more power and heat than Off (all lengths cost about the same). " +
+            "With audio on, the microphone stays active while monitoring.")
         choice("Video rotation", listOf("Auto (follow phone)", "0°", "90°", "180°", "270°"), listOf(-1, 0, 90, 180, 270).indexOf(prefs.rotation).coerceAtLeast(0)) {
             prefs.rotation = listOf(-1, 0, 90, 180, 270)[it]
         }

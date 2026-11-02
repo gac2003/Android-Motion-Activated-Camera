@@ -59,6 +59,10 @@ class ProCaps(val lens: Lens, val ctrl: CameraCharacteristics, val lensChars: Ca
         map = ctrl.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
     }
 
+    /** Camera frame timestamps use elapsedRealtime (needed to line audio up with video in pre-record mode). */
+    val realtimeTimestamps: Boolean =
+        ctrl.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) == CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
+
     val canManualFocus get() = minFocusDiopter > 0f
     val canZoom get() = zoomMax > zoomMin + 0.01f
 

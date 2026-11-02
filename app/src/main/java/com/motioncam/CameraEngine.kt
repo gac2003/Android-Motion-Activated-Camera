@@ -144,6 +144,9 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     @Volatile private var hitSizeLimit = false
     private var armed: Armed? = null
     private var recorder: MediaRecorder? = null
+    /** Pre-record mode: continuous encoder + memory buffer instead of a per-clip MediaRecorder. */
+    private var pre: PreRecorder? = null
+    private var preClip: ClipStore.Pending? = null
     private var pending: ClipStore.Pending? = null
     private var recordStartedElapsed = 0L
     private var recordStartedWall = 0L
@@ -236,6 +239,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         monitoring = on
         if (on) {
             ClipStore.deleteOrphans(ctx)
+            pre?.setCapturing(true)
             retryCount = 0
             if (mode == Mode.PREVIEW) {
                 mode = Mode.WATCHING
@@ -247,6 +251,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         } else {
             if (mode == Mode.RECORDING) stopRecording(rearm = false)
             disarm()
+            pre?.setCapturing(false)
             when (mode) {
                 Mode.WATCHING, Mode.PAUSED_STORAGE -> { mode = Mode.PREVIEW; message = "" }
                 Mode.PAUSED_HOT -> if (active) openCamera()
@@ -267,7 +272,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     // ================================================================== camera lifecycle
 
     private fun signature() =
-        "${prefs.camera}|${prefs.resHeight}|${prefs.fps}|${prefs.hevc}|${prefs.bitrateMbps}|${prefs.audio}"
+        "${prefs.camera}|${prefs.resHeight}|${prefs.fps}|${prefs.hevc}|${prefs.bitrateMbps}|${prefs.audio}|${prefs.preRecordMs}"
 
     @SuppressLint("MissingPermission")
     private fun openCamera() {
@@ -285,7 +290,13 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             activeSig = signature()
             effectiveFps = if (c.supportsFps(prefs.fps)) prefs.fps else 30
             recordSize = c.recordSize(prefs.resHeight)
-            persistent = createPersistentSurface()
+            if (prefs.preRecordMs > 0) {
+                pre = try {
+                    PreRecorder(recordSize.width, recordSize.height, effectiveFps, bitrate(), prefs.hevc,
+                        prefs.preRecordMs, audioAllowed(), c.realtimeTimestamps)
+                } catch (e: Exception) { message = "Pre-record unavailable: ${e.message}"; null }
+            }
+            persistent = pre?.surface ?: createPersistentSurface()
             comboIndex = 0
             mgr.openCamera(c.lens.logicalId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
@@ -335,7 +346,14 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         device = null
         try { reader?.close() } catch (_: Exception) {}
         reader = null
-        try { persistent?.release() } catch (_: Exception) {}
+        if (pre != null) {
+            preClip?.let { ClipStore.finish(ctx, it, pre?.stopClip() == true, recordStartedWall) }
+            preClip = null
+            pre?.release()   // also releases its surface
+            pre = null
+        } else {
+            try { persistent?.release() } catch (_: Exception) {}
+        }
         persistent = null
         sessionSt = null
         hwPreview = false
@@ -404,6 +422,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
 
     /** Prepares the next clip's recorder in advance so motion only has to call start(). */
     private fun arm(noAudio: Boolean = false) {
+        if (pre != null) return   // pre-record mode needs no per-clip recorder
         if (armed != null || !monitoring || mode == Mode.PAUSED_STORAGE) return
         if (SystemClock.elapsedRealtime() - armFailedAt < 10_000 && !noAudio) return   // don't hammer a failing encoder
         val ps = persistent ?: return
@@ -453,8 +472,21 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         ClipStore.finish(ctx, a.pending, false, 0)
     }
 
-    private fun startRecording() {
+    private fun startRecording(preRoll: Boolean = true) {
         if (!monitoring || mode != Mode.WATCHING) return
+        val pr = pre
+        if (pr != null) {
+            val p = try { ClipStore.create(ctx) } catch (e: Exception) { message = "Cannot create clip: ${e.message}"; publish(); return }
+            pr.startClip(p.pfd.fileDescriptor, recordRotation(), preRoll)
+            preClip = p
+            recordStartedElapsed = SystemClock.elapsedRealtime()
+            recordStartedWall = System.currentTimeMillis() - if (preRoll) prefs.preRecordMs else 0
+            mode = Mode.RECORDING
+            message = "Recording"
+            pushRepeating()
+            publish()
+            return
+        }
         if (armed == null) arm()
         var a = armed ?: return
         armed = null
@@ -495,6 +527,19 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     }
 
     private fun stopRecording(rearm: Boolean) {
+        val pc = preClip
+        if (pc != null) {
+            preClip = null
+            mode = if (monitoring) Mode.WATCHING else Mode.PREVIEW
+            message = if (monitoring) "Watching for motion" else ""
+            pushRepeating()
+            val ok = pre?.stopClip() == true
+            ClipStore.finish(ctx, pc, ok, recordStartedWall)
+            publish()
+            if (rebuildPending) rebuildSession()
+            maybeCleanup(force = false)
+            return
+        }
         val rec = recorder ?: return
         recorder = null
         mode = if (monitoring) Mode.WATCHING else Mode.PREVIEW
@@ -605,6 +650,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             message = if (monitoring) "Watching for motion" else ""
         }
         pushRepeating()
+        pre?.setCapturing(monitoring)
         if (monitoring && mode == Mode.WATCHING) arm()
         publish()
     }
@@ -627,7 +673,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         }
     }
 
-    private fun lowPowerIdle() = monitoring && mode != Mode.RECORDING && sessionSt == null && FrameHub.overlaySink == null && prefs.lowPowerIdle
+    private fun lowPowerIdle() = pre == null && monitoring && mode != Mode.RECORDING && sessionSt == null && FrameHub.overlaySink == null && prefs.lowPowerIdle
 
     private fun pushRepeating() {
         val s = session ?: return
@@ -638,7 +684,8 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             val b = dev.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
             b.addTarget(rd.surface)
             sessionSt?.let { b.addTarget(surfaceFor(it)) }
-            if (mode == Mode.RECORDING) persistent?.let { b.addTarget(it) }
+            // pre-record mode feeds the encoder the whole time we are monitoring
+            if (mode == Mode.RECORDING || (pre != null && monitoring)) persistent?.let { b.addTarget(it) }
             b.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
 
             val low = lowPowerIdle()
@@ -835,6 +882,8 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             return
         }
 
+        if (pre?.failed == true) { restartCamera("Encoder error — restarting"); return }
+
         // stall watchdog
         if ((mode == Mode.WATCHING || mode == Mode.RECORDING || mode == Mode.PREVIEW) && now - lastFrameAt > 10_000) {
             restartCamera("Camera stalled — restarting")
@@ -846,11 +895,11 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             val clipLen = now - recordStartedElapsed
             if (sinceMotion >= prefs.stopDelaySec * 1000L) {
                 stopRecording(rearm = true)
-            } else if (clipLen >= prefs.maxClipMin * 60_000L) {
+            } else if (clipLen >= prefs.maxClipMin * 60_000L || (pre?.bytesWritten ?: 0L) > 3_800_000_000L) {
                 // split long events: stop and immediately continue in a new file
                 stopRecording(rearm = false)
                 arm()
-                startRecording()
+                startRecording(preRoll = false)
             }
         } else if (mode == Mode.WATCHING) {
             val a = armed

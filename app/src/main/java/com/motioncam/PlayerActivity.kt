@@ -207,7 +207,7 @@ class PlayerActivity : Activity() {
         speedBtn = Ui.label(this, "1x", 16f).apply {
             gravity = Gravity.CENTER
             minWidth = Ui.dp(this@PlayerActivity, 48)
-            setOnClickListener { cycleSpeed() }
+            setOnClickListener { showSpeedMenu(this) }
         }
         bar.addView(speedBtn)
         muteBtn = iconButton(this, IconDrawable.Kind.VOLUME, 48, 12) { toggleMute() }
@@ -480,11 +480,26 @@ class PlayerActivity : Activity() {
     private fun prev() { if (curPos() > 3000) startAt(cur.index, 0) else startAt(maxOf(0, cur.index - 1), 0) }
     private fun next() { if (cur.index + 1 < clips.size) startAt(cur.index + 1, 0) }
 
-    private fun cycleSpeed() {
-        val speeds = listOf(1f, 2f, 4f, 8f)
-        speed = speeds[(speeds.indexOf(speed) + 1) % speeds.size]
-        speedBtn.text = "${speed.toInt()}x"
-        cur.mp?.let { if (playing && cur.prepared) applySpeed(it) }
+    private fun speedLabel(v: Float) = (if (v == v.toInt().toFloat()) "${v.toInt()}" else "$v".trimEnd('0')) + "x"
+
+    /** Playback speed dropdown (0.25x – 8x). */
+    private fun showSpeedMenu(anchor: View) {
+        val speeds = listOf(0.25f, 0.5f, 0.75f, 1f, 2f, 4f, 8f)
+        val pm = PopupMenu(this, anchor)
+        speeds.forEachIndexed { i, v ->
+            pm.menu.add(0, i, i, speedLabel(v) + if (v == 1f) "  (normal)" else "").apply {
+                isCheckable = true
+                isChecked = v == speed
+            }
+        }
+        pm.menu.setGroupCheckable(0, true, true)
+        pm.setOnMenuItemClickListener { item ->
+            speed = speeds[item.itemId]
+            speedBtn.text = speedLabel(speed)
+            cur.mp?.let { if (playing && cur.prepared) applySpeed(it) }
+            true
+        }
+        pm.show()
     }
 
     private fun toggleMute() {

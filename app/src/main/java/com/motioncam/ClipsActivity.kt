@@ -35,30 +35,23 @@ class ClipsActivity : Activity() {
     private val thumbs = object : LruCache<Long, Bitmap>((Runtime.getRuntime().maxMemory() / 8).toInt()) {
         override fun sizeOf(key: Long, value: Bitmap) = value.byteCount
     }
-    private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    private lateinit var prefs: Prefs
+    private var timeFmt = SimpleDateFormat("h:mm:ss a", Locale.getDefault())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        prefs = Prefs(this)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
-        val top = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            val p = Ui.dp(this@ClipsActivity, 12)
-            setPadding(p, p, p, p)
-        }
-        val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        titles.addView(Ui.label(this, "Clips", 20f))
-        summary = Ui.label(this, "", 12f, Ui.GREY)
-        titles.addView(summary)
-        top.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
-        top.addView(Ui.chip(this, "▶ Timeline").apply {
+        val playAll = Ui.chip(this, "▶ Timeline").apply {
             setOnClickListener {
                 // newest day, from its first clip
                 val h = rows.firstOrNull { it is Row.Header } as Row.Header?
                 h?.clips?.minByOrNull { it.startMs }?.let { play(it) }
             }
-        })
-        root.addView(top)
+        }
+        root.addView(topBar(this, "Clips", playAll))
+        summary = Ui.label(this, "", 12f, Ui.GREY).apply { setPadding(Ui.dp(this@ClipsActivity, 52), 0, 0, Ui.dp(this@ClipsActivity, 6)) }
+        root.addView(summary)
         list = ListView(this).apply {
             divider = null
             setBackgroundColor(Ui.BG)
@@ -70,6 +63,7 @@ class ClipsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        timeFmt = Fmt.time(prefs)
         reload()
     }
 

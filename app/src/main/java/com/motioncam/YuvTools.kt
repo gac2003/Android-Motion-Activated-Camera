@@ -12,23 +12,49 @@ class Frame(
 )
 
 object YuvTools {
-    private fun copy(buf: java.nio.ByteBuffer): ByteArray {
+    private fun copy(buf: java.nio.ByteBuffer, reuse: ByteArray?): ByteArray {
         val d = buf.duplicate()
         d.rewind()
-        val a = ByteArray(d.remaining())
+        val n = d.remaining()
+        val a = if (reuse != null && reuse.size == n) reuse else ByteArray(n)
         d.get(a)
         return a
     }
 
-    fun read(img: Image, color: Boolean): Frame {
+    /** Copies the planes out of [img], reusing the arrays of [reuse] when sizes match (no garbage per frame). */
+    fun read(img: Image, color: Boolean, reuse: Frame? = null): Frame {
         val p = img.planes
         return Frame(
             img.width, img.height,
-            copy(p[0].buffer), p[0].rowStride,
-            if (color) copy(p[1].buffer) else null,
-            if (color) copy(p[2].buffer) else null,
+            copy(p[0].buffer, reuse?.y), p[0].rowStride,
+            if (color) copy(p[1].buffer, reuse?.u) else reuse?.u,
+            if (color) copy(p[2].buffer, reuse?.v) else reuse?.v,
             p[1].rowStride, p[1].pixelStride,
         )
+    }
+
+    /** Centre-weighted exposure meter: EV difference between the frame and mid-grey (like a camera's meter). */
+    fun meterEv(f: Frame): Float {
+        var sum = 0.0
+        var wsum = 0.0
+        val step = maxOf(4, f.w / 80)
+        var y = 0
+        while (y < f.h) {
+            val row = y * f.yRow
+            val cy = Math.abs(y - f.h / 2) < f.h / 4
+            var x = 0
+            while (x < f.w) {
+                val w = if (cy && Math.abs(x - f.w / 2) < f.w / 4) 3.0 else 1.0
+                val v = (f.y[row + x].toInt() and 0xFF) / 255.0
+                sum += Math.pow(v, 2.2) * w
+                wsum += w
+                x += step
+            }
+            y += step
+        }
+        val lin = sum / wsum
+        val mid = Math.pow(118 / 255.0, 2.2)
+        return (Math.log(maxOf(lin, 1e-5) / mid) / Math.log(2.0)).toFloat().coerceIn(-5f, 5f)
     }
 
     private const val GREEN = 0xFF20FF40.toInt()

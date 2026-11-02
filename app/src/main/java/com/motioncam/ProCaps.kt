@@ -45,8 +45,11 @@ class ProCaps(val lens: Lens, val ctrl: CameraCharacteristics, val lensChars: Ca
         expMaxNs = exp?.upper ?: 33_000_000L
         val caps = ctrl.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
         manualSensor = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) && iso != null && exp != null
-        minFocusDiopter = lensChars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
-            ?: ctrl.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+        // some multi-camera phones report 0 on one of the two descriptions: take whichever has a value
+        minFocusDiopter = maxOf(
+            lensChars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f,
+            ctrl.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f,
+        )
         val z = ctrl.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
         zoomMin = z?.lower ?: 1f
         zoomMax = minOf(z?.upper ?: 1f, 10f)
@@ -82,8 +85,35 @@ class ProCaps(val lens: Lens, val ctrl: CameraCharacteristics, val lensChars: Ca
 
     fun supportsFps(fps: Int) = fpsRanges.any { it.upper == fps }
 
-    /** Approximate colour temperature from auto-white-balance gains (DNG-style calibration). */
-    fun estimateKelvin(g: RggbChannelVector): Int? {
+    /**
+     * Approximate colour temperature of the current auto white balance. Uses the sensor's colour calibration
+     * when the phone exposes it, otherwise a typical-sensor curve of the red/blue gain ratio.
+     */
+    fun estimateKelvin(g: RggbChannelVector): Int? = calibratedKelvin(g) ?: gainCurveKelvin(g)
+
+    private fun gainCurveKelvin(g: RggbChannelVector): Int? {
+        if (g.red <= 0f || g.blue <= 0f) return null
+        val rb = Math.log((g.blue / g.red).toDouble())
+        // (ln(B/R gain), kelvin) for a typical phone sensor
+        val pts = listOf(Math.log(2.3) to 2400.0, Math.log(2.08) to 2850.0, Math.log(1.25) to 4000.0,
+            Math.log(0.82) to 5200.0, Math.log(0.66) to 6500.0, Math.log(0.57) to 7500.0, Math.log(0.45) to 9500.0)
+        val k = when {
+            rb >= pts.first().first -> pts.first().second
+            rb <= pts.last().first -> pts.last().second
+            else -> {
+                var r = 5200.0
+                for (i in 0 until pts.size - 1) {
+                    val (x0, k0) = pts[i]
+                    val (x1, k1) = pts[i + 1]
+                    if (rb <= x0 && rb >= x1) { r = k0 + (k1 - k0) * (rb - x0) / (x1 - x0); break }
+                }
+                r
+            }
+        }
+        return (k / 50).toInt() * 50
+    }
+
+    private fun calibratedKelvin(g: RggbChannelVector): Int? {
         val cm1 = ctrl.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1) ?: return null
         val cm2 = ctrl.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM2) ?: cm1
         val t1 = illuminantK(ctrl.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1)) ?: 2856.0

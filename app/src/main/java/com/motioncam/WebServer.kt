@@ -156,7 +156,7 @@ class WebServer(private val ctx: Context, private val prefs: Prefs) {
     }
 
     private fun clipsHtml(): String {
-        val df = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+        val df = SimpleDateFormat("yyyy-MM-dd  " + Fmt.time(prefs).toPattern(), Locale.US)
         val sb = StringBuilder(PAGE_HEAD)
         sb.append("<a href='/'>&larr; Live</a><h2>Recorded clips</h2><table>")
         for (c in ClipStore.list(ctx)) {

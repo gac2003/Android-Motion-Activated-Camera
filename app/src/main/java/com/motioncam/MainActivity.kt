@@ -42,6 +42,9 @@ class MainActivity : Activity() {
     private lateinit var seek: SeekBar
     private lateinit var autoBtn: TextView
     private val chips = LinkedHashMap<String, Chip>()
+    private lateinit var chipRow: LinearLayout
+    private var addrCache: List<Pair<String, String>> = emptyList()
+    private var addrCacheAt = 0L
     private var selected: String? = null
     private var updating = false
     private var touching = false
@@ -254,19 +257,12 @@ class MainActivity : Activity() {
         bottom.addView(panel)
 
         val strip = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
-        val row = LinearLayout(this).apply {
+        chipRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(Ui.dp(this@MainActivity, 8), 0, Ui.dp(this@MainActivity, 8), 0)
         }
-        for (name in listOf("LENS", "FORMAT", "EV", "ISO", "SPEED", "FOCUS", "WB", "ZOOM", "ZONES")) {
-            val c = Chip(this, name)
-            c.view.setOnClickListener { onChip(name) }
-            chips[name] = c
-            row.addView(c.view, LinearLayout.LayoutParams(-2, -2).apply {
-                setMargins(Ui.dp(this@MainActivity, 3), 0, Ui.dp(this@MainActivity, 3), 0)
-            })
-        }
-        strip.addView(row)
+        buildChips()
+        strip.addView(chipRow)
         bottom.addView(strip)
 
         startBtn = Ui.label(this, "START MONITORING", 16f).apply {
@@ -287,6 +283,76 @@ class MainActivity : Activity() {
         })
         autoBtn.setOnClickListener { onAuto() }
         setContentView(root)
+    }
+
+    private fun visibleChips(): List<String> =
+        prefs.chipLayout.split(",").map { it.trim() }.filter { it in Prefs.ALL_CHIPS }.distinct()
+            .ifEmpty { Prefs.ALL_CHIPS }
+
+    private fun buildChips() {
+        chipRow.removeAllViews()
+        chips.clear()
+        for (name in visibleChips()) {
+            val c = Chip(this, name)
+            c.view.setOnClickListener { onChip(name) }
+            c.view.setOnLongClickListener { customizeChips(); true }
+            chips[name] = c
+            chipRow.addView(c.view, LinearLayout.LayoutParams(-2, -2).apply {
+                setMargins(Ui.dp(this@MainActivity, 3), 0, Ui.dp(this@MainActivity, 3), 0)
+            })
+        }
+        if (selected != null && selected !in chips) {
+            selected = null
+            panel.visibility = View.GONE
+            updateFlags()
+        }
+        refreshChips()
+    }
+
+    /** Long-press any control button: choose which buttons are shown and their order (like Samsung's camera). */
+    private fun customizeChips() {
+        val visible = visibleChips()
+        val order = (visible + Prefs.ALL_CHIPS.filter { it !in visible }).toMutableList()
+        val shown = order.associateWith { it in visible }.toMutableMap()
+        val names = mapOf("LENS" to "Lens", "FORMAT" to "Resolution / fps", "EV" to "Exposure value / meter", "ISO" to "ISO",
+            "SPEED" to "Shutter speed", "FOCUS" to "Focus", "WB" to "White balance", "ZOOM" to "Zoom", "ZONES" to "Detection zones")
+        val listBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = Ui.dp(this@MainActivity, 12)
+            setPadding(p, p / 2, p, 0)
+        }
+        fun rebuild() {
+            listBox.removeAllViews()
+            order.forEachIndexed { i, key ->
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                val cb = CheckBox(this).apply {
+                    text = names[key] ?: key
+                    isChecked = shown[key] == true
+                    setOnCheckedChangeListener { _, b -> shown[key] = b }
+                }
+                row.addView(cb, LinearLayout.LayoutParams(0, -2, 1f))
+                fun arrow(t: String, enabled: Boolean, move: Int) = Button(this).apply {
+                    text = t
+                    isEnabled = enabled
+                    minWidth = 0; minimumWidth = Ui.dp(this@MainActivity, 44)
+                    setOnClickListener { order.removeAt(i); order.add(i + move, key); rebuild() }
+                }
+                row.addView(arrow("▲", i > 0, -1))
+                row.addView(arrow("▼", i < order.size - 1, 1))
+                listBox.addView(row)
+            }
+        }
+        rebuild()
+        AlertDialog.Builder(this).setTitle("Customise control buttons")
+            .setView(ScrollView(this).apply { addView(listBox) })
+            .setPositiveButton("Save") { _, _ ->
+                val v = order.filter { shown[it] == true }
+                if (v.isEmpty()) { Toast.makeText(this, "Keep at least one button", Toast.LENGTH_SHORT).show(); return@setPositiveButton }
+                prefs.chipLayout = v.joinToString(",")
+                buildChips()
+            }
+            .setNeutralButton("Default") { _, _ -> prefs.chipLayout = Prefs.ALL_CHIPS.joinToString(","); buildChips() }
+            .setNegativeButton("Cancel", null).show()
     }
 
     // ------------------------------------------------------------------ start / stop / permissions
@@ -334,13 +400,13 @@ class MainActivity : Activity() {
             else -> s.message.ifEmpty { s.mode.name }
         }
         val sb = StringBuilder()
-        caps?.let { sb.append(it.lens.label).append(" · ") }
+        caps?.let { sb.append(it.lens.label.substringBefore(" [")).append(" · ") }
         sb.append(s.format.ifEmpty { "${prefs.resHeight}p ${prefs.fps} fps" })
-        if (s.batteryPct >= 0) sb.append("\nBattery ${s.batteryPct}%${if (s.charging) " ⚡" else ""} · ${"%.0f".format(s.tempC)}°C")
-        if (running && s.lastMotionWall > 0) sb.append(" · last motion ${(now - s.lastMotionWall) / 1000}s ago")
+        if (s.tempC > 0f) sb.append(" · ${"%.0f".format(s.tempC)}°C")
+        if (running && s.lastMotionWall > 0) sb.append(" · motion ${(now - s.lastMotionWall) / 1000}s ago")
         if (running && prefs.serverOn) {
-            val addrs = WebServer.localAddresses()
-            if (addrs.isNotEmpty()) sb.append("\nRemote: ").append(addrs.joinToString("  ") { "http://${it.second}:${prefs.port}" })
+            if (now - addrCacheAt > 10_000) { addrCacheAt = now; addrCache = WebServer.localAddresses() }
+            if (addrCache.isNotEmpty()) sb.append("\nRemote: ").append(addrCache.joinToString("  ") { "http://${it.second}:${prefs.port}" })
         }
         if (s.message.isNotEmpty() && s.mode != Mode.RECORDING && s.mode != Mode.WATCHING && statusTv.text != s.message) sb.append("\n").append(s.message)
         infoTv.text = sb.toString()
@@ -358,7 +424,8 @@ class MainActivity : Activity() {
         fun set(n: String, v: String, auto: Boolean, enabled: Boolean = true) = chips[n]?.set(v, auto, n == selected, enabled)
         set("LENS", c?.lens?.label?.substringBefore(" [")?.replace("Rear ", "")?.replace(" · multi-cam", "") ?: "—", false)
         set("FORMAT", "${if (prefs.resHeight >= 2160) "4K" else "${prefs.resHeight}p"}${prefs.fps}", false)
-        set("EV", evText(c, prefs.evIndex), false, enabled = prefs.exposureAuto)
+        if (prefs.exposureAuto) set("EV", evText(c, prefs.evIndex), false)
+        else set("EV", meterText(if (live) e!!.liveMeterEv else Float.NaN), false)
         if (prefs.exposureAuto) {
             set("ISO", if (live && e!!.liveIso > 0) "${e.liveIso}" else "AUTO", true)
             set("SPEED", if (live && e!!.liveShutterNs > 0) shutterText(e.liveShutterNs) else "AUTO", true)
@@ -413,13 +480,13 @@ class MainActivity : Activity() {
             }
             "ISO", "SPEED" -> {
                 seek.max = 1000
-                setAutoBtn("AUTO", prefs.exposureAuto, c.manualSensor)
+                setAutoBtn("AUTO", prefs.exposureAuto || !c.manualSensor)
                 seek.isEnabled = c.manualSensor
                 if (!prefs.exposureAuto) seek.progress = if (selected == "ISO") isoProgress(c, prefs.iso) else shutterProgress(c, prefs.shutterNs)
             }
             "FOCUS" -> {
                 seek.max = 1000
-                setAutoBtn("AUTO", prefs.focusAuto, c.canManualFocus)
+                setAutoBtn("AUTO", prefs.focusAuto || !c.canManualFocus)
                 seek.isEnabled = c.canManualFocus
                 if (!prefs.focusAuto) seek.progress = (prefs.focusPos * 1000).roundToInt()
             }
@@ -454,7 +521,11 @@ class MainActivity : Activity() {
         val text: String
         var follow = -1
         when (sel) {
-            "EV" -> text = if (prefs.exposureAuto) "EV " + evText(c, prefs.evIndex) else "EV: needs AUTO ISO/SPEED"
+            "EV" -> if (prefs.exposureAuto) text = "EV " + evText(c, prefs.evIndex) else {
+                val mv = if (live) e!!.liveMeterEv else Float.NaN
+                text = "Meter " + meterText(mv) + " EV"
+                if (!mv.isNaN() && c.evStep > 0f) follow = ((mv / c.evStep).roundToInt().coerceIn(c.evMin, c.evMax) - c.evMin)
+            }
             "ISO" -> if (prefs.exposureAuto) {
                 auto = true
                 val v = if (live) e!!.liveIso else 0
@@ -491,8 +562,12 @@ class MainActivity : Activity() {
     private fun onAuto() {
         val c = caps ?: return
         when (selected) {
-            "ISO", "SPEED" -> if (prefs.exposureAuto) seedManualExposure(c) else prefs.exposureAuto = true
-            "FOCUS" -> if (prefs.focusAuto) seedManualFocus(c) else prefs.focusAuto = true
+            "ISO", "SPEED" -> if (!c.manualSensor) {
+                Toast.makeText(this, "This lens does not allow manual ISO / shutter speed", Toast.LENGTH_SHORT).show(); return
+            } else if (prefs.exposureAuto) seedManualExposure(c) else prefs.exposureAuto = true
+            "FOCUS" -> if (!c.canManualFocus) {
+                Toast.makeText(this, "This lens is fixed-focus (no manual focus)", Toast.LENGTH_SHORT).show(); return
+            } else if (prefs.focusAuto) seedManualFocus(c) else prefs.focusAuto = true
             "WB" -> if (prefs.wbAuto) seedManualWb() else prefs.wbAuto = true
             "ZOOM" -> prefs.zoom = 1f.coerceIn(c.zoomMin, c.zoomMax)
             "ZONES" -> prefs.zones = ""
@@ -550,6 +625,7 @@ class MainActivity : Activity() {
     private fun askExact() {
         val c = caps ?: return
         val sel = selected ?: return
+        if (sel == "EV" && !prefs.exposureAuto) return   // the meter is read-only in manual exposure
         val (title, hint, cur) = when (sel) {
             "EV" -> Triple("Exposure compensation (EV)", "e.g. -0.7", "%.1f".format(prefs.evIndex * c.evStep))
             "ISO" -> Triple("ISO (${c.isoMin}–${c.isoMax})", "e.g. 400", "${if (prefs.exposureAuto) engine?.liveIso ?: prefs.iso else prefs.iso}")
@@ -626,6 +702,10 @@ class MainActivity : Activity() {
         val (lo, hi) = c.shutterRange(fpsNow(c))
         return progressToLog(p, lo.toDouble(), hi.toDouble()).toLong()
     }
+
+    /** Light-meter reading in manual exposure: how far the picture is from a normal exposure. */
+    private fun meterText(v: Float): String =
+        if (v.isNaN()) "—" else (if (v > 0.05f) "+" else "") + "%.1f".format(v)
 
     private fun evText(c: ProCaps?, idx: Int): String {
         val v = idx * (c?.evStep ?: 0.1667f)

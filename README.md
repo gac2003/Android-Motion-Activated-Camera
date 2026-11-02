@@ -36,8 +36,12 @@ With the Android SDK installed (`ANDROID_HOME` set, platform 34): `./gradlew ass
 4. Settings → *Exempt from battery optimisation*. Set *Video rotation* explicitly if the phone is on a fixed stand.
 
 Clips are saved to **Movies/MotionCam** (visible in Gallery and over USB file transfer).
-The **Clips** screen shows thumbnails by day; tapping a clip opens the **timeline player**, which plays every
-following clip back to back like one continuous video, with a scrubbable timeline (15m/1h/6h/24h) and 1–8x speed.
+The **Clips** screen shows thumbnails by day; tapping a clip opens the **player**, which plays every following clip
+back to back like one continuous video. Below the video is a Samsung-style filmstrip: the playing clip is expanded
+into its frames (tap it to collapse/expand), pinch to resize, drag to scrub (stops at the clip's end while expanded).
+Tap the video to pause/play, double-tap left/right to skip 5 s; the ⋮ menu has share / open with / delete.
+
+Long-press any control button on the main screen to choose which buttons are shown and their order.
 
 ## Motion detection tips (peephole / windows)
 * *Light filter → Strong* ignores reflections, glare and light sweeping across the scene; *Normal* ignores

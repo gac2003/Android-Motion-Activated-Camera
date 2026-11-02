@@ -21,21 +21,27 @@ class SettingsActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
-        val scroll = ScrollView(this).apply { setBackgroundColor(Ui.BG) }
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
+        root.addView(topBar(this, "Settings"))
+        val scroll = ScrollView(this)
         box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@SettingsActivity, 16)
-            setPadding(p, p, p, p * 2)
+            setPadding(p, 0, p, p * 2)
         }
         scroll.addView(box)
-        setContentView(scroll)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
 
-        title("Preview")
+        title("Preview & display", Prefs.PREVIEW_KEYS)
         toggle("Show live camera preview", prefs.previewOn) { prefs.previewOn = it }
         toggle("Focus peaking (green edges) while adjusting FOCUS", prefs.peaking) { prefs.peaking = it }
-        toggle("Low-power mode while monitoring with the screen off (15 fps between clips)", prefs.lowPowerIdle) { prefs.lowPowerIdle = it }
+        toggle("Low-power standby while monitoring with the screen off", prefs.lowPowerIdle) { prefs.lowPowerIdle = it }
+        note("Between clips the camera only watches for motion at a reduced frame rate. As soon as motion starts a clip, " +
+            "it switches to your recording frame rate, so clips are always recorded at the fps chosen below.")
+        toggle("24-hour clock (off = AM/PM)", prefs.use24h) { prefs.use24h = it }
 
-        title("Recording")
+        title("Recording", Prefs.RECORDING_KEYS)
         choice("Resolution", listOf("720p", "1080p (FHD)", "4K"), listOf(720, 1080, 2160).indexOf(prefs.resHeight).coerceAtLeast(1)) {
             prefs.resHeight = listOf(720, 1080, 2160)[it]
         }
@@ -50,7 +56,7 @@ class SettingsActivity : Activity() {
         }
         note("For a phone fixed on a stand, set the rotation explicitly so clips are always upright, even with the screen locked.")
 
-        title("Motion detection")
+        title("Motion detection", Prefs.MOTION_KEYS)
         number("Sensitivity (1 = least, 10 = most)", "", 1, 10, prefs.sensitivity) { prefs.sensitivity = it }
         choice("Light filter", listOf("Off (any brightness change)", "Normal — ignore lights turning on/off, exposure changes", "Strong — also ignore glare and reflections (peepholes, windows)"), prefs.lightFilter) {
             prefs.lightFilter = it
@@ -62,12 +68,12 @@ class SettingsActivity : Activity() {
         note("Draw detection zones with the ZONES button on the main screen: red = moving, dark = ignored. " +
             "For a peephole, mask everything outside the lens circle and pick the Strong light filter.")
 
-        title("Storage")
+        title("Storage", Prefs.STORAGE_KEYS)
         number("Delete clips older than", "days", 0, 365, prefs.keepDays, offLabel = "never") { prefs.keepDays = it }
         number("Storage limit for clips", "GB", 0, 500, prefs.maxStorageGb, offLabel = "no limit") { prefs.maxStorageGb = it }
         toggle("When the phone is nearly full, delete the oldest clips (otherwise recording pauses)", prefs.autoDeleteLow) { prefs.autoDeleteLow = it }
 
-        title("Protection")
+        title("Protection", Prefs.PROTECTION_KEYS)
         number("Stop monitoring when unplugged battery falls to", "%", 0, 50, prefs.minBattery, offLabel = "off") { prefs.minBattery = it }
         number("Pause the camera when battery temperature reaches", "°C", 0, 70, prefs.maxTempC, offLabel = "off", minActive = 35) { prefs.maxTempC = it }
         button("Exempt from battery optimisation (recommended)") {
@@ -81,7 +87,7 @@ class SettingsActivity : Activity() {
             }
         }
 
-        title("Remote viewing")
+        title("Remote viewing", Prefs.REMOTE_KEYS)
         toggle("Enable web viewer while monitoring", prefs.serverOn) { prefs.serverOn = it }
         number("Port", "", 1024, 65535, prefs.port, slider = false) { prefs.port = it }
         text("Password (user name: admin, min. 4 characters)", prefs.password) { if (it.length >= 4) prefs.password = it }
@@ -96,6 +102,27 @@ class SettingsActivity : Activity() {
                 "• Bluetooth: pair, enable Bluetooth tethering (low frame rate).\n" +
                 "• Or join the phone's own hotspot from your laptop."
         )
+
+        title("Reset", null)
+        box.addView(Ui.chip(this, "Reset ALL settings to default").apply {
+            setTextColor(Ui.RED)
+            setOnClickListener {
+                confirmReset("Reset all settings?", "Every setting, camera control, detection zone and button layout goes back to " +
+                    "its default. Recorded clips and the web viewer password are kept.", Prefs.ALL_KEYS)
+            }
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
+    }
+
+    private fun confirmReset(title: String, msg: String, keys: List<String>) {
+        android.app.AlertDialog.Builder(this).setTitle(title).setMessage(msg)
+            .setPositiveButton("Reset") { _, _ ->
+                prefs.reset(keys)
+                EngineHost.peek()?.applyConfig()
+                EngineHost.peek()?.applyPro()
+                Toast.makeText(this, "Reset to defaults", Toast.LENGTH_SHORT).show()
+                recreate()
+            }
+            .setNegativeButton("Cancel", null).show()
     }
 
     override fun onPause() {
@@ -107,8 +134,21 @@ class SettingsActivity : Activity() {
 
     // ------------------------------------------------------------------ row builders
 
-    private fun title(s: String) {
-        box.addView(Ui.label(this, s.uppercase(), 13f, Ui.ACCENT).apply { setPadding(0, Ui.dp(this@SettingsActivity, 22), 0, Ui.dp(this@SettingsActivity, 4)) })
+    /** Section heading; with [keys] it gets a "Reset" button for just that section. */
+    private fun title(s: String, keys: List<String>?) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, Ui.dp(this@SettingsActivity, 22), 0, Ui.dp(this@SettingsActivity, 4))
+        }
+        row.addView(Ui.label(this, s.uppercase(), 13f, Ui.ACCENT), LinearLayout.LayoutParams(0, -2, 1f))
+        if (keys != null) {
+            row.addView(Ui.label(this, "Reset", 12f, Ui.GREY).apply {
+                setPadding(Ui.dp(this@SettingsActivity, 12), Ui.dp(this@SettingsActivity, 4), 0, Ui.dp(this@SettingsActivity, 4))
+                setOnClickListener { confirmReset("Reset \"$s\"?", "Settings in this section go back to their defaults.", keys) }
+            })
+        }
+        box.addView(row)
     }
 
     private fun note(s: String) {

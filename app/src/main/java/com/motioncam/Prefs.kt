@@ -8,6 +8,22 @@ class Prefs(ctx: Context) {
     private val sp: SharedPreferences =
         ctx.applicationContext.getSharedPreferences("motioncam", Context.MODE_PRIVATE)
 
+    init { migrate() }
+
+    /** Keeps the user's chosen behaviour when the meaning of a stored value changes between versions. */
+    private fun migrate() {
+        val v = sp.getInt("prefsVersion", 1)
+        if (v >= 2) return
+        val e = sp.edit()
+        if (sp.contains("sensitivity")) {
+            // v1 threshold: 0.05 + (10-s)*0.024 ; v2: 0.07 + (10-s)*0.03  -> same threshold
+            val old = sp.getInt("sensitivity", 5)
+            val thr = 0.05f + (10 - old) * 0.024f
+            e.putInt("sensitivity", Math.round(10 - (thr - 0.07f) / 0.03f).coerceIn(1, 10))
+        }
+        e.putInt("prefsVersion", 2).apply()
+    }
+
     private fun i(k: String, d: Int) = sp.getInt(k, d)
     private fun f(k: String, d: Float) = sp.getFloat(k, d)
     private fun b(k: String, d: Boolean) = sp.getBoolean(k, d)
@@ -23,6 +39,10 @@ class Prefs(ctx: Context) {
     var peaking: Boolean get() = b("peaking", true); set(v) = put("peaking", v)
     /** Drop to a lower camera frame rate while monitoring with nobody looking at the screen. */
     var lowPowerIdle: Boolean get() = b("lowPowerIdle", true); set(v) = put("lowPowerIdle", v)
+    /** false = 12-hour clock with AM/PM (default). */
+    var use24h: Boolean get() = b("use24h", false); set(v) = put("use24h", v)
+    /** Visible Pro-mode buttons in order, comma separated. */
+    var chipLayout: String get() = s("chipLayout", ALL_CHIPS.joinToString(",")); set(v) = put("chipLayout", v)
 
     // ---- camera / recording ----
     /** "<logicalId>" or "<logicalId>:<physicalId>". Empty = first rear camera. */
@@ -32,7 +52,7 @@ class Prefs(ctx: Context) {
     var hevc: Boolean get() = b("hevc", false); set(v) = put("hevc", v)
     /** 0 = automatic. */
     var bitrateMbps: Int get() = i("bitrateMbps", 0); set(v) = put("bitrateMbps", v)
-    var audio: Boolean get() = b("audio", false); set(v) = put("audio", v)
+    var audio: Boolean get() = b("audio", true); set(v) = put("audio", v)
     /** -1 = follow device orientation, otherwise 0/90/180/270. */
     var rotation: Int get() = i("rotation", -1); set(v) = put("rotation", v)
 
@@ -52,11 +72,11 @@ class Prefs(ctx: Context) {
 
     // ---- motion ----
     /** 1 (least) .. 10 (most sensitive). */
-    var sensitivity: Int get() = i("sensitivity", 4); set(v) = put("sensitivity", v)
+    var sensitivity: Int get() = i("sensitivity", 5); set(v) = put("sensitivity", v)
     /** 0 = off, 1 = normal (ignore brightness shifts), 2 = strong (also ignore glare/reflections). */
-    var lightFilter: Int get() = i("lightFilter", 1); set(v) = put("lightFilter", v)
+    var lightFilter: Int get() = i("lightFilter", 2); set(v) = put("lightFilter", v)
     /** Minimum size of one connected moving area, percent of the frame. */
-    var minAreaPct: Float get() = f("minAreaPct", 1.0f); set(v) = put("minAreaPct", v)
+    var minAreaPct: Float get() = f("minAreaPct", 5.0f); set(v) = put("minAreaPct", v)
     /** Motion must persist this long before a clip starts (filters flashes). */
     var minMotionMs: Int get() = i("minMotionMs", 250); set(v) = put("minMotionMs", v)
     var stopDelaySec: Int get() = i("stopDelaySec", 30); set(v) = put("stopDelaySec", v)
@@ -77,4 +97,26 @@ class Prefs(ctx: Context) {
     var streamHd: Boolean get() = b("streamHd", false); set(v) = put("streamHd", v)
     var port: Int get() = i("port", 8080); set(v) = put("port", v)
     var password: String get() = s("password", ""); set(v) = put("password", v)
+
+    // ---- reset ----
+    fun reset(keys: List<String>) {
+        val e = sp.edit()
+        for (k in keys) e.remove(k)
+        e.apply()
+    }
+
+    companion object {
+        val ALL_CHIPS = listOf("LENS", "FORMAT", "EV", "ISO", "SPEED", "FOCUS", "WB", "ZOOM", "ZONES")
+
+        val PREVIEW_KEYS = listOf("previewOn", "peaking", "lowPowerIdle", "use24h")
+        val RECORDING_KEYS = listOf("resHeight", "fps", "hevc", "bitrateMbps", "audio", "rotation")
+        val MOTION_KEYS = listOf("sensitivity", "lightFilter", "minAreaPct", "minMotionMs", "stopDelaySec", "maxClipMin", "zones")
+        val STORAGE_KEYS = listOf("maxStorageGb", "keepDays", "autoDeleteLow")
+        val PROTECTION_KEYS = listOf("minBattery", "maxTempC")
+        val REMOTE_KEYS = listOf("serverOn", "streamHd", "port")
+        val CAMERA_KEYS = listOf("camera", "exposureAuto", "evIndex", "iso", "shutterNs", "focusAuto", "focusPos",
+            "wbAuto", "wbKelvin", "zoom", "chipLayout")
+        /** Everything except the web password (so you are not locked out of the viewer). */
+        val ALL_KEYS = PREVIEW_KEYS + RECORDING_KEYS + MOTION_KEYS + STORAGE_KEYS + PROTECTION_KEYS + REMOTE_KEYS + CAMERA_KEYS
+    }
 }

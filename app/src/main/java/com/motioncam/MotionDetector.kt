@@ -63,8 +63,9 @@ class MotionDetector {
         }
         val global = if (lightFilter >= 1 && cnt > 0) median(tmp, cnt) else 0f
 
-        val thr = 0.05f + (10 - s) * 0.024f          // s=10: 5 %, s=5: 17 %, s=1: 27 % brightness change
-        val patThr = 0.05f + (10 - s) * 0.012f
+        // s=10: 7 %, s=5: 22 %, s=1: 34 % brightness change (default tuned for people/animals)
+        val thr = 0.07f + (10 - s) * 0.03f
+        val patThr = 0.06f + (10 - s) * 0.012f
         for (i in 0 until N) {
             val c = (zones == null || zones[i]) && abs(rel[i] - global) > thr
             changed[i] = c
@@ -101,7 +102,7 @@ class MotionDetector {
     }
 
     private fun measure(f: Frame) {
-        val step = 4
+        val step = maxOf(1, f.w / 320)   // ~320 samples per row whatever the stream size
         for (gy in 0 until GH) {
             val y0 = gy * f.h / GH
             val y1 = (gy + 1) * f.h / GH

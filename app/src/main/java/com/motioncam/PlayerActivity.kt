@@ -1,29 +1,35 @@
 package com.motioncam
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.SurfaceTexture
+import android.graphics.drawable.GradientDrawable
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.GestureDetector
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.Surface
 import android.view.TextureView
+import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 /**
  * Continuous playback of motion clips in chronological order. Two players alternate: while one plays,
  * the next clip is prepared on the other and chained with setNextMediaPlayer, so events play back
- * seamlessly like one video. The timeline below shows when each clip happened.
+ * seamlessly like one video. A Samsung-style filmstrip below shows the clips.
+ *  - tap video: play / pause;  double-tap left / right third: back / forward 5 s
  */
 class PlayerActivity : Activity() {
     companion object { const val EXTRA_START_ID = "startId" }
@@ -42,43 +48,47 @@ class PlayerActivity : Activity() {
         }
     }
 
-    private var clips: List<Clip> = emptyList()   // oldest first
-    private lateinit var container: FrameLayout
+    private lateinit var prefs: Prefs
+    private var clips: MutableList<Clip> = mutableListOf()   // oldest first
+    private lateinit var video: FrameLayout
     private lateinit var a: Slot
     private lateinit var b: Slot
     private lateinit var cur: Slot
     private lateinit var nxt: Slot
-    private lateinit var timeline: TimelineView
+    private lateinit var strip: FilmstripView
     private lateinit var stamp: TextView
     private lateinit var info: TextView
-    private lateinit var playBtn: TextView
+    private lateinit var bigPlay: TextView
+    private lateinit var skipL: TextView
+    private lateinit var skipR: TextView
     private lateinit var speedBtn: TextView
-    private lateinit var zoomBtn: TextView
+    private lateinit var muteBtn: TextView
     private var playing = true
+    private var muted = false
     private var speed = 1f
     private var pendingStart: Pair<Int, Int>? = null
     private val ui = Handler(Looper.getMainLooper())
-    private val stampFmt = SimpleDateFormat("EEE d MMM yyyy  HH:mm:ss", Locale.getDefault())
-    private val zooms = listOf(15 * 60_000L to "15m", 3_600_000L to "1h", 6 * 3_600_000L to "6h", 24 * 3_600_000L to "24h")
-    private var zoomIdx = 1
+    private val stampFmt by lazy { Fmt.dateTime(prefs) }
 
     private val ticker = object : Runnable {
         override fun run() {
             updatePosition()
-            ui.postDelayed(this, 200)
+            ui.postDelayed(this, if (playing) 50 else 250)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        prefs = Prefs(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
 
-        container = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        // ---- video area
+        video = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         a = Slot(TextureView(this))
         b = Slot(TextureView(this))
         for (s in listOf(a, b)) {
-            container.addView(s.tv, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+            video.addView(s.tv, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
             s.tv.alpha = 0f
             s.tv.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                 override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
@@ -96,30 +106,77 @@ class PlayerActivity : Activity() {
             }
         }
         cur = a; nxt = b
-        stamp = Ui.label(this, "", 15f).apply { setShadowLayer(4f, 0f, 0f, Color.BLACK); setPadding(24, 16, 24, 16) }
-        container.addView(stamp, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START))
-        container.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutSlot(a); layoutSlot(b) }
-        container.setOnClickListener { togglePlay() }
-        root.addView(container, LinearLayout.LayoutParams(-1, 0, 1f))
+        video.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutSlot(a); layoutSlot(b) }
 
-        timeline = TimelineView(this).apply { onSeek = { t -> seekToTime(t) }; windowMs = zooms[zoomIdx].first }
-        root.addView(timeline, LinearLayout.LayoutParams(-1, Ui.dp(this, 64)))
+        bigPlay = Ui.label(this, "▶", 34f).apply {
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x88000000.toInt()) }
+            visibility = View.GONE
+        }
+        val bp = Ui.dp(this, 76)
+        video.addView(bigPlay, FrameLayout.LayoutParams(bp, bp, Gravity.CENTER))
+        skipL = skipLabel("«  5s").also { video.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = Ui.dp(this@PlayerActivity, 40) }) }
+        skipR = skipLabel("5s  »").also { video.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = Ui.dp(this@PlayerActivity, 40) }) }
+
+        // top overlay: back, time stamp, menu
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x99000000.toInt(), 0))
+            val p = Ui.dp(this@PlayerActivity, 6)
+            setPadding(p, p, p, p * 3)
+        }
+        topBar.addView(Ui.label(this, "‹", 30f).apply {
+            setPadding(Ui.dp(this@PlayerActivity, 10), 0, Ui.dp(this@PlayerActivity, 14), Ui.dp(this@PlayerActivity, 4))
+            setOnClickListener { finish() }
+        })
+        stamp = Ui.label(this, "", 15f).apply { setShadowLayer(4f, 0f, 0f, Color.BLACK) }
+        topBar.addView(stamp, LinearLayout.LayoutParams(0, -2, 1f))
+        val menuBtn = Ui.label(this, "⋮", 24f).apply { setPadding(Ui.dp(this@PlayerActivity, 14), 0, Ui.dp(this@PlayerActivity, 10), 0) }
+        menuBtn.setOnClickListener { showMenu(menuBtn) }
+        topBar.addView(menuBtn)
+        video.addView(topBar, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+
+        val gd = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent) = true
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean { togglePlay(); return true }
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                val w = video.width
+                when {
+                    e.x < w / 3f -> seekBy(-5000)
+                    e.x > w * 2f / 3f -> seekBy(5000)
+                    else -> togglePlay()
+                }
+                return true
+            }
+        })
+        video.setOnTouchListener { _, e -> gd.onTouchEvent(e) }
+        root.addView(video, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        // ---- filmstrip + compact controls
+        strip = FilmstripView(this)
+        strip.listener = object : FilmstripView.Listener {
+            override fun onScrub(index: Int, posMs: Long, final: Boolean) = scrubTo(index, posMs, final)
+            override fun onTapClip(index: Int) { startAt(index, 0); strip.setCurrent(index, true) }
+        }
+        root.addView(strip, LinearLayout.LayoutParams(-1, Ui.dp(this, 84)))
 
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Ui.PANEL)
-            val p = Ui.dp(this@PlayerActivity, 8)
-            setPadding(p, p, p, p)
+            val p = Ui.dp(this@PlayerActivity, 6)
+            setPadding(p * 2, p, p * 2, p * 2)
         }
-        fun btn(t: String, click: () -> Unit) = Ui.chip(this, t).apply { setOnClickListener { click() } }.also {
-            bar.addView(it, LinearLayout.LayoutParams(-2, -2).apply { setMargins(Ui.dp(this@PlayerActivity, 3), 0, Ui.dp(this@PlayerActivity, 3), 0) })
-        }
+        fun btn(t: String, click: () -> Unit) = Ui.label(this, t, 18f).apply {
+            gravity = Gravity.CENTER
+            minWidth = Ui.dp(this@PlayerActivity, 48)
+            setPadding(0, Ui.dp(this@PlayerActivity, 6), 0, Ui.dp(this@PlayerActivity, 6))
+            setOnClickListener { click() }
+        }.also { bar.addView(it) }
         btn("⏮") { prev() }
-        playBtn = btn("⏸") { togglePlay() }
         btn("⏭") { next() }
         speedBtn = btn("1x") { cycleSpeed() }
-        zoomBtn = btn(zooms[zoomIdx].second) { cycleZoom() }
+        muteBtn = btn("🔊") { toggleMute() }
         info = Ui.label(this, "", 12f, Ui.GREY).apply { gravity = Gravity.END }
         bar.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(bar)
@@ -129,16 +186,30 @@ class PlayerActivity : Activity() {
         Thread {
             val list = ClipStore.list(this).sortedBy { it.startMs }.map { c ->
                 if (c.durationMs > 0) c else c.copy(durationMs = probeDuration(c))
-            }
+            }.toMutableList()
             runOnUiThread {
                 clips = list
-                timeline.clips = list
                 if (list.isEmpty()) { Toast.makeText(this, "No clips", Toast.LENGTH_SHORT).show(); finish(); return@runOnUiThread }
                 val idx = list.indexOfFirst { it.id == startId }.let { if (it < 0) 0 else it }
+                strip.clips = list
+                strip.setCurrent(idx, true)   // open expanded, like Samsung's player
                 pendingStart = Pair(idx, 0)
                 maybeBegin()
             }
         }.start()
+    }
+
+    private fun skipLabel(t: String) = Ui.label(this, t, 16f).apply {
+        setShadowLayer(6f, 0f, 0f, Color.BLACK)
+        background = GradientDrawable().apply { cornerRadius = Ui.dp(this@PlayerActivity, 20).toFloat(); setColor(0x66000000) }
+        setPadding(Ui.dp(this@PlayerActivity, 14), Ui.dp(this@PlayerActivity, 8), Ui.dp(this@PlayerActivity, 14), Ui.dp(this@PlayerActivity, 8))
+        alpha = 0f
+    }
+
+    private fun flash(v: View) {
+        v.animate().cancel()
+        v.alpha = 1f
+        v.animate().alpha(0f).setStartDelay(450).setDuration(250).start()
     }
 
     private fun probeDuration(c: Clip): Long = try {
@@ -149,10 +220,7 @@ class PlayerActivity : Activity() {
         d
     } catch (e: Exception) { 0L }
 
-    override fun onResume() {
-        super.onResume()
-        ui.post(ticker)
-    }
+    override fun onResume() { super.onResume(); ui.post(ticker) }
 
     override fun onPause() {
         ui.removeCallbacks(ticker)
@@ -162,6 +230,7 @@ class PlayerActivity : Activity() {
 
     override fun onDestroy() {
         a.release(); b.release()
+        strip.release()
         super.onDestroy()
     }
 
@@ -178,6 +247,7 @@ class PlayerActivity : Activity() {
         if (index !in clips.indices) return
         a.release(); b.release()
         cur = a; nxt = b
+        strip.setCurrent(index)
         load(cur, index, offsetMs)
     }
 
@@ -190,6 +260,7 @@ class PlayerActivity : Activity() {
         try {
             slot.surface?.let { mp.setSurface(it) }
             mp.setDataSource(this, clips[index].uri)
+            if (muted) mp.setVolume(0f, 0f)
             mp.setOnVideoSizeChangedListener { _, w, h -> slot.vw = w; slot.vh = h; layoutSlot(slot) }
             mp.setOnPreparedListener {
                 if (slot.mp !== mp) return@setOnPreparedListener
@@ -231,17 +302,17 @@ class PlayerActivity : Activity() {
             if (playing && !m.isPlaying) m.start()
             if (playing) applySpeed(m)
             show(cur)
+            strip.setCurrent(cur.index)
             old.release()
             load(nxt, cur.index + 1)
         } else if (old.index + 1 < clips.size) {
             advanceTo(old.index + 1)
         } else {
-            playing = false
-            playBtn.text = "▶"
+            setPlaying(false)
         }
     }
 
-    private fun advanceTo(index: Int) { if (index in clips.indices) startAt(index, 0) else { playing = false; playBtn.text = "▶" } }
+    private fun advanceTo(index: Int) { if (index in clips.indices) startAt(index, 0) else setPlaying(false) }
 
     private fun show(s: Slot) {
         s.tv.alpha = 1f
@@ -249,8 +320,8 @@ class PlayerActivity : Activity() {
     }
 
     private fun layoutSlot(s: Slot) {
-        val cw = container.width
-        val ch = container.height
+        val cw = video.width
+        val ch = video.height
         if (cw == 0 || ch == 0 || s.vw == 0 || s.vh == 0) return
         val va = s.vw.toFloat() / s.vh
         var w = cw
@@ -267,22 +338,45 @@ class PlayerActivity : Activity() {
         try { mp.playbackParams = mp.playbackParams.setSpeed(speed) } catch (_: Exception) {}
     }
 
+    private fun setPlaying(p: Boolean) {
+        playing = p
+        bigPlay.animate().cancel()
+        if (p) { bigPlay.text = "⏸"; bigPlay.visibility = View.VISIBLE; bigPlay.alpha = 1f; bigPlay.animate().alpha(0f).setStartDelay(350).setDuration(250).withEndAction { bigPlay.visibility = View.GONE }.start() }
+        else { bigPlay.text = "▶"; bigPlay.alpha = 1f; bigPlay.visibility = View.VISIBLE }
+    }
+
     private fun togglePlay() {
+        setPlaying(!playing)
         val m = cur.mp
-        playing = !playing
-        playBtn.text = if (playing) "⏸" else "▶"
         if (m == null || !cur.prepared) return
         try {
             if (playing) { m.start(); applySpeed(m) } else m.pause()
         } catch (_: Exception) {}
     }
 
-    private fun prev() {
-        val m = cur.mp
-        val pos = try { m?.currentPosition ?: 0 } catch (_: Exception) { 0 }
-        if (pos > 3000) startAt(cur.index, 0) else startAt(maxOf(0, cur.index - 1), 0)
+    private fun curPos(): Int = try { if (cur.prepared) cur.mp?.currentPosition ?: 0 else 0 } catch (_: Exception) { 0 }
+
+    /** YouTube-style double-tap skip; crosses into the previous / next clip when needed. */
+    private fun seekBy(delta: Int) {
+        flash(if (delta < 0) skipL else skipR)
+        val i = cur.index
+        if (i !in clips.indices) return
+        val dur = clips[i].durationMs.toInt()
+        val p = curPos() + delta
+        when {
+            p >= dur && i + 1 < clips.size -> startAt(i + 1, minOf(p - dur, clips[i + 1].durationMs.toInt() - 500).coerceAtLeast(0))
+            p < 0 && i > 0 -> startAt(i - 1, (clips[i - 1].durationMs.toInt() + p).coerceAtLeast(0))
+            else -> try { cur.mp?.seekTo(p.coerceIn(0, maxOf(0, dur - 200)).toLong(), MediaPlayer.SEEK_CLOSEST) } catch (_: Exception) {}
+        }
     }
 
+    private fun scrubTo(index: Int, posMs: Long, final: Boolean) {
+        if (index == cur.index && cur.prepared) {
+            try { cur.mp?.seekTo(posMs, if (final) MediaPlayer.SEEK_CLOSEST else MediaPlayer.SEEK_PREVIOUS_SYNC) } catch (_: Exception) {}
+        } else if (final) startAt(index, posMs.toInt())
+    }
+
+    private fun prev() { if (curPos() > 3000) startAt(cur.index, 0) else startAt(maxOf(0, cur.index - 1), 0) }
     private fun next() { if (cur.index + 1 < clips.size) startAt(cur.index + 1, 0) }
 
     private fun cycleSpeed() {
@@ -292,28 +386,59 @@ class PlayerActivity : Activity() {
         cur.mp?.let { if (playing && cur.prepared) applySpeed(it) }
     }
 
-    private fun cycleZoom() {
-        zoomIdx = (zoomIdx + 1) % zooms.size
-        timeline.windowMs = zooms[zoomIdx].first
-        zoomBtn.text = zooms[zoomIdx].second
+    private fun toggleMute() {
+        muted = !muted
+        muteBtn.text = if (muted) "🔇" else "🔊"
+        val v = if (muted) 0f else 1f
+        for (s in listOf(a, b)) try { s.mp?.setVolume(v, v) } catch (_: Exception) {}
     }
 
-    private fun seekToTime(t: Long) {
-        if (clips.isEmpty()) return
-        val inside = clips.indexOfFirst { t >= it.startMs && t < it.endMs }
-        if (inside >= 0) { startAt(inside, (t - clips[inside].startMs).toInt()); return }
-        val after = clips.indexOfFirst { it.startMs > t }
-        startAt(if (after >= 0) after else clips.size - 1, 0)
+    // ------------------------------------------------------------------ menu
+
+    private fun showMenu(anchor: View) {
+        val i = cur.index
+        if (i !in clips.indices) return
+        val c = clips[i]
+        val pm = PopupMenu(this, anchor)
+        pm.menu.add(0, 1, 0, "Open in another app")
+        pm.menu.add(0, 2, 1, "Share")
+        pm.menu.add(0, 3, 2, "Delete clip")
+        pm.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(c.uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                2 -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("video/mp4")
+                    .putExtra(Intent.EXTRA_STREAM, c.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share clip"))
+                3 -> AlertDialog.Builder(this).setTitle("Delete this clip?")
+                    .setMessage(Fmt.dateTime(prefs).format(Date(c.startMs)))
+                    .setPositiveButton("Delete") { _, _ -> deleteCurrent(c) }
+                    .setNegativeButton("Cancel", null).show()
+            }
+            true
+        }
+        pm.show()
+    }
+
+    private fun deleteCurrent(c: Clip) {
+        val i = clips.indexOfFirst { it.id == c.id }
+        a.release(); b.release()
+        ClipStore.delete(this, c)
+        if (i >= 0) clips.removeAt(i)
+        if (clips.isEmpty()) { finish(); return }
+        strip.clips = clips
+        val ni = i.coerceIn(0, clips.size - 1)
+        strip.setCurrent(ni, strip.expanded)
+        startAt(ni, 0)
     }
 
     private fun updatePosition() {
         val i = cur.index
         if (i !in clips.indices) return
-        val pos = try { if (cur.prepared) cur.mp?.currentPosition ?: 0 else 0 } catch (_: Exception) { 0 }
-        val t = clips[i].startMs + pos
-        stamp.text = stampFmt.format(Date(t))
-        timeline.playhead = t
+        val pos = curPos()
+        strip.setPosition(pos.toLong())
+        stamp.text = stampFmt.format(Date(clips[i].startMs + pos))
         val c = clips[i]
-        info.text = "clip ${i + 1}/${clips.size} · ${pos / 1000}/${c.durationMs / 1000}s"
+        info.text = "${i + 1} / ${clips.size}  ·  ${fmtDur(pos.toLong())} / ${fmtDur(c.durationMs)}"
     }
+
+    private fun fmtDur(ms: Long): String { val s = ms / 1000; return "%d:%02d".format(s / 60, s % 60) }
 }

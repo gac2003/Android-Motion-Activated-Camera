@@ -56,6 +56,22 @@ object Ui {
     }
 }
 
+/** Title bar with a back arrow that returns to the previous (main) screen. */
+fun topBar(a: android.app.Activity, title: String, right: View? = null): LinearLayout =
+    LinearLayout(a).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setBackgroundColor(Ui.BG)
+        val p = Ui.dp(a, 8)
+        setPadding(p, p, p * 2, p)
+        addView(Ui.label(a, "‹", 30f).apply {
+            setPadding(Ui.dp(a, 8), 0, Ui.dp(a, 16), Ui.dp(a, 4))
+            setOnClickListener { a.finish() }
+        })
+        addView(Ui.label(a, title, 20f), LinearLayout.LayoutParams(0, -2, 1f))
+        if (right != null) addView(right)
+    }
+
 /** A Pro-mode control button: small title, value underneath. Yellow value = automatic. */
 class Chip(ctx: Context, val name: String) {
     val title: TextView = Ui.label(ctx, name, 10f, Ui.GREY).apply { gravity = Gravity.CENTER }
@@ -70,9 +86,15 @@ class Chip(ctx: Context, val name: String) {
         addView(value)
     }
 
+    private var lastSelected: Boolean? = null
+    private var lastColor = 0
+
     fun set(v: String, auto: Boolean, selected: Boolean, enabled: Boolean = true) {
         if (value.text != v) value.text = v
-        value.setTextColor(if (!enabled) Ui.GREY else if (auto) Ui.ACCENT else Color.WHITE)
+        val color = if (!enabled) Ui.GREY else if (auto) Ui.ACCENT else Color.WHITE
+        if (color != lastColor) { lastColor = color; value.setTextColor(color) }
+        if (lastSelected == selected) return   // avoid re-creating backgrounds 4x a second
+        lastSelected = selected
         val bg = GradientDrawable()
         bg.cornerRadius = Ui.dp(view.context, 10).toFloat()
         bg.setColor(if (selected) 0xFF3C4048.toInt() else 0xAA2A2D33.toInt())

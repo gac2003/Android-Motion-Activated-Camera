@@ -109,6 +109,12 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     @Volatile var liveShutterNs = 0L; private set
     @Volatile var liveFocusDiopter = -1f; private set
     @Volatile var liveKelvin = 0; private set
+    /** Exposure meter (EV vs mid-grey) of the current picture; shown on the EV button in manual exposure. */
+    @Volatile var liveMeterEv = Float.NaN; private set
+    private var lastMeter = 0L
+    private var frameBuf: Frame? = null
+    private var lastFreeCheck = 0L
+    private var freeCache = Long.MAX_VALUE
     private var lastKelvinCalc = 0L
 
     private var active = false
@@ -485,8 +491,10 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             list += Combo(c.previewSize(1920), c.analysisSize(1280))
             list += Combo(c.previewSize(1280), c.analysisSize(640))
         }
-        list += Combo(null, c.analysisSize(1280))
-        list += Combo(null, c.analysisSize(640))
+        // without the on-screen preview a small stream is enough for motion detection (less ISP/CPU work)
+        val big = prefs.serverOn && prefs.streamHd
+        list += Combo(null, c.analysisSize(if (big) 1280 else 640))
+        list += Combo(null, c.analysisSize(if (big) 640 else 320))
         return list
     }
 
@@ -575,7 +583,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         }
     }
 
-    private fun lowPowerIdle() = monitoring && mode != Mode.RECORDING && sessionSt == null && prefs.lowPowerIdle
+    private fun lowPowerIdle() = monitoring && mode != Mode.RECORDING && sessionSt == null && FrameHub.overlaySink == null && prefs.lowPowerIdle
 
     private fun pushRepeating() {
         val s = session ?: return
@@ -591,7 +599,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
 
             val low = lowPowerIdle()
             b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, pickFpsRange(c, low))
-            val fps = if (low) 15 else effectiveFps
+            val fps = if (low) 10 else effectiveFps
 
             if (prefs.exposureAuto || !c.manualSensor) {
                 b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
@@ -620,7 +628,9 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
 
             if (c.canZoom) b.set(CaptureRequest.CONTROL_ZOOM_RATIO, prefs.zoom.coerceIn(c.zoomMin, c.zoomMax))
 
-            s.setRepeatingRequest(b.build(), captureCb, h)
+            // per-frame results are only needed to show live values on screen; skip them otherwise (saves CPU)
+            val wantResults = FrameHub.overlaySink != null || previewSt != null
+            s.setRepeatingRequest(b.build(), if (wantResults) captureCb else null, h)
         } catch (e: Exception) {
             message = "Request error: ${e.message}"
             publish()
@@ -631,7 +641,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         val rs = c.fpsRanges.toList()
         if (rs.isEmpty()) return Range(15, 30)
         if (low) {
-            val ok = rs.filter { it.upper >= 15 }
+            val ok = rs.filter { it.upper >= 10 }
             val minUpper = ok.minOfOrNull { it.upper } ?: return rs.maxByOrNull { it.upper }!!
             return ok.filter { it.upper == minUpper }.minByOrNull { it.lower }!!
         }
@@ -670,15 +680,19 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         val peaking = sink != null && FrameHub.peaking
         // the hardware preview is only on screen if the session uses the UI's *current* surface
         val hw = hwPreview && sessionSt != null && sessionSt === previewSt
-        val motionDue = (monitoringNow || showMotion) && now - lastMotionRun >= 125
+        val motionDue = (monitoringNow || showMotion) && now - lastMotionRun >= (if (m == Mode.RECORDING && !showMotion) 250 else 125)
+        val meterDue = sink != null && now - lastMeter >= 250
         val overlayWanted = sink != null && (!hw || peaking || showMotion)
         val overlayDue = overlayWanted && now - lastOverlayRun >= (if (hw) 100 else 66)
         val jpegDue = FrameHub.clients > 0 && now - lastJpegRun >= 200
 
         if (sink != null && !overlayWanted && overlayShown) { overlayShown = false; sink(null) }
-        if (!motionDue && !overlayDue && !jpegDue) return
+        if (!motionDue && !overlayDue && !jpegDue && !meterDue) return
 
-        val f = YuvTools.read(img, color = (overlayDue && !hw) || jpegDue)
+        val f = YuvTools.read(img, color = (overlayDue && !hw) || jpegDue, reuse = frameBuf)
+        frameBuf = f
+
+        if (meterDue) { lastMeter = now; liveMeterEv = YuvTools.meterEv(f) }
 
         if (motionDue) {
             lastMotionRun = now
@@ -758,7 +772,8 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
                 }
             }
             // storage
-            val free = ClipStore.freeBytes()
+            if (now - lastFreeCheck > 30_000 || freeCache < 1_000_000_000L) { lastFreeCheck = now; freeCache = ClipStore.freeBytes() }
+            val free = freeCache
             if (free < 300_000_000L && mode == Mode.WATCHING) {
                 if (prefs.autoDeleteLow) maybeCleanup(force = true)
                 else { disarm(); mode = Mode.PAUSED_STORAGE; message = "Phone storage full — not recording" }

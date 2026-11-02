@@ -334,19 +334,21 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(Ui.dp(ctx, 20), 0, Ui.dp(ctx, 12), Ui.dp(ctx, 10))
         }
-        header.addView(Ui.label(ctx, "Touch and hold to move buttons.", 15f), LinearLayout.LayoutParams(0, -2, 1f))
-        val save = Ui.label(ctx, "Save", 16f).apply {
-            setPadding(Ui.dp(ctx, 22), Ui.dp(ctx, 10), Ui.dp(ctx, 22), Ui.dp(ctx, 10))
-            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = Ui.dp(ctx, 24).toFloat(); setColor(0xFF6B4A2E.toInt()) }
-        }
-        header.addView(save)
+        header.addView(Ui.label(ctx, "Touch and hold to move buttons. Tap outside to cancel.", 15f), LinearLayout.LayoutParams(0, -2, 1f))
         col.addView(header)
+        fun pillButton(text: String, color: Int) = Ui.label(ctx, text, 15f).apply {
+            gravity = Gravity.CENTER
+            setPadding(Ui.dp(ctx, 20), Ui.dp(ctx, 9), Ui.dp(ctx, 20), Ui.dp(ctx, 9))
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = Ui.dp(ctx, 22).toFloat(); setColor(color) }
+        }
+        val save = pillButton("Save", 0xFF8A5A2E.toInt())
 
         val panel = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(ctx, 14)
             setPadding(p, p, p, p)
             background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = Ui.dp(ctx, 26).toFloat(); setColor(0xF21B1C20.toInt()) }
+            isClickable = true   // taps inside the panel must not count as "outside"
         }
         val grid = GridLayout(ctx).apply { columnCount = 4; minimumHeight = Ui.dp(ctx, 150) }
         panel.addView(grid, LinearLayout.LayoutParams(-1, -2))
@@ -363,7 +365,7 @@ class MainActivity : Activity() {
         }
         stripScroll.addView(stripRow)
         panel.addView(stripScroll, LinearLayout.LayoutParams(-1, -2))
-        val foot = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END; setPadding(0, Ui.dp(ctx, 10), 0, 0) }
+        val foot = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, Ui.dp(ctx, 12), 0, 0) }
         panel.addView(foot, LinearLayout.LayoutParams(-1, -2))
         col.addView(panel, LinearLayout.LayoutParams(-1, -2).apply { setMargins(Ui.dp(ctx, 12), 0, Ui.dp(ctx, 12), Ui.dp(ctx, 24)) })
         overlay.addView(col, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
@@ -432,14 +434,25 @@ class MainActivity : Activity() {
         }
 
         fun close() { (overlay.parent as? ViewGroup)?.removeView(overlay); editor = null }
-        foot.addView(Ui.label(ctx, "Default", 14f, Ui.GREY).apply {
-            setPadding(Ui.dp(ctx, 12), Ui.dp(ctx, 8), Ui.dp(ctx, 12), Ui.dp(ctx, 8))
-            setOnClickListener { active.clear(); active.addAll(Prefs.ALL_CHIPS); render() }
+        // Save on the left, Default and Cancel on the right, all in one row
+        foot.addView(save)
+        foot.addView(View(ctx), LinearLayout.LayoutParams(0, 1, 1f))
+        foot.addView(pillButton("Default", 0xFF33363C.toInt()).apply {
+            setOnClickListener {
+                AlertDialog.Builder(ctx).setTitle("Restore default buttons?")
+                    .setMessage("All control buttons will be shown in their original order.")
+                    .setPositiveButton("Restore") { _, _ ->
+                        active.clear(); active.addAll(Prefs.ALL_CHIPS)
+                        prefs.chipLayout = active.joinToString(",")
+                        buildChips()
+                        render()
+                    }
+                    .setNegativeButton("Cancel", null).show()
+            }
         })
-        foot.addView(Ui.label(ctx, "Cancel", 14f, Ui.GREY).apply {
-            setPadding(Ui.dp(ctx, 12), Ui.dp(ctx, 8), Ui.dp(ctx, 12), Ui.dp(ctx, 8))
-            setOnClickListener { close() }
-        })
+        foot.addView(pillButton("Cancel", 0xFF33363C.toInt()).apply { setOnClickListener { close() } },
+            LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(ctx, 8) })
+        overlay.setOnClickListener { close() }   // tap outside the panel = cancel
         save.setOnClickListener {
             prefs.chipLayout = active.joinToString(",")
             buildChips()

@@ -377,6 +377,7 @@ class PlayerActivity : Activity() {
     private fun setPlaying(p: Boolean) {
         playing = p
         bigPlay.animate().cancel()
+        if (vScale > 1.03f) { bigPlay.visibility = View.GONE; return }   // keep a zoomed picture clean
         if (p) { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PAUSE)); bigPlay.visibility = View.VISIBLE; bigPlay.alpha = 1f; bigPlay.animate().alpha(0f).setStartDelay(350).setDuration(250).withEndAction { bigPlay.visibility = View.GONE }.start() }
         else { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PLAY)); bigPlay.alpha = 1f; bigPlay.visibility = View.VISIBLE }
     }
@@ -432,6 +433,8 @@ class PlayerActivity : Activity() {
             bar.visibility = v
         }
         zoomReset.visibility = if (zoomed) View.VISIBLE else View.GONE
+        if (zoomed) { bigPlay.animate().cancel(); bigPlay.visibility = View.GONE }
+        else if (!playing) { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PLAY)); bigPlay.alpha = 1f; bigPlay.visibility = View.VISIBLE }
     }
 
     private fun resetZoom() {

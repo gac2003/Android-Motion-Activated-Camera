@@ -486,6 +486,9 @@ class PlayerActivity : Activity() {
             val m = cur.mp ?: return
             // stop just short of the end, so dragging to the end shows the last frame instead of finishing the clip
             val pos = posMs.coerceAtMost(lastFrameMs(index).toLong())
+            // released at the end (the strip snaps there): stay on the last frame, paused, rather than resuming
+            // straight into the next clip
+            if (final && playing && posMs >= lastFrameMs(index) - 200) setPlaying(false)
             if (final) {
                 holdAt(pos)
                 m.setOnSeekCompleteListener {

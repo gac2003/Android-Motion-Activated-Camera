@@ -23,7 +23,7 @@ New versions install over the old one and keep your settings and clips.
 
 [Privacy policy](PRIVACY.md)
 
-# MotionCam
+# What is MotionCam?
 
 A motion-triggered security camera for Android (built for a Galaxy S20 FE, works on any Android 11+ phone).
 
@@ -34,8 +34,6 @@ A motion-triggered security camera for Android (built for a Galaxy S20 FE, works
 * Runs as a foreground service so it keeps working with the screen off.
 * **Remote viewing without Wi-Fi/LAN**: built-in web page with live MJPEG + clip download, reachable over USB tethering, `adb forward`, Bluetooth tethering or the phone's own hotspot.
 * Protects the phone (all optional): pauses the camera when hot, stops when the battery is low, can delete old clips.
-
-## Screenshots
 
 | Pro controls & focus peaking | Clips gallery | Timeline player | Collections |
 |:---:|:---:|:---:|:---:|

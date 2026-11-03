@@ -63,10 +63,25 @@ class RemoteFoldersActivity : Activity() {
         setContentView(root)
     }
 
-    override fun onResume() { super.onResume(); render() }
+    private val ui = android.os.Handler(android.os.Looper.getMainLooper())
+    /** "checked N min ago" labels, kept current while the screen is open. */
+    private val checkedLabels = HashMap<android.widget.TextView, RemoteSource>()
+    private val tick = object : Runnable {
+        override fun run() {
+            for ((tv, s) in checkedLabels) tv.text = checkedText(s)
+            ui.postDelayed(this, 30_000L)
+        }
+    }
+
+    override fun onResume() { super.onResume(); render(); ui.postDelayed(tick, 30_000L) }
+    override fun onPause() { ui.removeCallbacks(tick); super.onPause() }
+
+    private fun checkedText(s: RemoteSource) =
+        if (s.lastRefresh == 0L) "not loaded yet" else "${s.clipCount} clips · checked " + ago(s.lastRefresh)
 
     private fun render() {
         box.removeAllViews()
+        checkedLabels.clear()
         val all = RemoteSources.all(this)
         val shown = all.filter { prefs.remoteFtp || (it.kind != CloudKind.FTP && it.kind != CloudKind.SFTP) }
         if (shown.isEmpty()) {
@@ -105,8 +120,7 @@ class RemoteFoldersActivity : Activity() {
         val texts = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(Ui.dp(ctx, 10), 0, 0, 0) }
         texts.addView(Ui.label(ctx, s.name, 16f))
         texts.addView(Ui.label(ctx, s.describe, 12f, Ui.GREY).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
-        val checked = if (s.lastRefresh == 0L) "not loaded yet" else "${s.clipCount} clips · checked " + ago(s.lastRefresh)
-        texts.addView(Ui.label(ctx, checked, 12f, Ui.GREY))
+        texts.addView(Ui.label(ctx, checkedText(s), 12f, Ui.GREY).also { checkedLabels[it] = s })
         r.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
         lateinit var more: View
         more = iconButton(ctx, IconDrawable.Kind.MORE, 44, 10) {

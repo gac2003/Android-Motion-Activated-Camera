@@ -41,6 +41,11 @@ class ClipsActivity : Activity() {
     private val autoRefresh = object : Runnable {
         override fun run() { refreshRemote(quiet = true); ui.postDelayed(this, 5 * 60_000L) }
     }
+    /** Keeps "checked N min ago" current while the screen is open. */
+    private val summaryTick = object : Runnable {
+        override fun run() { updateRemoteSummary(); ui.postDelayed(this, 30_000L) }
+    }
+    private var missing = 0
     private var favIds: Set<Long> = emptySet()
     private sealed class Row {
         class Header(val dayStart: Long, val clips: List<Clip>) : Row()
@@ -221,11 +226,15 @@ class ClipsActivity : Activity() {
         banner.visibility = if (canSeeAll() || remote != null) View.GONE else View.VISIBLE
         reload()
         // remote folder: check for new clips now (if the list is a few minutes old) and every 5 minutes
-        if (remote != null) ui.postDelayed(autoRefresh, if (System.currentTimeMillis() - (remote?.lastRefresh ?: 0) > 2 * 60_000L) 0 else 5 * 60_000L)
+        if (remote != null) {
+            ui.postDelayed(autoRefresh, if (System.currentTimeMillis() - (remote?.lastRefresh ?: 0) > 2 * 60_000L) 0 else 5 * 60_000L)
+            ui.postDelayed(summaryTick, 30_000L)
+        }
     }
 
     override fun onPause() {
         ui.removeCallbacks(autoRefresh)
+        ui.removeCallbacks(summaryTick)
         super.onPause()
     }
 
@@ -295,7 +304,7 @@ class ClipsActivity : Activity() {
     private fun showRemote(list: List<Clip>) {
         val src = remote ?: return
         var all = list
-        var missing = 0
+        missing = 0
         val cid = collectionId
         if (cid != null) {
             val ids = store.get(this, cid)?.clipIds ?: emptySet<Long>()
@@ -305,6 +314,13 @@ class ClipsActivity : Activity() {
         favIds = store.favouriteIds(this)
         clips = all
         buildRows()
+        updateRemoteSummary()
+    }
+
+    private fun updateRemoteSummary() {
+        val src = remote ?: return
+        val all = clips
+        val cid = collectionId
         val total = all.sumOf { it.size }
         val ago = if (src.lastRefresh == 0L) "" else " · checked " + agoText(src.lastRefresh)
         summary.text = when {

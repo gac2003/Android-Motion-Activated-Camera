@@ -79,10 +79,11 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 c.drawPath(path, stroke)
             }
             Kind.REFRESH -> {
+                // open circle (gap at the upper right) ending in a solid arrowhead, like the usual refresh icon
                 stroke.strokeWidth = 2.2f
-                c.drawArc(RectF(5f, 5f, 19f, 19f), -60f, 290f, false, stroke)
-                path.moveTo(19.2f, 5.1f); path.lineTo(15.5f, 5.9f); path.lineTo(16.7f, 9.5f)
-                c.drawPath(path, stroke)
+                c.drawArc(RectF(5.2f, 5.2f, 18.8f, 18.8f), 30f, 280f, false, stroke)
+                path.moveTo(19.13f, 9.1f); path.lineTo(17.97f, 3.95f); path.lineTo(13.85f, 8.86f); path.close()
+                c.drawPath(path, fill)
             }
             Kind.CALENDAR -> {
                 stroke.strokeWidth = 2f

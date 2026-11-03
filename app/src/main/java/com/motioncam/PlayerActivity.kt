@@ -32,7 +32,11 @@ import java.util.Date
  *  - tap video: play / pause;  double-tap left / right third: back / forward 5 s
  */
 class PlayerActivity : Activity() {
-    companion object { const val EXTRA_START_ID = "startId" }
+    companion object {
+        const val EXTRA_START_ID = "startId"
+        /** Play only the clips of this collection. */
+        const val EXTRA_COLLECTION = "collection"
+    }
 
     private inner class Slot(val tv: TextureView) {
         var surface: Surface? = null
@@ -219,7 +223,9 @@ class PlayerActivity : Activity() {
 
         val startId = intent.getLongExtra(EXTRA_START_ID, -1L)
         Thread {
-            val list = ClipStore.list(this).sortedBy { it.startMs }.map { c ->
+            val cid = intent.getStringExtra(EXTRA_COLLECTION)
+            val inCollection = cid?.let { Collections.get(this, it)?.clipIds }
+            val list = ClipStore.list(this).filter { inCollection == null || it.id in inCollection }.sortedBy { it.startMs }.map { c ->
                 if (c.durationMs > 0) c else c.copy(durationMs = probeDuration(c))
             }.toMutableList()
             runOnUiThread {
@@ -531,11 +537,19 @@ class PlayerActivity : Activity() {
         if (i !in clips.indices) return
         val c = clips[i]
         val pm = PopupMenu(this, anchor)
-        pm.menu.add(0, 1, 0, "Open in another app")
-        pm.menu.add(0, 2, 1, "Share")
-        pm.menu.add(0, 3, 2, "Delete clip")
+        val fav = Collections.isFavourite(this, c.id)
+        pm.menu.add(0, 4, 0, if (fav) "Remove from Favourites" else "Add to Favourites")
+        pm.menu.add(0, 5, 1, "Add to collection…")
+        pm.menu.add(0, 1, 2, "Open in another app")
+        pm.menu.add(0, 2, 3, "Share")
+        pm.menu.add(0, 3, 4, "Delete clip")
         pm.setOnMenuItemClickListener { item ->
             when (item.itemId) {
+                4 -> {
+                    if (fav) Collections.remove(this, Collections.FAVOURITES, listOf(c.id)) else Collections.add(this, Collections.FAVOURITES, listOf(c.id))
+                    Toast.makeText(this, if (fav) "Removed from Favourites" else "Added to Favourites", Toast.LENGTH_SHORT).show()
+                }
+                5 -> CollectionPicker.show(this, listOf(c.id)) {}
                 1 -> startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(c.uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                 2 -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("video/mp4")
                     .putExtra(Intent.EXTRA_STREAM, c.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share clip"))

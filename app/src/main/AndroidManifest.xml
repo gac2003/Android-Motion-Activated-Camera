@@ -36,6 +36,7 @@
 
         <activity android:name=".SettingsActivity" android:exported="false" />
         <activity android:name=".ClipsActivity" android:exported="false" />
+        <activity android:name=".CollectionsActivity" android:exported="false" />
         <activity
             android:name=".PlayerActivity"
             android:exported="false"

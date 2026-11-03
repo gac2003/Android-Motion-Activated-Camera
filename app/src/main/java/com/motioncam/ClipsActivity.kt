@@ -22,6 +22,13 @@ import java.util.concurrent.Executors
 
 /** Gallery of recorded clips with thumbnails, grouped by day. Tap = play in timeline. */
 class ClipsActivity : Activity() {
+    companion object {
+        /** Open showing only the clips of this collection. */
+        const val EXTRA_COLLECTION = "collection"
+    }
+
+    private var collectionId: String? = null
+    private var favIds: Set<Long> = emptySet()
     private sealed class Row {
         class Header(val dayStart: Long, val clips: List<Clip>) : Row()
         class Items(val clips: List<Clip>) : Row()
@@ -76,6 +83,7 @@ class ClipsActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
+        collectionId = intent.getStringExtra(EXTRA_COLLECTION)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
         val playAll = Ui.chip(this, "▶ Timeline").apply {
             setOnClickListener {
@@ -88,10 +96,14 @@ class ClipsActivity : Activity() {
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            if (collectionId == null) addView(iconButton(this@ClipsActivity, IconDrawable.Kind.FOLDER, 44, 10) {
+                startActivity(Intent(this@ClipsActivity, CollectionsActivity::class.java))
+            })
             addView(calBtn)
             addView(playAll)
         }
-        normalBar = topBar(this, "Clips", actions)
+        val title = collectionId?.let { Collections.get(this, it)?.name } ?: "Clips"
+        normalBar = topBar(this, title, actions)
         root.addView(normalBar)
         selBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -111,8 +123,18 @@ class ClipsActivity : Activity() {
             selBar.addView(it, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(this@ClipsActivity, 6) })
         }
         selAction("All") { if (selected.size == clips.size) selected.clear() else clips.forEach { selected += it.id }; updateSelection() }
-        selAction("Share") { shareSelected() }
-        selAction("Delete") { deleteSelected() }
+        selAction("Add to…") { addSelectedTo() }
+        if (collectionId != null) selAction("Remove") { removeSelectedFromCollection() }
+        else selAction("Delete") { deleteSelected() }
+        lateinit var more: View
+        more = iconButton(this, IconDrawable.Kind.MORE, 40, 10) {
+            val pm = PopupMenu(this, more)
+            pm.menu.add(0, 1, 0, "Share")
+            if (collectionId != null) pm.menu.add(0, 2, 1, "Delete from phone")
+            pm.setOnMenuItemClickListener { if (it.itemId == 1) shareSelected() else deleteSelected(); true }
+            pm.show()
+        }
+        selBar.addView(more)
         root.addView(selBar)
         summary = Ui.label(this, "", 12f, Ui.GREY).apply { setPadding(Ui.dp(this@ClipsActivity, 52), 0, 0, Ui.dp(this@ClipsActivity, 6)) }
         root.addView(summary)
@@ -155,12 +177,25 @@ class ClipsActivity : Activity() {
     private fun reload() {
         banner.visibility = if (canSeeAll()) View.GONE else View.VISIBLE
         Thread {
-            val all = ClipStore.list(this)
+            var all = ClipStore.list(this)
+            // only prune collections when every clip is visible (otherwise hidden clips would be dropped)
+            if (canSeeAll() || android.os.Build.VERSION.SDK_INT < 30) Collections.prune(this, all.map { it.id }.toSet())
+            val cid = collectionId
+            if (cid != null) {
+                val ids = Collections.get(this, cid)?.clipIds ?: emptySet<Long>()
+                all = all.filter { it.id in ids }
+            }
+            val favs = Collections.favouriteIds(this)
             runOnUiThread {
+                favIds = favs
                 clips = all
                 buildRows()
                 val total = all.sumOf { it.size }
-                summary.text = if (all.isEmpty()) "No clips yet" else "${all.size} clips · %.1f GB".format(total / 1e9)
+                summary.text = when {
+                    all.isEmpty() && collectionId != null -> "No clips in this collection yet. In Clips, hold a clip to select it, then Add to…"
+                    all.isEmpty() -> "No clips yet"
+                    else -> "${all.size} clips · %.1f GB".format(total / 1e9)
+                }
             }
         }.start()
     }
@@ -195,7 +230,8 @@ class ClipsActivity : Activity() {
     }
 
     private fun play(c: Clip) {
-        startActivity(Intent(this, PlayerActivity::class.java).putExtra(PlayerActivity.EXTRA_START_ID, c.id))
+        startActivity(Intent(this, PlayerActivity::class.java).putExtra(PlayerActivity.EXTRA_START_ID, c.id)
+            .putExtra(PlayerActivity.EXTRA_COLLECTION, collectionId))
     }
 
     private fun options(c: Clip) {
@@ -421,6 +457,7 @@ class ClipsActivity : Activity() {
                 val iv = cell.getChildAt(0) as ImageView
                 val label = cell.getChildAt(1) as TextView
                 val check = cell.getChildAt(2) as TextView
+                cell.getChildAt(3).visibility = if (c.id in favIds) View.VISIBLE else View.GONE
                 bindThumb(iv, c)
                 label.text = "${timeFmt.format(Date(c.startMs))}  ·  ${durText(c.durationMs)}"
                 val sel = c.id in selected
@@ -473,6 +510,13 @@ class ClipsActivity : Activity() {
             addView(check, FrameLayout.LayoutParams(Ui.dp(ctx, 24), Ui.dp(ctx, 24), Gravity.TOP or Gravity.END).apply {
                 setMargins(0, Ui.dp(ctx, 6), Ui.dp(ctx, 6), 0)
             })
+            val star = Ui.label(ctx, "★", 14f, Ui.ACCENT).apply {
+                setShadowLayer(4f, 0f, 0f, Color.BLACK)
+                visibility = View.GONE
+            }
+            addView(star, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
+                setMargins(Ui.dp(ctx, 8), Ui.dp(ctx, 4), 0, 0)
+            })
         }
     }
 
@@ -504,6 +548,22 @@ class ClipsActivity : Activity() {
         AlertDialog.Builder(this).setTitle("Delete ${list.size} clip${if (list.size == 1) "" else "s"}?")
             .setPositiveButton("Delete") { _, _ -> ClipDeleter.delete(this, list) { exitSelection(); reload() } }
             .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun addSelectedTo() {
+        val ids = selectedClips().map { it.id }
+        if (ids.isEmpty()) return
+        CollectionPicker.show(this, ids) { exitSelection(); reload() }
+    }
+
+    private fun removeSelectedFromCollection() {
+        val cid = collectionId ?: return
+        val ids = selectedClips().map { it.id }
+        if (ids.isEmpty()) return
+        Collections.remove(this, cid, ids)
+        Toast.makeText(this, "Removed ${ids.size} from this collection (clips kept)", Toast.LENGTH_SHORT).show()
+        exitSelection()
+        reload()
     }
 
     private fun shareSelected() {

@@ -12,7 +12,7 @@ import android.widget.ImageView
 
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
-    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR }
+    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -60,6 +60,12 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 path.moveTo(15f, 4.5f); path.lineTo(7.5f, 12f); path.lineTo(15f, 19.5f); c.drawPath(path, stroke)
             }
             Kind.MORE -> for (y in listOf(5f, 12f, 19f)) c.drawCircle(12f, y, 2f, fill)
+            Kind.FOLDER -> {
+                stroke.strokeWidth = 2f
+                path.moveTo(3.5f, 18.5f); path.lineTo(3.5f, 6f); path.lineTo(9.5f, 6f); path.lineTo(11.5f, 8.5f)
+                path.lineTo(20.5f, 8.5f); path.lineTo(20.5f, 18.5f); path.close()
+                c.drawPath(path, stroke)
+            }
             Kind.CALENDAR -> {
                 stroke.strokeWidth = 2f
                 c.drawRoundRect(RectF(3.5f, 5f, 20.5f, 20f), 2.5f, 2.5f, stroke)

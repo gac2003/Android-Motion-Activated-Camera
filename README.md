@@ -109,7 +109,8 @@ renamed or deleted) in the normal gallery and timeline player: day sections, cal
   and paste it on the viewing device (＋ Add → "a viewer link"). Anyone with the link can view; **Revoke link** stops it.
 * **FTP / SFTP**: enter the server login (a read-only account is best). Can be turned off in Settings → Remote folders.
 * Clips stream when played (FTP/SFTP download first) and are cached (up to 1.5 GB) so replaying is instant.
-  **Save to phone** copies clips into this phone's Clips; those copies are never uploaded to cloud backup.
+  **Save to phone** copies clips into this phone's Clips; those copies are never uploaded to cloud backup and are
+  never deleted by the phone's automatic clean-up (age limit, size cap, low storage) – only when you delete them.
 
 ## Remote viewing
 The web viewer password is shown/changed in Settings (user name: `admin`). The app lists the phone's addresses, e.g. `http://192.168.42.129:8080`.

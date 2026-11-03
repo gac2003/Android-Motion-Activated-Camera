@@ -6,6 +6,11 @@ on:
 permissions:
   contents: write   # publish releases
 
+# one build at a time per branch, in order, so the newest build is always the "latest" release
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest

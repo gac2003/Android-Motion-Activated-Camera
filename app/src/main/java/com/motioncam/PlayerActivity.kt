@@ -328,7 +328,9 @@ class PlayerActivity : Activity() {
                 if (slot === cur) {
                     // previewing under the finger: go to where the finger is now (it may have moved while loading)
                     val off = if (scrubbing && previewIndex == index) previewPos.toInt().coerceAtMost(lastFrameMs(index)) else offsetMs
-                    if (off > 0) {
+                    // paused (or scrubbing), the player draws nothing until it seeks: always seek then, even to 0:00,
+                    // so the new clip's frame replaces the previous clip's picture
+                    if (off > 0 || !playing || scrubbing) {
                         mp.setOnSeekCompleteListener { releaseHoldIfReached(mp) }
                         mp.seekTo(off.toLong(), MediaPlayer.SEEK_CLOSEST)
                     } else holdMs = -1

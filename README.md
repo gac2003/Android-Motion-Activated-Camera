@@ -21,7 +21,7 @@ Cap phone at 70% CPU usage and turn off fast charging to reduce temperatures.
 
 New versions install over the old one and keep your settings and clips.
 
-[Privacy policy](PRIVACY.md)
+[Privacy policy](PRIVACY.md) · [MIT License](LICENSE)
 
 # What is MotionCam?
 

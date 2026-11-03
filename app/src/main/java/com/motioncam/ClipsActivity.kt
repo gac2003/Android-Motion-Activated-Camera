@@ -41,10 +41,6 @@ class ClipsActivity : Activity() {
     private val autoRefresh = object : Runnable {
         override fun run() { refreshRemote(quiet = true); ui.postDelayed(this, 5 * 60_000L) }
     }
-    /** Keeps "checked N min ago" current while the screen is open. */
-    private val summaryTick = object : Runnable {
-        override fun run() { updateRemoteSummary(); ui.postDelayed(this, 30_000L) }
-    }
     private var missing = 0
     private lateinit var actionRow: LinearLayout
     private var swipe: androidx.swiperefreshlayout.widget.SwipeRefreshLayout? = null
@@ -239,13 +235,11 @@ class ClipsActivity : Activity() {
         // remote folder: check for new clips now (if the list is a few minutes old) and every 5 minutes
         if (remote != null) {
             ui.postDelayed(autoRefresh, if (System.currentTimeMillis() - (remote?.lastRefresh ?: 0) > 2 * 60_000L) 0 else 5 * 60_000L)
-            ui.postDelayed(summaryTick, 30_000L)
         }
     }
 
     override fun onPause() {
         ui.removeCallbacks(autoRefresh)
-        ui.removeCallbacks(summaryTick)
         super.onPause()
     }
 
@@ -335,7 +329,8 @@ class ClipsActivity : Activity() {
         val all = clips
         val cid = collectionId
         val total = all.sumOf { it.size }
-        val ago = if (src.lastRefresh == 0L) "" else " · checked " + agoText(src.lastRefresh)
+        // the clock time of the last check (it changes visibly with every automatic check, unlike "just now")
+        val ago = if (src.lastRefresh == 0L) "" else " · checked " + checkedAt(src.lastRefresh)
         summary.text = when {
             all.isEmpty() && lastError == null && (refreshing || src.lastRefresh == 0L) -> "Loading…"
             all.isEmpty() && cid != null -> "No clips in this collection yet. Hold a clip to select it, then Add to…"
@@ -346,10 +341,9 @@ class ClipsActivity : Activity() {
         }
     }
 
-    private fun agoText(t: Long): String {
-        val m = (System.currentTimeMillis() - t) / 60_000
-        return when { m < 1 -> "just now"; m < 60 -> "$m min ago"; m < 1440 -> "${m / 60} h ago"; else -> "${m / 1440} d ago" }
-    }
+    private fun checkedAt(t: Long): String =
+        if (dayStart(t) == dayStart(System.currentTimeMillis())) timeFmt.format(Date(t))
+        else SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(t)) + ", " + timeFmt.format(Date(t))
 
     /** Downloads remote clips into the phone's own Clips (never backed up again). */
     private fun saveToPhone(list: List<Clip>) {

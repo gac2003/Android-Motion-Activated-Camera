@@ -37,7 +37,7 @@ class CameraService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) { shutdown(); return START_NOT_STICKY }
+        if (intent?.action == ACTION_STOP) { shutdown(manual = true); return START_NOT_STICKY }
         if (engine != null) return START_NOT_STICKY
         prefs = Prefs(this)
         getSystemService(NotificationManager::class.java)
@@ -102,11 +102,12 @@ class CameraService : Service() {
         shutdown()
     }
 
-    private fun shutdown() {
+    /** [manual] = the user stopped monitoring (button or notification), not a safety stop. */
+    private fun shutdown(manual: Boolean = false) {
         StatusBus.remove(statusListener)
         engine?.let {
             it.onMonitoringStopped = null
-            it.setMonitoring(false)
+            it.setMonitoring(false, manual)
             EngineHost.release("service")
         }
         engine = null

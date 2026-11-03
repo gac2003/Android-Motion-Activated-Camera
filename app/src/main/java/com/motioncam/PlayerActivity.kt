@@ -377,8 +377,10 @@ class PlayerActivity : Activity() {
             cur = nxt
             nxt = old
             val m = cur.mp!!
-            if (playing && !m.isPlaying) m.start()
-            if (playing) applySpeed(m)
+            // the chained player starts by itself; keep it paused if playback is paused (or the user is scrubbing)
+            if (!playing || scrubbing) try { m.pause(); m.seekTo(0, MediaPlayer.SEEK_CLOSEST) } catch (_: Exception) {}
+            else if (!m.isPlaying) m.start()
+            if (playing && !scrubbing) applySpeed(m)
             show(cur)
             strip.setCurrent(cur.index)
             old.release()
@@ -446,17 +448,25 @@ class PlayerActivity : Activity() {
     private fun curPos(): Int = try { if (cur.prepared) cur.mp?.currentPosition ?: 0 else 0 } catch (_: Exception) { 0 }
 
     /** YouTube-style double-tap skip; crosses into the previous / next clip when needed. */
+    /**
+     * YouTube-style double-tap skip, kept inside the current clip: with less than 5 s left it goes to the
+     * clip's start / end instead of into the neighbouring clip.
+     */
     private fun seekBy(delta: Int) {
         flash(if (delta < 0) skipL else skipR)
         val i = cur.index
-        if (i !in clips.indices) return
-        val dur = clips[i].durationMs.toInt()
-        val p = curPos() + delta
-        when {
-            p >= dur && i + 1 < clips.size -> startAt(i + 1, minOf(p - dur, clips[i + 1].durationMs.toInt() - 500).coerceAtLeast(0))
-            p < 0 && i > 0 -> startAt(i - 1, (clips[i - 1].durationMs.toInt() + p).coerceAtLeast(0))
-            else -> try { cur.mp?.seekTo(p.coerceIn(0, maxOf(0, dur - 200)).toLong(), MediaPlayer.SEEK_CLOSEST) } catch (_: Exception) {}
-        }
+        if (i !in clips.indices || !cur.prepared) return
+        val p = (curPos() + delta).coerceIn(0, lastFrameMs(i))
+        holdAt(p.toLong())
+        cur.mp?.let { m -> m.setOnSeekCompleteListener { releaseHoldIfReached(m) } }
+        try { cur.mp?.seekTo(p.toLong(), MediaPlayer.SEEK_CLOSEST) } catch (_: Exception) {}
+    }
+
+    /** Just before the end of clip [i]: seeking exactly to the end would count as "finished" and jump to the next clip. */
+    private fun lastFrameMs(i: Int): Int {
+        val d = (if (i == cur.index && cur.prepared) try { cur.mp?.duration } catch (_: Exception) { null } else null)
+            ?: clips[i].durationMs.toInt()
+        return maxOf(0, d - 100)
     }
 
     private var scrubbing = false
@@ -474,14 +484,16 @@ class PlayerActivity : Activity() {
         if (final) scrubbing = false
         if (index == cur.index && cur.prepared) {
             val m = cur.mp ?: return
+            // stop just short of the end, so dragging to the end shows the last frame instead of finishing the clip
+            val pos = posMs.coerceAtMost(lastFrameMs(index).toLong())
             if (final) {
-                holdAt(posMs)
+                holdAt(pos)
                 m.setOnSeekCompleteListener {
                     releaseHoldIfReached(m)
                     if (playing && !scrubbing) try { if (!m.isPlaying) { m.start(); applySpeed(m) } } catch (_: Exception) {}
                 }
             }
-            try { m.seekTo(posMs, MediaPlayer.SEEK_CLOSEST) } catch (_: Exception) {}
+            try { m.seekTo(pos, MediaPlayer.SEEK_CLOSEST) } catch (_: Exception) {}
         } else if (final) startAt(index, posMs.toInt())
     }
 

@@ -48,6 +48,16 @@ data class Status(
     val charging: Boolean = false,
 )
 
+/**
+ * Very short clips from a manual stop (picking the phone up to turn monitoring off usually triggers one).
+ * The main screen sets [listener] while it is visible; the engine then saves such a clip but holds it back
+ * from cloud backup and hands its id to the listener, which offers Undo and deletes it otherwise.
+ * With no listener (screen not open, e.g. stopped from the notification) the clip is kept as usual.
+ */
+object ShortClipBus {
+    @Volatile var listener: ((clipId: Long, lengthMs: Long) -> Unit)? = null
+}
+
 /** Status channel (engine -> UI/service). Listeners run on the engine thread. */
 object StatusBus {
     @Volatile var status = Status()
@@ -192,7 +202,20 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         }
     }
 
-    fun setMonitoring(on: Boolean) = h.post { setMonitoringInternal(on) }
+    /** [manual] = the user turned monitoring off (not a safety stop), so a very short clip may be discarded. */
+    fun setMonitoring(on: Boolean, manual: Boolean = false) = h.post {
+        manualStop = manual && !on
+        try { setMonitoringInternal(on) } finally { manualStop = false }
+    }
+    private var manualStop = false
+
+    /** A clip that is too short and was cut by a manual stop: the listener decides (Undo / delete). */
+    private fun heldAsShort(): Pair<((Long, Long) -> Unit), Long>? {
+        if (!manualStop || !prefs.discardShortOnStop) return null
+        val l = ShortClipBus.listener ?: return null
+        val len = SystemClock.elapsedRealtime() - recordStartedElapsed
+        return if (len < prefs.discardShortMs) Pair(l, len) else null
+    }
 
     /** UI preview surface (null = UI hidden). The engine never releases it. */
     fun setPreview(st: SurfaceTexture?) = h.post {
@@ -536,13 +559,14 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             mode = if (monitoring) Mode.WATCHING else Mode.PREVIEW
             message = if (monitoring) "Watching for motion" else ""
             pushRepeating()
+            val held = heldAsShort()
             val ok = pre?.stopClip() == true
             ClipStore.finish(ctx, pc, ok, recordStartedWall)
             if (ok) {
                 val id = android.content.ContentUris.parseId(pc.uri)
                 val preRoll = pre?.preRollMs ?: 0L
                 savePeak(id, preRoll + (peakElapsed - recordStartedElapsed), preRoll)
-                com.motioncam.cloud.CloudSync.onClipSaved(ctx, id)
+                if (held != null) held.first(id, held.second) else com.motioncam.cloud.CloudSync.onClipSaved(ctx, id)
             }
             publish()
             if (rebuildPending) rebuildSession()
@@ -554,6 +578,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         mode = if (monitoring) Mode.WATCHING else Mode.PREVIEW
         message = if (monitoring) "Watching for motion" else ""
         pushRepeating()   // stop feeding the encoder first
+        val held = heldAsShort()
         var ok = SystemClock.elapsedRealtime() - recordStartedElapsed > 1000
         try { rec.stop() } catch (_: Exception) { if (!hitSizeLimit) ok = false }   // after a size cap the file is already finalised
         hitSizeLimit = false
@@ -563,7 +588,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             if (ok) {
                 val id = android.content.ContentUris.parseId(it.uri)
                 savePeak(id, peakElapsed - recordStartedElapsed)
-                com.motioncam.cloud.CloudSync.onClipSaved(ctx, id)
+                if (held != null) held.first(id, held.second) else com.motioncam.cloud.CloudSync.onClipSaved(ctx, id)
             }
         }
         pending = null

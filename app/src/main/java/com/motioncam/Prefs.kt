@@ -61,6 +61,9 @@ class Prefs(ctx: Context) {
     var audio: Boolean get() = b("audio", true); set(v) = put("audio", v)
     /** Seconds of video kept before motion is detected (0 = off). Keeps the encoder running while monitoring. */
     var preRecordMs: Int get() = i("preRecordMs", 0); set(v) = put("preRecordMs", v)
+    /** Discard a clip shorter than [discardShortMs] that was cut off by stopping monitoring manually (with Undo). */
+    var discardShortOnStop: Boolean get() = b("discardShortOnStop", true); set(v) = put("discardShortOnStop", v)
+    var discardShortMs: Int get() = i("discardShortMs", 1500); set(v) = put("discardShortMs", v)
     /** -1 = follow device orientation, otherwise 0/90/180/270. */
     var rotation: Int get() = i("rotation", -1); set(v) = put("rotation", v)
 
@@ -131,7 +134,7 @@ class Prefs(ctx: Context) {
         val ALL_CHIPS = listOf("LENS", "FORMAT", "EV", "ISO", "SPEED", "FOCUS", "WB", "ZOOM", "ZONES")
 
         val PREVIEW_KEYS = listOf("previewOn", "peaking", "lowPowerIdle", "use24h")
-        val RECORDING_KEYS = listOf("resHeight", "fps", "hevc", "bitrateMbps", "audio", "rotation", "preRecordMs")
+        val RECORDING_KEYS = listOf("resHeight", "fps", "hevc", "bitrateMbps", "audio", "rotation", "preRecordMs", "discardShortOnStop", "discardShortMs")
         val MOTION_KEYS = listOf("sensitivity", "lightFilter", "minAreaPct", "minMotionMs", "stopDelaySec", "maxClipMin", "zones")
         val STORAGE_KEYS = listOf("maxStorageGb", "keepDays", "autoDeleteLow")
         val PROTECTION_KEYS = listOf("minBattery", "maxTempC")

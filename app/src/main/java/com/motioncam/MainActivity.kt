@@ -123,9 +123,12 @@ class MainActivity : Activity() {
         render(StatusBus.status)
         if (selected != null) configurePanel()
         ui.post(ticker)
+        ShortClipBus.listener = { id, len -> ui.post { offerUndo(id, len) } }
     }
 
     override fun onPause() {
+        ShortClipBus.listener = null
+        finishDiscard()   // leaving the screen: the decision stands
         resumed = false
         ui.removeCallbacks(allowSleep)
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -261,6 +264,71 @@ class MainActivity : Activity() {
     // ------------------------------------------------------------------ UI construction
 
     private lateinit var rootLayout: FrameLayout
+    private var topBarView: View? = null
+
+    // ------------------------------------------------------------------ short clip from a manual stop: Undo
+
+    private var discardId = -1L
+    private var undoPill: TextView? = null
+    private val discardNow = Runnable { finishDiscard() }
+
+    /**
+     * Shows a small "Short clip discarded · UNDO" pill in the top-right corner of the preview for a few seconds.
+     * Tapping it asks for confirmation and keeps the clip; otherwise the clip is deleted when the pill goes.
+     */
+    private fun offerUndo(clipId: Long, lengthMs: Long) {
+        finishDiscard()                       // an earlier one still pending: its time is up
+        discardId = clipId
+        val pill = Ui.label(this, "Short clip (%.1f s) discarded  ·  UNDO".format(lengthMs / 1000f), 13f).apply {
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = Ui.dp(this@MainActivity, 18).toFloat(); setColor(0xE6202328.toInt()); setStroke(Ui.dp(this@MainActivity, 1), Ui.ACCENT)
+            }
+            val p = Ui.dp(this@MainActivity, 12)
+            setPadding(p, p / 2 + 2, p, p / 2 + 2)
+            elevation = Ui.dp(this@MainActivity, 4).toFloat()
+            setOnClickListener { confirmKeep(clipId, lengthMs) }
+        }
+        rootLayout.addView(pill, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
+            topMargin = (topBarView?.bottom ?: 0) + Ui.dp(this@MainActivity, 8)
+            rightMargin = Ui.dp(this@MainActivity, 8)
+        })
+        pill.alpha = 0f
+        pill.animate().alpha(1f).setDuration(150).start()
+        undoPill = pill
+        ui.postDelayed(discardNow, 6000)
+    }
+
+    private fun confirmKeep(clipId: Long, lengthMs: Long) {
+        ui.removeCallbacks(discardNow)       // no time limit while deciding
+        hidePill()
+        android.app.AlertDialog.Builder(this).setTitle("Keep this clip?")
+            .setMessage("The %.1f s clip recorded just before you stopped monitoring will be kept in Clips (and backed up, if backup is on).".format(lengthMs / 1000f))
+            .setPositiveButton("Keep") { _, _ ->
+                if (discardId != clipId) { Toast.makeText(this, "Too late: the clip was already discarded", Toast.LENGTH_SHORT).show(); return@setPositiveButton }
+                discardId = -1
+                com.motioncam.cloud.CloudSync.onClipSaved(this, clipId)
+                Toast.makeText(this, "Clip kept", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Discard") { _, _ -> finishDiscard() }
+            .setOnCancelListener { finishDiscard() }
+            .show()
+    }
+
+    private fun hidePill() {
+        undoPill?.let { p -> p.animate().alpha(0f).setDuration(150).withEndAction { rootLayout.removeView(p) }.start() }
+        undoPill = null
+    }
+
+    /** Deletes the held short clip (if still pending). */
+    private fun finishDiscard() {
+        ui.removeCallbacks(discardNow)
+        hidePill()
+        val id = discardId
+        if (id < 0) return
+        discardId = -1
+        val app = applicationContext
+        Thread { ClipStore.get(app, id)?.let { ClipStore.delete(app, it) } }.start()
+    }
 
     private fun buildUi() {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
@@ -298,6 +366,7 @@ class MainActivity : Activity() {
 
         // top bar
         val top = LinearLayout(this).apply {
+            topBarView = this
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Ui.PANEL)
             val p = Ui.dp(this@MainActivity, 10)

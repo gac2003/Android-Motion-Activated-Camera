@@ -424,14 +424,29 @@ class PlayerActivity : Activity() {
         }
     }
 
+    private var scrubbing = false
+
+    /**
+     * Filmstrip scrubbing, like YouTube/Samsung: playback pauses while the finger is down and every preview
+     * frame is the exact one under the playhead (previously it kept playing and snapped back to the previous
+     * key frame, which looked like jitter). Playback resumes on release if it was playing.
+     */
     private fun scrubTo(index: Int, posMs: Long, final: Boolean) {
+        if (!final && !scrubbing) {
+            scrubbing = true
+            if (playing) try { cur.mp?.pause() } catch (_: Exception) {}
+        }
+        if (final) scrubbing = false
         if (index == cur.index && cur.prepared) {
             val m = cur.mp ?: return
             if (final) {
                 holdAt(posMs)
-                m.setOnSeekCompleteListener { releaseHoldIfReached(m) }
+                m.setOnSeekCompleteListener {
+                    releaseHoldIfReached(m)
+                    if (playing && !scrubbing) try { if (!m.isPlaying) { m.start(); applySpeed(m) } } catch (_: Exception) {}
+                }
             }
-            try { m.seekTo(posMs, if (final) MediaPlayer.SEEK_CLOSEST else MediaPlayer.SEEK_PREVIOUS_SYNC) } catch (_: Exception) {}
+            try { m.seekTo(posMs, MediaPlayer.SEEK_CLOSEST) } catch (_: Exception) {}
         } else if (final) startAt(index, posMs.toInt())
     }
 

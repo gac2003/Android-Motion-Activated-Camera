@@ -106,6 +106,7 @@ class MainActivity : Activity() {
         keepAwake()
         resumed = true
         StatusBus.add(statusListener)
+        com.motioncam.cloud.CloudSync.kick(this)
         updateFlags()
         (getSystemService(DISPLAY_SERVICE) as DisplayManager).registerDisplayListener(displayListener, ui)
         updateGeometry()

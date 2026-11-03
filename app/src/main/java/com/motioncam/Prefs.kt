@@ -100,6 +100,14 @@ class Prefs(ctx: Context) {
     var minBattery: Int get() = i("minBattery", 10); set(v) = put("minBattery", v)
     var maxTempC: Int get() = i("maxTempC", 46); set(v) = put("maxTempC", v)
 
+    // ---- cloud backup (per-destination settings live in cloud/CloudConfig) ----
+    var cloudWifiOnly: Boolean get() = b("cloudWifiOnly", true); set(v) = put("cloudWifiOnly", v)
+    var cloudChargingOnly: Boolean get() = b("cloudChargingOnly", false); set(v) = put("cloudChargingOnly", v)
+    /** 0 = original, 1 = 720p, 2 = 480p copies. */
+    var cloudQuality: Int get() = i("cloudQuality", 0); set(v) = put("cloudQuality", v)
+    /** Delete the phone copy once a clip is in every enabled destination (clips in collections are kept). */
+    var cloudDeleteLocal: Boolean get() = b("cloudDeleteLocal", false); set(v) = put("cloudDeleteLocal", v)
+
     // ---- remote view ----
     var serverOn: Boolean get() = b("serverOn", false); set(v) = put("serverOn", v)
     var streamHd: Boolean get() = b("streamHd", false); set(v) = put("streamHd", v)
@@ -122,9 +130,10 @@ class Prefs(ctx: Context) {
         val STORAGE_KEYS = listOf("maxStorageGb", "keepDays", "autoDeleteLow")
         val PROTECTION_KEYS = listOf("minBattery", "maxTempC")
         val REMOTE_KEYS = listOf("serverOn", "streamHd", "port")
+        val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal")
         val CAMERA_KEYS = listOf("camera", "exposureAuto", "evIndex", "iso", "shutterNs", "focusAuto", "focusPos",
             "wbAuto", "wbKelvin", "zoom", "chipLayout")
         /** Everything except the web password (so you are not locked out of the viewer). */
-        val ALL_KEYS = PREVIEW_KEYS + RECORDING_KEYS + MOTION_KEYS + STORAGE_KEYS + PROTECTION_KEYS + REMOTE_KEYS + CAMERA_KEYS
+        val ALL_KEYS = PREVIEW_KEYS + RECORDING_KEYS + MOTION_KEYS + STORAGE_KEYS + PROTECTION_KEYS + REMOTE_KEYS + CLOUD_KEYS + CAMERA_KEYS
     }
 }

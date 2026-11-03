@@ -44,4 +44,9 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 
-// Deliberately no third-party dependencies: only the Android framework (Camera2, MediaRecorder).
+dependencies {
+    // Google Drive sign-in (phone's account picker); the Drive API itself is called over plain HTTPS
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
+    // SFTP (SSH) client
+    implementation("com.github.mwiede:jsch:0.2.20")
+}

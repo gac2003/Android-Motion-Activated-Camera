@@ -64,6 +64,21 @@ Long-press any control button on the main screen to choose which buttons are sho
 * Mask everything outside the peephole circle with **ZONES**.
 * Raise *Motion must last at least* (e.g. 500 ms) to ignore brief flashes.
 
+## Cloud backup (optional)
+Settings → **Cloud backup** copies every new clip to **Google Drive**, **Dropbox**, an **FTP/FTPS** server or an
+**SFTP** server, so footage survives if the phone is damaged or stolen.
+
+* **Connect**: Google Drive uses the phone's Google account picker; Dropbox opens a sign-in page; FTP/SFTP take the
+  server address and login (stored encrypted on the phone).
+* **Limited access**: Google Drive uses `drive.file` (MotionCam only sees files it created), Dropbox uses an App folder
+  (`Apps/MotionCam`). Only MotionCam's own `MC_….mp4` clips in the backup folder are ever deleted.
+* **Folder**: created automatically ("MotionCam"), or choose / create another one.
+* **When full**: delete the oldest backed-up clips to make room, or pause and notify. Optional size cap and
+  "delete cloud copies after N days". Clips in chosen collections (Favourites by default) are never deleted.
+* **Reliable**: uploads are queued, resume where they stopped after a connection drop, retry with back-off, wait for a
+  working connection (e.g. a Wi-Fi login page) and continue in the background, even after a reboot.
+* **Options**: Wi-Fi only, charging only, upload as original / 720p / 480p, delete the phone copy once backed up.
+
 ## Remote viewing
 The web viewer password is shown/changed in Settings (user name: `admin`). The app lists the phone's addresses, e.g. `http://192.168.42.129:8080`.
 

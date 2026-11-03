@@ -110,6 +110,27 @@ class SettingsActivity : Activity() {
                 "• Or join the phone's own hotspot from your laptop."
         )
 
+        title("Cloud backup", Prefs.CLOUD_KEYS)
+        note("Copies every new clip to the cloud or your own server, so footage survives if the phone is damaged or stolen. " +
+            "Uploads wait and resume automatically if the internet drops.")
+        for (k in com.motioncam.cloud.CloudKind.values()) {
+            val st = com.motioncam.cloud.CloudSync.status(this, k)
+            box.addView(Ui.chip(this, "${k.label}\n$st").apply {
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                setOnClickListener {
+                    startActivity(Intent(this@SettingsActivity, com.motioncam.cloud.CloudActivity::class.java)
+                        .putExtra(com.motioncam.cloud.CloudActivity.EXTRA_KIND, k.key))
+                }
+            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
+        }
+        toggle("Upload only on Wi-Fi (not mobile data)", prefs.cloudWifiOnly) { prefs.cloudWifiOnly = it; com.motioncam.cloud.CloudSync.kick(this) }
+        toggle("Upload only while charging", prefs.cloudChargingOnly) { prefs.cloudChargingOnly = it; com.motioncam.cloud.CloudSync.kick(this) }
+        choice("Upload quality", listOf("Original (largest, best quality)", "720p (about 1/3 the size)", "480p (smallest)"), prefs.cloudQuality) {
+            prefs.cloudQuality = it
+        }
+        note("Smaller copies are made on the phone before uploading (uses some extra power; original stays on the phone).")
+        toggle("Delete the phone copy after it is backed up everywhere (clips in collections are kept)", prefs.cloudDeleteLocal) { prefs.cloudDeleteLocal = it }
+
         title("Reset", null)
         box.addView(Ui.chip(this, "Reset ALL settings to default").apply {
             setTextColor(Ui.RED)

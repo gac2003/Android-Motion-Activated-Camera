@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- lets queued cloud uploads resume after a reboot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
@@ -37,6 +39,11 @@
         <activity android:name=".SettingsActivity" android:exported="false" />
         <activity android:name=".ClipsActivity" android:exported="false" />
         <activity android:name=".CollectionsActivity" android:exported="false" />
+        <activity android:name=".cloud.CloudActivity" android:exported="false" />
+        <service
+            android:name=".cloud.CloudJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
         <activity
             android:name=".PlayerActivity"
             android:exported="false"

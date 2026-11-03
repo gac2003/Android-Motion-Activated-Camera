@@ -54,6 +54,7 @@ class CameraService : Service() {
         wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "motioncam:monitor").also { it.acquire() }
 
         StatusBus.add(statusListener)
+        com.motioncam.cloud.CloudSync.kick(this)   // resume any pending cloud uploads
         val e = EngineHost.acquire(this, "service")
         e.onMonitoringStopped = { why -> main.post { shutdownWithMessage(why) } }
         e.setMonitoring(true)

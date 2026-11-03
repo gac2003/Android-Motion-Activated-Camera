@@ -20,8 +20,8 @@ object Pkce {
  * Receives the OAuth redirect on http://127.0.0.1:<port>/ (the "loopback" flow Google supports for installed
  * apps). The browser on the same phone is redirected here after the user approves.
  */
-class LoopbackReceiver : java.io.Closeable {
-    private val server = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))
+class LoopbackReceiver(port: Int = 0) : java.io.Closeable {
+    private val server = ServerSocket(port, 1, InetAddress.getByName("127.0.0.1"))
     val redirectUri = "http://127.0.0.1:${server.localPort}"
 
     /** Waits for the redirect; returns the "code" parameter (checks [state]). */

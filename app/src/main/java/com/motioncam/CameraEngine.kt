@@ -535,6 +535,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             pushRepeating()
             val ok = pre?.stopClip() == true
             ClipStore.finish(ctx, pc, ok, recordStartedWall)
+            if (ok) com.motioncam.cloud.CloudSync.onClipSaved(ctx, android.content.ContentUris.parseId(pc.uri))
             publish()
             if (rebuildPending) rebuildSession()
             maybeCleanup(force = false)
@@ -549,7 +550,10 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         try { rec.stop() } catch (_: Exception) { if (!hitSizeLimit) ok = false }   // after a size cap the file is already finalised
         hitSizeLimit = false
         try { rec.release() } catch (_: Exception) {}
-        pending?.let { ClipStore.finish(ctx, it, ok, recordStartedWall) }
+        pending?.let {
+            ClipStore.finish(ctx, it, ok, recordStartedWall)
+            if (ok) com.motioncam.cloud.CloudSync.onClipSaved(ctx, android.content.ContentUris.parseId(it.uri))
+        }
         pending = null
         publish()
         if (rebuildPending) rebuildSession()

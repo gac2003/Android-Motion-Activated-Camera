@@ -21,6 +21,13 @@ Cap phone at 70% CPU usage and turn off fast charging to reduce temperatures.
 
 New versions install over the old one and keep your settings and clips.
 
+## Screenshots
+
+| Pro controls & focus peaking | Clips gallery | Timeline player | Collections |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/screenshots/preview-focus-peaking.jpg" width="200" alt="Live preview with manual focus and green focus peaking"> | <img src="docs/screenshots/clips.jpg" width="200" alt="Clips grouped by day with thumbnails"> | <img src="docs/screenshots/player-timeline.jpg" width="200" alt="Player with the clip filmstrip timeline"> | <img src="docs/screenshots/collections.jpg" width="200" alt="Collections with Favourites"> |
+| Manual focus (green = sharp edges), ISO, shutter, WB and zoom like a Pro video mode; yellow = automatic | Day sections, sticky headers, calendar, multi-select | Plays clips back to back with a scrubbable filmstrip | Group clips into collections (soft links) |
+
 [Privacy policy](PRIVACY.md)
 
 # MotionCam

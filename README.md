@@ -1,4 +1,4 @@
-vibe coded Android app that turns your phone into a security camera.
+Vibe coded Android app that turns your phone into a security surveillance camera.
 After trying the popular apps like Alfred and IPCam, they were either filled with ads, locked features behind subscriptions, or lacked manual camera adjustments.
 This app was mainly built to be:
 1. Turn your phone into a security camera that can run 24/7
@@ -6,7 +6,10 @@ This app was mainly built to be:
 3. Easily browse recorded footage in-app
 4. Only record when motion is detected to save storage space and not record useless footage
 
-Tested on a S23 Ultra and S20 FE. Cap phone at 70% CPU usage and turn off fast charging to reduce temperatures.
+Tested on a S23 Ultra and S20 FE which ran 24/7.
+Cap phone at 70% CPU usage and turn off fast charging to reduce temperatures.
+
+Android APK can be downloaded from the artifacts of the GitHub Actions.
 
 # MotionCam
 

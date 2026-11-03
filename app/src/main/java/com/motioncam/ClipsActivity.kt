@@ -341,9 +341,11 @@ class ClipsActivity : Activity() {
         }
     }
 
-    private fun checkedAt(t: Long): String =
-        if (dayStart(t) == dayStart(System.currentTimeMillis())) timeFmt.format(Date(t))
-        else SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(t)) + ", " + timeFmt.format(Date(t))
+    private fun checkedAt(t: Long): String {
+        val hm = Fmt.t(prefs, t, seconds = false)
+        return if (dayStart(t) == dayStart(System.currentTimeMillis())) hm
+        else SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(t)) + ", " + hm
+    }
 
     /** Downloads remote clips into the phone's own Clips (never backed up again). */
     private fun saveToPhone(list: List<Clip>) {

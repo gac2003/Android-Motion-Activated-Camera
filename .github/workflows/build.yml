@@ -3,6 +3,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write   # publish releases
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -34,10 +37,25 @@ jobs:
         env:
           MOTIONCAM_KEYSTORE_PASSWORD: ${{ secrets.MOTIONCAM_KEYSTORE_PASSWORD }}
           MOTIONCAM_KEY_ALIAS: ${{ secrets.MOTIONCAM_KEY_ALIAS }}
-        run: ./gradlew --no-daemon assembleDebug
+        run: |
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk MotionCam.apk
       - name: Show signing certificate (should match the release key's SHA-1)
-        run: '"$ANDROID_HOME"/build-tools/34.0.0/apksigner verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -E "SHA-1|SHA-256|DN"'
+        run: '"$ANDROID_HOME"/build-tools/34.0.0/apksigner verify --print-certs MotionCam.apk | grep -E "SHA-1|SHA-256|DN"'
       - uses: actions/upload-artifact@v4
         with:
-          name: MotionCam-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: MotionCam-apk
+          path: MotionCam.apk
+      - name: Publish as the latest release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'gac2003/Android-Motion-Activated-Camera'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="build-${GITHUB_RUN_NUMBER}"
+          NOTES="Automatic build ${GITHUB_RUN_NUMBER} of commit ${GITHUB_SHA::7}: $(git log -1 --pretty=%s)
+
+          **Install:** download MotionCam.apk below on your Android phone (Android 11+), open it and allow installing from your browser/file manager. Updates install over the previous version and keep your settings."
+          gh release create "$TAG" MotionCam.apk --title "MotionCam 1.0.${GITHUB_RUN_NUMBER}" --notes "$NOTES" --target "$GITHUB_SHA" --latest
+          # keep only the 5 newest automatic builds
+          gh release list --limit 100 --json tagName -q '.[].tagName' | grep '^build-' | sort -t- -k2 -n -r | tail -n +6 \
+            | xargs -r -I{} gh release delete {} --yes --cleanup-tag

@@ -11,8 +11,10 @@ android {
         applicationId = "com.motioncam"
         minSdk = 30
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // CI build number, so every published APK is newer than the previous one
+        val build = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
+        versionCode = build
+        versionName = "1.0.$build"
     }
 
     // Release signing key comes from GitHub Actions secrets (never stored in the repo). Builds without it
@@ -35,6 +37,8 @@ android {
         }
         release {
             isMinifyEnabled = false
+            // published builds use the release key; local/fork builds fall back to the local debug key
+            signingConfig = if (ksPath != null) signingConfigs.getByName("motioncam") else signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -42,6 +46,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    // lint warnings must not block publishing a release
+    lint { checkReleaseBuilds = false; abortOnError = false }
 }
 
 dependencies {

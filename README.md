@@ -9,7 +9,15 @@ This app was mainly built to be:
 Tested on a S23 Ultra and S20 FE which ran 24/7.
 Cap phone at 70% CPU usage and turn off fast charging to reduce temperatures.
 
-Android APK can be downloaded from the artifacts of the GitHub Actions.
+## ⬇ Download
+
+**[Download the latest MotionCam.apk](https://github.com/gac2003/Android-Motion-Activated-Camera/releases/latest/download/MotionCam.apk)** · [all releases](https://github.com/gac2003/Android-Motion-Activated-Camera/releases)
+
+1. Open the link on your Android phone (Android 11 or newer).
+2. Open the downloaded file and allow your browser / file manager to install apps when asked.
+3. Google Play Protect may warn that the app is unknown (it isn't on the Play Store) — choose *Install anyway*.
+
+New versions install over the old one and keep your settings and clips.
 
 [Privacy policy](PRIVACY.md)
 
@@ -27,10 +35,9 @@ A motion-triggered security camera for Android (built for a Galaxy S20 FE, works
 
 ## Build the APK
 
-### Option A – GitHub (no tools needed)
-1. Create a GitHub repository and push this folder to it.
-2. Open the **Actions** tab → *Build APK* → latest run → download the **MotionCam-debug-apk** artifact (zip containing `app-debug.apk`).
-3. Copy the APK to the phone and install it (allow "install unknown apps" for your file manager/browser).
+### Option A – download a build
+Every push to `main` is built by GitHub Actions and published under **Releases** as `MotionCam.apk`
+(the download link at the top always points to the newest one).
 
 ### Option B – Android Studio
 Open this folder in Android Studio (Hedgehog or newer), let it sync, then *Build → Build APK(s)*, or press Run with the phone connected over USB.

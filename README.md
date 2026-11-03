@@ -1,5 +1,5 @@
 Vibe coded Android app that turns your phone into a security surveillance camera.
-After trying the popular apps like Alfred and IPCam, they were either filled with ads, locked features behind subscriptions, or lacked manual camera adjustments.
+After trying the popular apps like Alfred and IP Webcam, they were either filled with ads, locked features behind subscriptions, or lacked manual camera adjustments.
 This app was mainly built to be:
 1. Turn your phone into a security camera that can run 24/7
 2. Give manual control over the camera including manual focus, ISO, shutter speed, etc that the popular apps lack

@@ -34,7 +34,8 @@ class DropboxProvider(private val appKey: String, private val refreshToken: Stri
         }
     }
 
-    private fun token(): String {
+    @Synchronized
+    internal fun token(): String {
         val now = System.currentTimeMillis()
         access?.let { if (now < accessExp - 60_000) return it }
         val r = Http.request("POST", "https://api.dropboxapi.com/oauth2/token",
@@ -48,7 +49,7 @@ class DropboxProvider(private val appKey: String, private val refreshToken: Stri
         return access!!
     }
 
-    private fun rpc(endpoint: String, args: JSONObject?, what: String): JSONObject {
+    internal fun rpc(endpoint: String, args: JSONObject?, what: String): JSONObject {
         repeat(2) { attempt ->
             val r = Http.request("POST", "https://api.dropboxapi.com/2/$endpoint",
                 mapOf("Authorization" to "Bearer ${token()}", "Content-Type" to "application/json"),
@@ -60,14 +61,16 @@ class DropboxProvider(private val appKey: String, private val refreshToken: Stri
         throw CloudException("$what: not signed in", CloudException.Kind.AUTH)
     }
 
-    private fun fail(r: Http.Resp, what: String): Nothing {
+    internal fun fail(r: Http.Resp, what: String): Nothing {
+        if (r.body.contains("missing_scope")) throw CloudException(
+            "$what: this Dropbox sign-in is missing a permission. Disconnect and connect Dropbox again.", CloudException.Kind.AUTH)
         if (r.code == 409 && r.body.contains("not_found")) throw CloudException("$what: folder not found", CloudException.Kind.NOT_FOUND)
         if (r.body.contains("insufficient_space")) throw CloudException("Dropbox is full", CloudException.Kind.QUOTA)
         Http.fail(r, what)
     }
 
     /** Dropbox-API-Arg must be ASCII. */
-    private fun arg(o: JSONObject) = o.toString().map { if (it.code > 126) "\\u%04x".format(it.code) else it.toString() }.joinToString("")
+    internal fun arg(o: JSONObject) = o.toString().map { if (it.code > 126) "\\u%04x".format(it.code) else it.toString() }.joinToString("")
 
     override fun test(): String {
         val o = rpc("users/get_current_account", null, "Check account")
@@ -175,6 +178,60 @@ class DropboxProvider(private val appKey: String, private val refreshToken: Stri
         if (!r.ok) fail(r, "Finish upload")
         val m = JSONObject(r.body)
         return RemoteFile(m.optString("path_display", path), m.optString("name", name), m.optLong("size", src.size), System.currentTimeMillis())
+    }
+
+    /** GET on a content endpoint (download / thumbnail), with an optional byte offset. */
+    internal fun content(endpoint: String, args: JSONObject, offset: Long, what: String): java.io.InputStream {
+        repeat(2) { attempt ->
+            val h = mutableMapOf("Authorization" to "Bearer ${token()}", "Dropbox-API-Arg" to arg(args))
+            if (offset > 0) h["Range"] = "bytes=$offset-"
+            try {
+                return Http.download("https://content.dropboxapi.com/2/$endpoint", h, what).second
+            } catch (e: CloudException) {
+                if (e.kind == CloudException.Kind.AUTH && attempt == 0 && !(e.message ?: "").contains("missing_scope")) { synchronized(this) { access = null }; return@repeat }
+                if ((e.message ?: "").contains("missing_scope")) throw CloudException(
+                    "$what: this Dropbox sign-in is missing a permission. Disconnect and connect Dropbox again.", CloudException.Kind.AUTH)
+                if ((e.message ?: "").contains("HTTP 409") && (e.message ?: "").contains("not_found")) throw CloudException("$what: not found", CloudException.Kind.NOT_FOUND)
+                throw e
+            }
+        }
+        throw CloudException("$what: not signed in", CloudException.Kind.AUTH)
+    }
+
+    override fun open(file: RemoteFile, offset: Long): java.io.InputStream =
+        content("files/download", JSONObject().put("path", file.id), offset, "Download")
+
+    override fun serviceThumbnail(file: RemoteFile): ByteArray? = try {
+        content("files/get_thumbnail_v2", JSONObject()
+            .put("resource", JSONObject().put(".tag", "path").put("path", file.id))
+            .put("format", "jpeg").put("size", "w480h320"), 0, "Thumbnail").use { it.readBytes() }
+    } catch (e: Exception) { null }
+
+    /**
+     * A view-only link to [path] (normally the backup folder) that another Dropbox user can paste into
+     * MotionCam's Remote folders. Reuses an existing link.
+     */
+    fun viewerLink(path: String): String {
+        try {
+            val o = rpc("sharing/create_shared_link_with_settings", JSONObject().put("path", path)
+                .put("settings", JSONObject().put("audience", "public").put("access", "viewer").put("allow_download", true)), "Create link")
+            return o.getString("url")
+        } catch (e: CloudException) {
+            if (!(e.message ?: "").contains("shared_link_already_exists")) throw e
+        }
+        return existingLink(path) ?: throw CloudException("Dropbox did not return the existing link", CloudException.Kind.OTHER)
+    }
+
+    fun existingLink(path: String): String? {
+        val o = rpc("sharing/list_shared_links", JSONObject().put("path", path).put("direct_only", true), "Read links")
+        val arr = o.optJSONArray("links") ?: return null
+        return (0 until arr.length()).map { arr.getJSONObject(it) }.firstOrNull { it.optString(".tag") == "folder" || it.has("url") }?.optString("url")
+    }
+
+    /** Stops the link from working for everyone who has it. */
+    fun revokeLink(url: String) {
+        try { rpc("sharing/revoke_shared_link", JSONObject().put("url", url), "Revoke link") }
+        catch (e: CloudException) { if (e.kind != CloudException.Kind.NOT_FOUND && !(e.message ?: "").contains("shared_link_not_found")) throw e }
     }
 
     override fun delete(folder: String, file: RemoteFile) {

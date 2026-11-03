@@ -67,6 +67,35 @@ object Http {
         }
     }
 
+    /**
+     * Opens a download. Returns the body stream (close it when done) or throws. [headers] may include
+     * "Range". 200 and 206 count as success; other codes go through [fail].
+     */
+    fun download(url: String, headers: Map<String, String>, what: String, method: String = "GET"): Pair<Int, InputStream> {
+        try {
+            val c = URL(url).openConnection() as HttpURLConnection
+            c.requestMethod = method
+            c.connectTimeout = 20_000
+            c.readTimeout = 60_000
+            c.instanceFollowRedirects = true
+            for ((k, v) in headers) c.setRequestProperty(k, v)
+            val code = c.responseCode
+            if (code == 200 || code == 206) {
+                val s = c.inputStream
+                return Pair(code, object : java.io.FilterInputStream(s) {
+                    override fun close() { try { super.close() } catch (_: IOException) {}; c.disconnect() }
+                })
+            }
+            val text = try { c.errorStream?.bufferedReader()?.use { it.readText() } ?: "" } catch (e: IOException) { "" }
+            c.disconnect()
+            fail(Resp(code, text, emptyMap()), what)
+        } catch (e: CloudException) {
+            throw e
+        } catch (e: IOException) {
+            throw CloudException("Network error: ${e.message}", CloudException.Kind.NETWORK, e)
+        }
+    }
+
     /** Maps common HTTP failures to error kinds. */
     fun fail(r: Resp, what: String): Nothing {
         val kind = when {

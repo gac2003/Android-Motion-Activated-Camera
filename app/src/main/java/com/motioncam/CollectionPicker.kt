@@ -8,8 +8,8 @@ import android.widget.Toast
 
 /** "Add to…" dialog: choose a collection (or create one) for the given clips. */
 object CollectionPicker {
-    fun show(a: Activity, clipIds: List<Long>, done: () -> Unit) {
-        val cols = Collections.all(a)
+    fun show(a: Activity, clipIds: List<Long>, store: CollectionStore = Collections, done: () -> Unit) {
+        val cols = store.all(a)
         val names = cols.map { c ->
             val inAll = c.clipIds.containsAll(clipIds)
             (if (c.isFavourites) "★ " else "") + c.name + "  (${c.clipIds.size})" + if (inAll) "  ✓" else ""
@@ -17,12 +17,12 @@ object CollectionPicker {
         AlertDialog.Builder(a).setTitle(if (clipIds.size == 1) "Add clip to" else "Add ${clipIds.size} clips to")
             .setItems(names.toTypedArray()) { _, which ->
                 if (which < cols.size) {
-                    Collections.add(a, cols[which].id, clipIds)
+                    store.add(a, cols[which].id, clipIds)
                     Toast.makeText(a, "Added to ${cols[which].name}", Toast.LENGTH_SHORT).show()
                     done()
                 } else askName(a, "New collection", "") { name ->
-                    val c = Collections.create(a, name)
-                    Collections.add(a, c.id, clipIds)
+                    val c = store.create(a, name)
+                    store.add(a, c.id, clipIds)
                     Toast.makeText(a, "Added to ${c.name}", Toast.LENGTH_SHORT).show()
                     done()
                 }

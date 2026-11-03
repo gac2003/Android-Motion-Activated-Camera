@@ -18,18 +18,23 @@ import java.util.concurrent.TimeUnit
  */
 object GoogleAuth {
     const val SCOPE = "https://www.googleapis.com/auth/drive.file"
+    /**
+     * Read-only access to the whole Drive. Only requested when the user adds a folder another Google account
+     * shared with them (Remote folders); backups never use it.
+     */
+    const val SCOPE_READONLY = "https://www.googleapis.com/auth/drive.readonly"
     /** Android OAuth client registered for package com.motioncam + the release signing key (informational). */
     const val CLIENT_ID = "198396848516-1288dfl5tulora61kltqdnrdd57882ks.apps.googleusercontent.com"
 
-    private fun request(account: String?): AuthorizationRequest {
-        val b = AuthorizationRequest.builder().setRequestedScopes(listOf(Scope(SCOPE)))
+    private fun request(account: String?, scope: String): AuthorizationRequest {
+        val b = AuthorizationRequest.builder().setRequestedScopes(listOf(Scope(scope)))
         if (account != null) b.setAccount(Account(account, "com.google"))
         return b.build()
     }
 
     /** Interactive sign-in from a screen. [onToken] gets an access token; a consent screen may be shown first. */
-    fun start(a: Activity, requestCode: Int, onToken: (String) -> Unit, onError: (String) -> Unit) {
-        Identity.getAuthorizationClient(a).authorize(request(null))
+    fun start(a: Activity, requestCode: Int, onToken: (String) -> Unit, onError: (String) -> Unit, scope: String = SCOPE) {
+        Identity.getAuthorizationClient(a).authorize(request(null, scope))
             .addOnSuccessListener { r ->
                 val pi = r.pendingIntent
                 if (r.hasResolution() && pi != null) {
@@ -48,19 +53,20 @@ object GoogleAuth {
         Identity.getAuthorizationClient(a).getAuthorizationResultFromIntent(data).accessToken
     } catch (e: Exception) { null }
 
-    private var cached: String? = null
-    private var cachedAt = 0L
+    private class Cached(val token: String, val at: Long)
+    private val cache = HashMap<String, Cached>()
 
     /** Background token for an already-authorised [account]; never shows UI. Reused for ~45 minutes. */
     @Synchronized
-    fun token(ctx: Context, account: String?): String {
-        cached?.let { if (System.currentTimeMillis() - cachedAt < 45 * 60_000L) return it }
-        return fetch(ctx, account).also { cached = it; cachedAt = System.currentTimeMillis() }
+    fun token(ctx: Context, account: String?, scope: String = SCOPE): String {
+        val key = "$account|$scope"
+        cache[key]?.let { if (System.currentTimeMillis() - it.at < 45 * 60_000L) return it.token }
+        return fetch(ctx, account, scope).also { cache[key] = Cached(it, System.currentTimeMillis()) }
     }
 
-    private fun fetch(ctx: Context, account: String?): String {
+    private fun fetch(ctx: Context, account: String?, scope: String): String {
         val r = try {
-            Tasks.await(Identity.getAuthorizationClient(ctx).authorize(request(account)), 30, TimeUnit.SECONDS)
+            Tasks.await(Identity.getAuthorizationClient(ctx).authorize(request(account, scope)), 30, TimeUnit.SECONDS)
         } catch (e: Exception) {
             throw CloudException("Google sign-in unavailable: ${e.message}", CloudException.Kind.NETWORK, e)
         }
@@ -70,7 +76,7 @@ object GoogleAuth {
 
     /** Drops a token Google rejected so the next request gets a fresh one. */
     fun invalidate(ctx: Context, token: String) {
-        synchronized(this) { if (cached == token) cached = null }
+        synchronized(this) { cache.entries.removeAll { it.value.token == token } }
         try { GoogleAuthUtil.clearToken(ctx, token) } catch (_: Exception) {}
     }
 }

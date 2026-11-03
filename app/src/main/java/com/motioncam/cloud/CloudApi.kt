@@ -12,7 +12,7 @@ enum class CloudKind(val key: String, val label: String) {
 }
 
 /** A file in the backup folder. [id] is the provider's handle (Drive file id, Dropbox/FTP/SFTP path). */
-class RemoteFile(val id: String, val name: String, val size: Long, val modifiedMs: Long)
+class RemoteFile(val id: String, val name: String, val size: Long, val modifiedMs: Long, val thumbUrl: String? = null)
 
 /** A folder. [id] is a Drive folder id or a path for the other providers. */
 class RemoteFolder(val id: String, val name: String)
@@ -55,8 +55,33 @@ interface CloudProvider : java.io.Closeable {
     fun delete(folder: String, file: RemoteFile)
     /** Removes leftovers of a cancelled upload (e.g. "<name>.part"), best effort. */
     fun discardPartial(folder: String, name: String) {}
+    /** Reads [file] from byte [offset] to the end (used by remote folders, which only ever read). */
+    fun open(file: RemoteFile, offset: Long): InputStream =
+        throw CloudException("Reading is not supported here", CloudException.Kind.OTHER)
+    /** The service's own preview image of a video, if it has one (JPEG bytes). */
+    fun serviceThumbnail(file: RemoteFile): ByteArray? = null
     override fun close() {}
 }
 
 /** Our clips only: never touch anything else in the folder. */
 fun isOurClip(name: String) = name.startsWith("MC_") && name.endsWith(".mp4")
+
+/**
+ * Peak-motion thumbnails are uploaded next to the clips, in this subfolder, so other devices viewing the
+ * folder see the right frame without downloading videos. Name: <clip name without .mp4>_<duration ms>.jpg
+ */
+const val THUMB_FOLDER = ".thumbnails"
+
+fun thumbName(clipName: String, durationMs: Long) = clipName.removeSuffix(".mp4") + "_" + durationMs.coerceAtLeast(0) + ".jpg"
+
+/** Parses a thumbnail name: clip name (with .mp4) and duration, or null if it is not one of ours. */
+fun parseThumbName(name: String): Pair<String, Long>? {
+    val m = Regex("^(MC_.+)_(\\d+)(?: \\(\\d+\\))?\\.jpg$").find(name) ?: return null
+    return Pair(m.groupValues[1] + ".mp4", m.groupValues[2].toLong())
+}
+
+/** Bytes as an [UploadSource]. */
+fun bytesSource(b: ByteArray) = object : UploadSource {
+    override val size = b.size.toLong()
+    override fun open(offset: Long): InputStream = java.io.ByteArrayInputStream(b, offset.toInt(), (b.size - offset).toInt())
+}

@@ -216,6 +216,33 @@ class FtpProvider(
         return RemoteFile(final, name, src.size, System.currentTimeMillis())
     }
 
+    /** RETR from [offset]. Reading to the end and closing finishes the transfer; closing early drops the connection. */
+    override fun open(file: RemoteFile, offset: Long): java.io.InputStream {
+        connect()
+        val d = data()
+        if (offset > 0) expect(cmd("REST $offset"), 350, what = "Resume")
+        expect(cmd("RETR ${file.id}"), 125, 150, what = "Download")
+        val input = try { d.getInputStream() } catch (e: IOException) { net(e) }
+        return object : java.io.FilterInputStream(input) {
+            private var eof = false
+            private var closed = false
+            override fun read(): Int = super.read().also { if (it < 0) eof = true }
+            override fun read(b: ByteArray, off: Int, len: Int): Int = try {
+                super.read(b, off, len).also { if (it < 0) eof = true }
+            } catch (e: IOException) { net(e) }
+            override fun close() {
+                if (closed) return
+                closed = true
+                try { d.close() } catch (_: Exception) {}
+                if (eof) { try { read226() } catch (_: Exception) { dropConnection() } } else dropConnection()
+            }
+        }
+    }
+
+    private fun read226() { expect(read(), 226, 250, what = "Download") }
+
+    private fun dropConnection() { try { sock?.close() } catch (_: Exception) {}; sock = null }
+
     override fun delete(folder: String, file: RemoteFile) {
         connect()
         val r = cmd("DELE ${file.id}")

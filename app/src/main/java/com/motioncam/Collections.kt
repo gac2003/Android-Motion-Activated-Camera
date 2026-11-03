@@ -10,12 +10,15 @@ class ClipCollection(val id: String, var name: String, val clipIds: LinkedHashSe
     val isFavourites get() = id == Collections.FAVOURITES
 }
 
-/** Stores collections in a small JSON file in the app's private storage. */
-object Collections {
-    const val FAVOURITES = "favourites"
+/**
+ * Stores collections in a small JSON file in the app's private storage. [Collections] holds the phone's own
+ * clips; each remote folder has its own store ([Collections.forRemote]) so the two never mix. Remote
+ * collections live only on this device and are never written to the shared folder.
+ */
+open class CollectionStore(private val fileName: String) {
     private var cache: MutableList<ClipCollection>? = null
 
-    private fun file(ctx: Context) = File(ctx.filesDir, "collections.json")
+    private fun file(ctx: Context) = File(ctx.filesDir, fileName)
 
     @Synchronized
     private fun load(ctx: Context): MutableList<ClipCollection> {
@@ -34,7 +37,7 @@ object Collections {
                 }
             }
         } catch (_: Exception) {}
-        if (out.none { it.isFavourites }) out.add(0, ClipCollection(FAVOURITES, "Favourites", LinkedHashSet(), 0))
+        if (out.none { it.isFavourites }) out.add(0, ClipCollection(Collections.FAVOURITES, "Favourites", LinkedHashSet(), 0))
         cache = out
         return out
     }
@@ -81,7 +84,7 @@ object Collections {
     /** Deletes the collection only; the clips themselves are untouched. Favourites cannot be deleted. */
     @Synchronized
     fun delete(ctx: Context, id: String) {
-        if (id == FAVOURITES) return
+        if (id == Collections.FAVOURITES) return
         load(ctx).removeAll { it.id == id }
         save(ctx)
     }
@@ -97,10 +100,10 @@ object Collections {
     }
 
     @Synchronized
-    fun isFavourite(ctx: Context, clipId: Long) = get(ctx, FAVOURITES)?.clipIds?.contains(clipId) == true
+    fun isFavourite(ctx: Context, clipId: Long) = get(ctx, Collections.FAVOURITES)?.clipIds?.contains(clipId) == true
 
     @Synchronized
-    fun favouriteIds(ctx: Context): Set<Long> = get(ctx, FAVOURITES)?.clipIds?.toSet() ?: emptySet()
+    fun favouriteIds(ctx: Context): Set<Long> = get(ctx, Collections.FAVOURITES)?.clipIds?.toSet() ?: emptySet()
 
     /** Drops references to clips that no longer exist (deleted from the phone). */
     @Synchronized
@@ -109,4 +112,24 @@ object Collections {
         for (c in load(ctx)) if (c.clipIds.retainAll(existing)) changed = true
         if (changed) save(ctx)
     }
+}
+
+/** The phone's own collections (Favourites + user-made). */
+object Collections : CollectionStore("collections.json") {
+    const val FAVOURITES = "favourites"
+    private val remote = HashMap<String, CollectionStore>()
+
+    /** Collections of a remote folder, kept on this device only. */
+    @Synchronized
+    fun forRemote(sourceId: String): CollectionStore = remote.getOrPut(sourceId) { CollectionStore("remote_${sourceId}_collections.json") }
+
+    /** Removes a remote folder's collections (when the folder is removed from this device). */
+    @Synchronized
+    fun dropRemote(ctx: Context, sourceId: String) {
+        remote.remove(sourceId)
+        File(ctx.filesDir, "remote_${sourceId}_collections.json").delete()
+    }
+
+    /** The store for a remote source id, or the phone's own when null. */
+    fun of(sourceId: String?): CollectionStore = if (sourceId == null) this else forRemote(sourceId)
 }

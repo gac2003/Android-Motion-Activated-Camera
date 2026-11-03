@@ -114,6 +114,10 @@ class SftpProvider(
         RemoteFile(final, name, src.size, System.currentTimeMillis())
     }
 
+    override fun open(file: RemoteFile, offset: Long): java.io.InputStream = op("Download") { c ->
+        c.get(file.id, null, offset)
+    }
+
     override fun delete(folder: String, file: RemoteFile) {
         try { op("Delete") { it.rm(file.id) } } catch (e: CloudException) { if (e.kind != CloudException.Kind.NOT_FOUND) throw e }
     }

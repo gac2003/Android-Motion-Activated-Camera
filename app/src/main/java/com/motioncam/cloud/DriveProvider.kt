@@ -49,15 +49,63 @@ class DriveProvider(private val accessToken: () -> String, private val invalidat
     }
 
     override fun list(folder: String): List<RemoteFile> =
-        pages("'$folder' in parents and trashed=false and mimeType!='$folderMime'", "files(id,name,size,createdTime)").map {
-            RemoteFile(it.getString("id"), it.getString("name"), it.optString("size", "0").toLongOrNull() ?: 0L, parseTime(it.optString("createdTime")))
+        pages("'$folder' in parents and trashed=false and mimeType!='$folderMime'", "files(id,name,size,createdTime,thumbnailLink)").map {
+            RemoteFile(it.getString("id"), it.getString("name"), it.optString("size", "0").toLongOrNull() ?: 0L,
+                parseTime(it.optString("createdTime")), it.optString("thumbnailLink").ifEmpty { null })
         }
+
+    /** Folders other Google accounts shared with this one (needs the read-only Drive access). */
+    fun listShared(): List<RemoteFolder> =
+        pages("sharedWithMe and mimeType='$folderMime' and trashed=false", "files(id,name)")
+            .map { RemoteFolder(it.getString("id"), it.getString("name")) }.sortedBy { it.name.lowercase() }
+
+    override fun open(file: RemoteFile, offset: Long): java.io.InputStream {
+        repeat(2) { attempt ->
+            val tok = accessToken()
+            val h = mutableMapOf("Authorization" to "Bearer $tok")
+            if (offset > 0) h["Range"] = "bytes=$offset-"
+            try {
+                return Http.download("$api/files/${Http.enc(file.id)}?alt=media&supportsAllDrives=true", h, "Download").second
+            } catch (e: CloudException) {
+                if (e.kind == CloudException.Kind.AUTH && attempt == 0) { invalidate(tok); return@repeat }
+                throw e
+            }
+        }
+        throw CloudException("Download: not signed in", CloudException.Kind.AUTH)
+    }
+
+    /** Google's own (early-frame) preview, used only when no MotionCam thumbnail was uploaded. */
+    override fun serviceThumbnail(file: RemoteFile): ByteArray? {
+        val link = file.thumbUrl ?: return null
+        val url = link.replace(Regex("=s\\d+$"), "=s480")
+        return try {
+            Http.download(url, mapOf("Authorization" to "Bearer ${accessToken()}"), "Thumbnail").second.use { it.readBytes() }
+        } catch (e: Exception) { null }
+    }
+
+    /**
+     * Gives another Google account read-only access to a folder this app created (and everything in it).
+     * Google emails them a link; the folder then shows under "Shared with me" in their MotionCam.
+     */
+    fun share(folderId: String, email: String) {
+        call("POST", "$api/files/${Http.enc(folderId)}/permissions?sendNotificationEmail=true&fields=id",
+            JSONObject().put("role", "reader").put("type", "user").put("emailAddress", email.trim()), "Share folder")
+    }
+
+    /** Accounts the folder is shared with (email addresses), excluding the owner. */
+    fun sharedWith(folderId: String): List<String> {
+        val o = call("GET", "$api/files/${Http.enc(folderId)}/permissions?fields=permissions(emailAddress,role,type)", what = "Read sharing")
+        val arr = o.optJSONArray("permissions") ?: return emptyList()
+        return (0 until arr.length()).map { arr.getJSONObject(it) }
+            .filter { it.optString("role") != "owner" }
+            .map { it.optString("emailAddress").ifEmpty { if (it.optString("type") == "anyone") "anyone with the link" else "?" } }
+    }
 
     private fun pages(q: String, fields: String): List<JSONObject> {
         val out = ArrayList<JSONObject>()
         var token: String? = null
         do {
-            val url = "$api/files?pageSize=1000&spaces=drive&q=${Http.enc(q)}&fields=${Http.enc("nextPageToken,$fields")}" +
+            val url = "$api/files?pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true&q=${Http.enc(q)}&fields=${Http.enc("nextPageToken,$fields")}" +
                 (token?.let { "&pageToken=${Http.enc(it)}" } ?: "")
             val o = call("GET", url, what = "List files")
             val arr = o.optJSONArray("files") ?: JSONArray()

@@ -63,7 +63,7 @@ class Prefs(ctx: Context) {
     var preRecordMs: Int get() = i("preRecordMs", 0); set(v) = put("preRecordMs", v)
     /** Discard a clip shorter than [discardShortMs] that was cut off by stopping monitoring manually (with Undo). */
     var discardShortOnStop: Boolean get() = b("discardShortOnStop", true); set(v) = put("discardShortOnStop", v)
-    var discardShortMs: Int get() = i("discardShortMs", 1500); set(v) = put("discardShortMs", v)
+    var discardShortMs: Int get() = i("discardShortMs", 1000); set(v) = put("discardShortMs", v)
     /** -1 = follow device orientation, otherwise 0/90/180/270. */
     var rotation: Int get() = i("rotation", -1); set(v) = put("rotation", v)
 

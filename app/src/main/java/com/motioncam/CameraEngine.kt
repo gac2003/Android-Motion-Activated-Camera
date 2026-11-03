@@ -579,7 +579,8 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         message = if (monitoring) "Watching for motion" else ""
         pushRepeating()   // stop feeding the encoder first
         val held = heldAsShort()
-        var ok = SystemClock.elapsedRealtime() - recordStartedElapsed > 1000
+        // under ~0.3 s there may be no complete frame (stop() then fails anyway); anything longer is a real clip
+        var ok = SystemClock.elapsedRealtime() - recordStartedElapsed > 300
         try { rec.stop() } catch (_: Exception) { if (!hitSizeLimit) ok = false }   // after a size cap the file is already finalised
         hitSizeLimit = false
         try { rec.release() } catch (_: Exception) {}

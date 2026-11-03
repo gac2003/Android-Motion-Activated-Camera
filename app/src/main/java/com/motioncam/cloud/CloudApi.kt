@@ -53,6 +53,8 @@ interface CloudProvider : java.io.Closeable {
     fun upload(folder: String, name: String, src: UploadSource, resume: String?,
                saveResume: (String?) -> Unit, progress: (Long) -> Unit): RemoteFile
     fun delete(folder: String, file: RemoteFile)
+    /** Removes leftovers of a cancelled upload (e.g. "<name>.part"), best effort. */
+    fun discardPartial(folder: String, name: String) {}
     override fun close() {}
 }
 

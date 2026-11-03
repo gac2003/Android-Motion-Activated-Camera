@@ -48,8 +48,17 @@ object GoogleAuth {
         Identity.getAuthorizationClient(a).getAuthorizationResultFromIntent(data).accessToken
     } catch (e: Exception) { null }
 
-    /** Background token for an already-authorised [account]; never shows UI. */
+    private var cached: String? = null
+    private var cachedAt = 0L
+
+    /** Background token for an already-authorised [account]; never shows UI. Reused for ~45 minutes. */
+    @Synchronized
     fun token(ctx: Context, account: String?): String {
+        cached?.let { if (System.currentTimeMillis() - cachedAt < 45 * 60_000L) return it }
+        return fetch(ctx, account).also { cached = it; cachedAt = System.currentTimeMillis() }
+    }
+
+    private fun fetch(ctx: Context, account: String?): String {
         val r = try {
             Tasks.await(Identity.getAuthorizationClient(ctx).authorize(request(account)), 30, TimeUnit.SECONDS)
         } catch (e: Exception) {
@@ -61,6 +70,7 @@ object GoogleAuth {
 
     /** Drops a token Google rejected so the next request gets a fresh one. */
     fun invalidate(ctx: Context, token: String) {
+        synchronized(this) { if (cached == token) cached = null }
         try { GoogleAuthUtil.clearToken(ctx, token) } catch (_: Exception) {}
     }
 }

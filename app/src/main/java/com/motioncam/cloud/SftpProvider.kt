@@ -118,6 +118,10 @@ class SftpProvider(
         try { op("Delete") { it.rm(file.id) } } catch (e: CloudException) { if (e.kind != CloudException.Kind.NOT_FOUND) throw e }
     }
 
+    override fun discardPartial(folder: String, name: String) {
+        try { sftp().rm(path(folder, name) + ".part") } catch (_: Exception) {}
+    }
+
     override fun close() {
         try { ch?.disconnect() } catch (_: Exception) {}
         try { session?.disconnect() } catch (_: Exception) {}

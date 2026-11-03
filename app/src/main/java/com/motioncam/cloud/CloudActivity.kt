@@ -64,8 +64,10 @@ class CloudActivity : Activity() {
         statusTv = Ui.label(this, CloudSync.status(this, kind), 14f)
         box.addView(statusTv)
         cfg.lastError?.let { if (cfg.blocked != null || CloudSync.counts(this, kind).failed > 0) note("Last error: $it") }
-        row(button("Retry now") { CloudSync.retryNow(this, kind); toast("Retrying") },
-            button("Upload existing clips…") { uploadExisting() })
+        row(button("View queue") { startActivity(Intent(this, UploadQueueActivity::class.java)) },
+            button("Retry now") { CloudSync.retryNow(this, kind); toast("Retrying") })
+        box.addView(button("Upload existing clips…") { uploadExisting() })
+        note("Clips already in the backup folder (same name) are skipped, so nothing is uploaded twice.")
 
         title("Backup")
         toggle("Back up new clips to ${kind.label}", cfg.enabled) { on ->

@@ -107,6 +107,8 @@ class Prefs(ctx: Context) {
     var cloudQuality: Int get() = i("cloudQuality", 0); set(v) = put("cloudQuality", v)
     /** Delete the phone copy once a clip is in every enabled destination (clips in collections are kept). */
     var cloudDeleteLocal: Boolean get() = b("cloudDeleteLocal", false); set(v) = put("cloudDeleteLocal", v)
+    /** All uploads paused from the queue screen. */
+    var cloudPaused: Boolean get() = b("cloudPaused", false); set(v) = put("cloudPaused", v)
 
     // ---- remote view ----
     var serverOn: Boolean get() = b("serverOn", false); set(v) = put("serverOn", v)

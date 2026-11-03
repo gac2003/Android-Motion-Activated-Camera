@@ -35,26 +35,45 @@ import java.io.InputStream
 object CloudSync {
     class Job(val clipId: Long, val kind: CloudKind, var attempts: Int = 0, var nextAt: Long = 0,
               var resume: String? = null, var error: String? = null, var failed: Boolean = false,
-              val addedAt: Long = System.currentTimeMillis())
+              val addedAt: Long = System.currentTimeMillis(), var seq: Long = addedAt, var paused: Boolean = false) {
+        val key get() = "$clipId:${kind.key}"
+        // live state (not saved)
+        @Volatile var running = false
+        @Volatile var abort = false
+        @Volatile var progress = -1
+        @Volatile var phase: String? = null
+    }
 
     class Uploaded(val clipId: Long, val kind: CloudKind, val name: String, val remoteId: String,
                    val size: Long, val at: Long, var pinned: Boolean)
+
+    /** Read-only view of a job for the queue screen. */
+    class JobView(val key: String, val clipId: Long, val kind: CloudKind, val state: String, val progress: Int,
+                  val running: Boolean, val paused: Boolean, val failed: Boolean, val error: String?)
 
     private const val JOB_ID = 4242
     private val lock = Object()
     private var jobs: MutableList<Job>? = null
     private var index: MutableList<Uploaded>? = null
-    @Volatile private var worker: Thread? = null
+    private val lanes = HashMap<CloudKind, Int>()
     @Volatile private var stop = false
     @Volatile private var jobCallback: ((Boolean) -> Unit)? = null
     @Volatile private var netCallbackRegistered = false
+    private val timer by lazy { android.os.Handler(android.os.HandlerThread("cloud-timer").also { it.start() }.looper) }
+    private var timerCtx: Context? = null
+    private val wake = Runnable { timerCtx?.let { kick(it) } }
 
-    /** What the worker is doing right now (for the UI). */
-    @Volatile var activity: String? = null; private set
-    @Volatile var activityKind: CloudKind? = null; private set
+    /** Cached listing of each backup folder (for the duplicate check and size cap). */
+    private class Listing(val at: Long, val files: java.util.concurrent.ConcurrentHashMap<String, RemoteFile>)
+    private val listings = HashMap<CloudKind, Listing>()
+    private class FreeSpace(val at: Long, var free: Long?)
+    private val freeSpace = HashMap<CloudKind, FreeSpace>()
+    private val spaceLocks = CloudKind.values().associateWith { Object() }
 
     private val BACKOFF_NET = longArrayOf(5_000, 15_000, 30_000, 60_000, 120_000, 300_000, 900_000)
     private val BACKOFF_OTHER = longArrayOf(60_000, 300_000, 900_000, 1_800_000, 3_600_000)
+
+    private fun laneLimit(k: CloudKind) = if (k == CloudKind.FTP || k == CloudKind.SFTP) 2 else 3
 
     // ------------------------------------------------------------------ persistence
 
@@ -71,9 +90,10 @@ object CloudSync {
                 for (i in 0 until a.length()) {
                     val o = a.getJSONObject(i)
                     val k = CloudKind.of(o.getString("kind")) ?: continue
+                    val added = o.optLong("added")
                     js += Job(o.getLong("clip"), k, o.optInt("attempts"), o.optLong("nextAt"),
                         o.optString("resume").ifEmpty { null }, o.optString("error").ifEmpty { null },
-                        o.optBoolean("failed"), o.optLong("added"))
+                        o.optBoolean("failed"), added, o.optLong("seq", added), o.optBoolean("paused"))
                 }
             }
             if (iFile(ctx).exists()) {
@@ -92,7 +112,8 @@ object CloudSync {
     private fun save(ctx: Context) {
         val q = JSONArray()
         for (j in jobs ?: return) q.put(JSONObject().put("clip", j.clipId).put("kind", j.kind.key).put("attempts", j.attempts)
-            .put("nextAt", j.nextAt).put("resume", j.resume ?: "").put("error", j.error ?: "").put("failed", j.failed).put("added", j.addedAt))
+            .put("nextAt", j.nextAt).put("resume", j.resume ?: "").put("error", j.error ?: "").put("failed", j.failed)
+            .put("added", j.addedAt).put("seq", j.seq).put("paused", j.paused))
         val ix = JSONArray()
         for (u in index ?: return) ix.put(JSONObject().put("clip", u.clipId).put("kind", u.kind.key).put("name", u.name).put("rid", u.remoteId)
             .put("size", u.size).put("at", u.at).put("pinned", u.pinned))
@@ -127,13 +148,14 @@ object CloudSync {
         return true
     }
 
-    /** Queues existing clips newer than [sinceMs] (0 = all). Returns how many were added. */
+    /** Queues existing clips newer than [sinceMs] (0 = all), oldest first. Returns how many were added. */
     fun enqueueExisting(ctx: Context, kind: CloudKind, sinceMs: Long): Int {
         val clips = ClipStore.list(ctx).filter { it.startMs >= sinceMs }.sortedBy { it.startMs }
         var n = 0
         synchronized(lock) {
             load(ctx)
-            for (c in clips) if (addJobLocked(c.id, kind)) n++
+            var seq = (jobs!!.maxOfOrNull { it.seq } ?: System.currentTimeMillis()) + 1
+            for (c in clips) if (addJobLocked(c.id, kind)) { jobs!!.last().seq = seq++; n++ }
             save(ctx)
         }
         kick(ctx)
@@ -153,26 +175,128 @@ object CloudSync {
 
     /** Removes queued jobs for a destination (when it is disabled or disconnected). */
     fun dropJobs(ctx: Context, kind: CloudKind) {
-        synchronized(lock) { load(ctx); jobs!!.removeAll { it.kind == kind }; save(ctx) }
+        synchronized(lock) {
+            load(ctx)
+            jobs!!.filter { it.kind == kind }.forEach { it.abort = true }
+            jobs!!.removeAll { it.kind == kind }
+            save(ctx)
+        }
+    }
+
+    // ---- queue screen
+
+    fun snapshot(ctx: Context): List<JobView> = synchronized(lock) {
+        load(ctx)
+        val now = System.currentTimeMillis()
+        val globalPause = Prefs(ctx).cloudPaused
+        jobs!!.sortedWith(compareBy({ !it.running }, { it.seq })).map { j ->
+            val state = when {
+                j.running -> j.phase ?: "Uploading"
+                j.failed -> "Failed — ${j.error ?: "error"}"
+                j.paused -> "Paused"
+                globalPause -> "Paused (all uploads)"
+                CloudConfig(ctx, j.kind).blocked != null -> CloudConfig(ctx, j.kind).blocked!!
+                j.nextAt > now -> "Retrying in ${ago(j.nextAt - now)}" + (j.error?.let { " — $it" } ?: "")
+                else -> "Waiting"
+            }
+            JobView(j.key, j.clipId, j.kind, state, if (j.running) j.progress else -1, j.running, j.paused, j.failed, j.error)
+        }
+    }
+
+    /** Queue order (by key) for display/reordering, highest priority first. */
+    fun order(ctx: Context): List<String> = synchronized(lock) { load(ctx); jobs!!.sortedBy { it.seq }.map { it.key } }
+
+    fun setPaused(ctx: Context, keys: Collection<String>, paused: Boolean) {
+        synchronized(lock) {
+            load(ctx)
+            for (j in jobs!!) if (j.key in keys) {
+                j.paused = paused
+                if (paused && j.running) j.abort = true      // stops after the current chunk; resumes later
+                if (!paused) { j.nextAt = 0; j.failed = false; j.attempts = 0 }
+            }
+            save(ctx)
+        }
+        kick(ctx)
+    }
+
+    fun cancel(ctx: Context, keys: Collection<String>) {
+        val removed = synchronized(lock) {
+            load(ctx)
+            val r = jobs!!.filter { it.key in keys }
+            r.forEach { it.abort = true }
+            jobs!!.removeAll(r.toSet())
+            save(ctx)
+            r
+        }
+        // tidy up partial uploads on servers that keep them (FTP/SFTP ".part")
+        Thread {
+            for (j in removed) {
+                val cfg = CloudConfig(ctx, j.kind)
+                val folder = cfg.folderId ?: continue
+                val clip = ClipStore.get(ctx, j.clipId) ?: continue
+                try { provider(ctx, cfg).use { it.discardPartial(folder, clip.name) } } catch (_: Exception) {}
+            }
+        }.start()
+    }
+
+    fun retry(ctx: Context, keys: Collection<String>) {
+        synchronized(lock) {
+            load(ctx)
+            for (j in jobs!!) if (j.key in keys) { j.failed = false; j.paused = false; j.nextAt = 0; j.attempts = 0 }
+            save(ctx)
+        }
+        kick(ctx)
+    }
+
+    /** Applies a new order (keys highest priority first); jobs not listed keep their relative order after. */
+    fun reorder(ctx: Context, keysInOrder: List<String>) {
+        synchronized(lock) {
+            load(ctx)
+            val pos = keysInOrder.withIndex().associate { it.value to it.index.toLong() }
+            val rest = jobs!!.filter { it.key !in pos }.sortedBy { it.seq }
+            for (j in jobs!!) pos[j.key]?.let { j.seq = it }
+            rest.forEachIndexed { i, j -> j.seq = keysInOrder.size.toLong() + i }
+            save(ctx)
+        }
+    }
+
+    fun moveToTop(ctx: Context, keys: Collection<String>) {
+        val o = order(ctx)
+        reorder(ctx, o.filter { it in keys } + o.filter { it !in keys })
+    }
+
+    fun moveToBottom(ctx: Context, keys: Collection<String>) {
+        val o = order(ctx)
+        reorder(ctx, o.filter { it !in keys } + o.filter { it in keys })
+    }
+
+    fun setAllPaused(ctx: Context, paused: Boolean) {
+        Prefs(ctx).cloudPaused = paused
+        if (paused) synchronized(lock) { load(ctx); jobs!!.filter { it.running }.forEach { it.abort = true } }
+        kick(ctx)
     }
 
     class Counts(val queued: Int, val failed: Int, val uploaded: Int)
 
-    fun counts(ctx: Context, kind: CloudKind): Counts = synchronized(lock) {
+    fun counts(ctx: Context, kind: CloudKind?): Counts = synchronized(lock) {
         load(ctx)
-        Counts(jobs!!.count { it.kind == kind && !it.failed }, jobs!!.count { it.kind == kind && it.failed }, index!!.count { it.kind == kind })
+        val js = jobs!!.filter { kind == null || it.kind == kind }
+        Counts(js.count { !it.failed }, js.count { it.failed }, index!!.count { kind == null || it.kind == kind })
     }
 
-    /** One-line status for the settings screen. */
+    /** One-line status for the settings screens. */
     fun status(ctx: Context, kind: CloudKind): String {
         val cfg = CloudConfig(ctx, kind)
         if (!cfg.isConfigured) return "Not set up"
         if (!cfg.enabled) return "Off"
         cfg.blocked?.let { return "⚠ $it" }
+        if (Prefs(ctx).cloudPaused) return "Paused (all uploads)"
         val c = counts(ctx, kind)
-        if (activityKind == kind && activity != null) return activity!! + if (c.queued > 1) " · ${c.queued - 1} more waiting" else ""
+        val running = synchronized(lock) { jobs!!.count { it.kind == kind && it.running } }
         val parts = ArrayList<String>()
-        if (c.queued > 0) parts += "${c.queued} waiting" + (waitReason(ctx)?.let { " ($it)" } ?: "")
+        if (running > 0) parts += "Uploading $running"
+        val waiting = c.queued - running
+        if (waiting > 0) parts += "$waiting waiting" + (if (running == 0) waitReason(ctx)?.let { " ($it)" } ?: "" else "")
         if (c.failed > 0) parts += "${c.failed} failed"
         if (parts.isEmpty()) parts += "Up to date"
         if (cfg.lastOkAt > 0) parts += "last upload ${ago(System.currentTimeMillis() - cfg.lastOkAt)} ago"
@@ -180,30 +304,55 @@ object CloudSync {
     }
 
     private fun ago(ms: Long): String {
-        val s = ms / 1000
+        val s = (ms / 1000).coerceAtLeast(0)
         return when { s < 60 -> "${s}s"; s < 3600 -> "${s / 60}m"; s < 86400 -> "${s / 3600}h"; else -> "${s / 86400}d" }
     }
 
-    /** Called from the JobScheduler job: run the worker and report when idle. */
+    /** Called from the JobScheduler job: run the workers and report when idle. */
     fun runForJob(ctx: Context, finished: (Boolean) -> Unit) {
         jobCallback = finished
         kick(ctx)
+        synchronized(lock) { if (lanes.values.sum() == 0) { jobCallback = null; finished(jobs?.any { !it.failed && !it.paused } == true) } }
     }
 
-    fun requestStop() { stop = true; synchronized(lock) { lock.notifyAll() } }
+    fun requestStop() { stop = true; synchronized(lock) { jobs?.filter { it.running }?.forEach { it.abort = true } } }
 
-    /** Starts the worker (or wakes it up). Cheap; call whenever something may have changed. */
+    // ------------------------------------------------------------------ scheduling
+
+    /**
+     * Starts upload lanes where there is work (up to 3 per cloud service, 2 per FTP/SFTP server).
+     * Cheap; call whenever something may have changed.
+     */
     fun kick(ctx: Context) {
         val app = ctx.applicationContext
+        if (Prefs(app).cloudPaused) return
+        val now = System.currentTimeMillis()
+        val enabled = enabledKinds(app).filter { CloudConfig(app, it).blocked == null }
         synchronized(lock) {
+            load(app)
             stop = false
-            val w = worker
-            if (w != null && w.isAlive) { lock.notifyAll(); return }
-            worker = Thread({ runWorker(app) }, "cloud-sync").also { it.isDaemon = true; it.start() }
+            var nextWake = Long.MAX_VALUE
+            for (k in enabled) {
+                val pending = jobs!!.filter { it.kind == k && !it.failed && !it.paused && !it.running }
+                val due = pending.count { it.nextAt <= now }
+                pending.filter { it.nextAt > now }.minOfOrNull { it.nextAt }?.let { nextWake = minOf(nextWake, it) }
+                val retentionDue = retentionDue(app, k)
+                val active = lanes[k] ?: 0
+                val want = minOf(laneLimit(k), due + active).coerceAtLeast(if (retentionDue && active == 0) 1 else 0)
+                for (i in active until want) {
+                    lanes[k] = (lanes[k] ?: 0) + 1
+                    Thread({ lane(app, k) }, "cloud-${k.key}-$i").apply { isDaemon = true }.start()
+                }
+            }
+            if (nextWake != Long.MAX_VALUE) {
+                val delay = (nextWake - now).coerceAtLeast(1000)
+                timerCtx = app
+                timer.removeCallbacks(wake)
+                timer.postDelayed(wake, delay)
+                scheduleJob(app, delay)   // backstop if the process is killed
+            }
         }
     }
-
-    // ------------------------------------------------------------------ conditions
 
     private fun waitReason(ctx: Context): String? {
         val p = Prefs(ctx)
@@ -243,50 +392,52 @@ object CloudSync {
         } catch (_: Exception) {}
     }
 
-    // ------------------------------------------------------------------ worker
+    // ------------------------------------------------------------------ worker lanes
 
-    private fun runWorker(ctx: Context) {
+    /** Next job for this service: due, not paused, not taken by another lane; highest priority first. */
+    private fun claim(ctx: Context, k: CloudKind): Job? = synchronized(lock) {
+        load(ctx)
+        if (Prefs(ctx).cloudPaused || CloudConfig(ctx, k).blocked != null) return null
+        val now = System.currentTimeMillis()
+        val j = jobs!!.filter { it.kind == k && !it.failed && !it.paused && !it.running && it.nextAt <= now }.minByOrNull { it.seq }
+        j?.running = true
+        j?.abort = false
+        j?.progress = 0
+        j
+    }
+
+    private fun lane(ctx: Context, k: CloudKind) {
+        var p: CloudProvider? = null
         try {
+            val cfg = CloudConfig(ctx, k)
+            if (retentionDue(ctx, k)) { p = provider(ctx, cfg); retention(ctx, cfg, p) }
             while (!stop) {
-                val now = System.currentTimeMillis()
-                val enabled = enabledKinds(ctx).filter { CloudConfig(ctx, it).blocked == null }
-                retention(ctx, enabled)
-                val next: Job?
-                val waitMs: Long
-                synchronized(lock) {
-                    load(ctx)
-                    jobs!!.removeAll { j -> CloudConfig(ctx, j.kind).let { !it.enabled || !it.isConfigured } }
-                    val live = jobs!!.filter { !it.failed && it.kind in enabled }
-                    next = live.filter { it.nextAt <= now }.minByOrNull { it.addedAt }
-                    waitMs = live.minOfOrNull { it.nextAt - now } ?: -1
+                if (waitReason(ctx) != null) { watchNetwork(ctx); scheduleJob(ctx, 0); break }
+                val job = claim(ctx, k) ?: break
+                if (p == null) {
+                    p = try { provider(ctx, cfg) } catch (e: Exception) {
+                        val ce = e as? CloudException ?: CloudException(e.message ?: "Cannot connect", CloudException.Kind.OTHER, e)
+                        handleError(ctx, cfg, job, ce)
+                        job.running = false
+                        break
+                    }
                 }
-                if (next == null) {
-                    if (waitMs < 0) break                         // nothing left
-                    scheduleJob(ctx, waitMs)                       // backstop if the process dies
-                    if (waitMs > 15 * 60_000L) break               // far away: let the job wake us
-                    synchronized(lock) { lock.wait(waitMs.coerceAtLeast(1000)) }
-                    continue
-                }
-                val why = waitReason(ctx)
-                if (why != null) {
-                    watchNetwork(ctx)
-                    scheduleJob(ctx, 0)                            // JobScheduler waits for the right network/charger
-                    synchronized(lock) { lock.wait(60_000) }
-                    if (waitReason(ctx) != null) break
-                    continue
-                }
-                process(ctx, next)
+                val healthy = process(ctx, job, cfg, p!!)
+                if (!healthy) { try { p.close() } catch (_: Exception) {}; p = null }   // reconnect next time
             }
-        } catch (_: InterruptedException) {
         } catch (_: Exception) {
         } finally {
-            activity = null
-            activityKind = null
-            val pending = synchronized(lock) { jobs?.any { !it.failed } == true }
-            if (pending) scheduleJob(ctx, 30_000)
-            jobCallback?.invoke(pending)
-            jobCallback = null
-            synchronized(lock) { if (worker === Thread.currentThread()) worker = null }
+            try { p?.close() } catch (_: Exception) {}
+            val idle = synchronized(lock) {
+                lanes[k] = ((lanes[k] ?: 1) - 1).coerceAtLeast(0)
+                lanes.values.sum() == 0
+            }
+            if (idle) {
+                val pending = synchronized(lock) { jobs?.any { !it.failed && !it.paused } == true }
+                jobCallback?.invoke(pending)
+                jobCallback = null
+            }
+            if (!stop) kick(ctx)   // schedules the next wake-up / more lanes if needed
         }
     }
 
@@ -304,67 +455,89 @@ object CloudSync {
     fun providerFor(ctx: Context, kind: CloudKind): CloudProvider = provider(ctx, CloudConfig(ctx, kind))
 
     /** Backup folder, created ("MotionCam") on first use if the user did not pick one. */
-    private fun folder(cfg: CloudConfig, p: CloudProvider): String {
+    private fun folder(cfg: CloudConfig, p: CloudProvider): String = synchronized(spaceLocks[cfg.kind]!!) {
         cfg.folderId?.let { return it }
         val existing = p.listFolders(null).firstOrNull { it.name == "MotionCam" }
         val f = existing ?: p.createFolder(null, "MotionCam")
         cfg.folderId = f.id
         cfg.folderName = f.name
-        return f.id
+        f.id
     }
 
-    private fun process(ctx: Context, job: Job) {
-        val cfg = CloudConfig(ctx, job.kind)
-        val clip = ClipStore.list(ctx).firstOrNull { it.id == job.clipId }
+    /** Folder contents, fetched at most every 5 minutes and kept up to date as we upload/delete. */
+    private fun listing(cfg: CloudConfig, p: CloudProvider, folder: String): MutableMap<String, RemoteFile> {
+        synchronized(lock) {
+            listings[cfg.kind]?.let { if (System.currentTimeMillis() - it.at < 5 * 60_000L) return it.files }
+        }
+        // network call outside the queue lock (the queue screen must never wait for it)
+        val files = java.util.concurrent.ConcurrentHashMap(p.list(folder).associateBy { it.name })
+        synchronized(lock) { listings[cfg.kind] = Listing(System.currentTimeMillis(), files) }
+        return files
+    }
+
+    /** Uploads one clip. Returns false if the connection should be re-made. */
+    private fun process(ctx: Context, job: Job, cfg: CloudConfig, p: CloudProvider): Boolean {
+        val clip = ClipStore.get(ctx, job.clipId)
         if (clip == null) {   // deleted from the phone before it could be uploaded
             synchronized(lock) { jobs!!.remove(job); save(ctx) }
-            return
+            return true
         }
-        activityKind = job.kind
-        activity = "Preparing ${clip.name}"
-        var p: CloudProvider? = null
+        job.phase = "Preparing"
         try {
-            p = provider(ctx, cfg)
             val folder = folder(cfg, p)
-            val src = source(ctx, clip)
+            // already in the cloud folder (e.g. uploaded before a reinstall)? then don't upload it again
+            val existing = listing(cfg, p, folder)[clip.name]
+            if (existing != null && existing.size > 0) {
+                done(ctx, job, cfg, clip, existing)
+                return true
+            }
+            val src = source(ctx, clip, job)
+            job.phase = "Uploading"
             ensureSpace(ctx, p, cfg, folder, src.size)
             var sent = 0L
-            var lastSave = 0L
             val rf = p.upload(folder, clip.name, src, job.resume,
                 saveResume = { r -> synchronized(lock) { job.resume = r; save(ctx) } },
                 progress = { n ->
-                    if (stop) throw CloudException("Paused", CloudException.Kind.NETWORK)
+                    if (stop || job.abort) throw CloudException("Paused", CloudException.Kind.NETWORK)
                     sent += n
-                    val now = SystemClock.elapsedRealtime()
-                    if (now - lastSave > 500) {
-                        lastSave = now
-                        activity = "Uploading ${clip.name} · ${(sent * 100 / src.size.coerceAtLeast(1)).coerceAtMost(100)}%"
-                    }
+                    job.progress = (sent * 100 / src.size.coerceAtLeast(1)).toInt().coerceIn(0, 100)
                 })
-            synchronized(lock) {
-                jobs!!.remove(job)
-                index!!.add(Uploaded(clip.id, job.kind, rf.name, rf.id, rf.size, System.currentTimeMillis(), isProtected(ctx, cfg, clip.id)))
-                save(ctx)
-            }
-            cfg.lastOkAt = System.currentTimeMillis()
-            cfg.lastError = null
-            cfg.blocked = null
-            afterUpload(ctx, clip)
+            done(ctx, job, cfg, clip, rf)
+            synchronized(lock) { freeSpace[cfg.kind]?.let { fs -> fs.free = fs.free?.minus(rf.size) } }
+            return true
         } catch (e: CloudException) {
             handleError(ctx, cfg, job, e)
+            return e.kind != CloudException.Kind.NETWORK
         } catch (e: Exception) {
             handleError(ctx, cfg, job, CloudException(e.message ?: e.javaClass.simpleName, CloudException.Kind.OTHER, e))
+            return false
         } finally {
-            try { p?.close() } catch (_: Exception) {}
-            activity = null
-            activityKind = null
+            job.running = false
+            job.phase = null
+            job.progress = -1
         }
+    }
+
+    private fun done(ctx: Context, job: Job, cfg: CloudConfig, clip: Clip, rf: RemoteFile) {
+        synchronized(lock) {
+            jobs!!.remove(job)
+            index!!.removeAll { it.clipId == clip.id && it.kind == job.kind }
+            index!!.add(Uploaded(clip.id, job.kind, rf.name, rf.id, rf.size, System.currentTimeMillis(), isProtected(ctx, cfg, clip.id)))
+            listings[cfg.kind]?.files?.put(rf.name, rf)
+            save(ctx)
+        }
+        cfg.lastOkAt = System.currentTimeMillis()
+        cfg.lastError = null
+        cfg.blocked = null
+        afterUpload(ctx, clip)
     }
 
     private fun handleError(ctx: Context, cfg: CloudConfig, job: Job, e: CloudException) {
         val now = System.currentTimeMillis()
-        cfg.lastError = e.message
         synchronized(lock) {
+            if (job !in jobs!!) return       // cancelled while uploading
+            if (job.abort && (job.paused || stop || Prefs(ctx).cloudPaused)) { save(ctx); return }   // paused by the user
+            cfg.lastError = e.message
             job.error = e.message
             when (e.kind) {
                 CloudException.Kind.AUTH -> {
@@ -378,8 +551,8 @@ object CloudSync {
                     notify(ctx, cfg.kind, "${cfg.kind.label} is full", "New clips are waiting on the phone. Free up space or change the backup settings.")
                 }
                 CloudException.Kind.NOT_FOUND -> {
-                    // the backup folder was removed: make a new one next time
-                    cfg.folderId = null
+                    cfg.folderId = null            // the backup folder was removed: make a new one next time
+                    listings.remove(cfg.kind)
                     job.nextAt = now + 5_000
                     job.attempts++
                 }
@@ -399,13 +572,13 @@ object CloudSync {
 
     // ------------------------------------------------------------------ sources & compression
 
-    private fun source(ctx: Context, clip: Clip): UploadSource {
+    private fun source(ctx: Context, clip: Clip, job: Job): UploadSource {
         val q = Prefs(ctx).cloudQuality
         if (q > 0) {
             val dir = File(ctx.cacheDir, "cloud").apply { mkdirs() }
             val f = File(dir, "clip_${clip.id}_$q.mp4")
             if (!f.exists() || f.length() == 0L) {
-                activity = "Compressing ${clip.name}"
+                job.phase = "Compressing"
                 val ok = Transcoder.shrink(ctx, clip.uri, f, if (q == 1) 720 else 480, if (q == 1) 2_500_000 else 1_200_000)
                 if (!ok) f.delete()
             }
@@ -453,59 +626,69 @@ object CloudSync {
         index!!.filter { it.kind == cfg.kind && it.pinned }.map { it.name }.toSet()
     }
 
-    /** Makes room for [need] bytes according to the policy, or throws QUOTA. */
-    private fun ensureSpace(ctx: Context, p: CloudProvider, cfg: CloudConfig, folder: String, need: Long) {
-        var files: List<RemoteFile>? = null
-        var mustFree = 0L
-        if (cfg.maxGb > 0) {
-            files = p.list(folder)
-            val used = files.filter { isOurClip(it.name) }.sumOf { it.size }
-            mustFree = maxOf(mustFree, used + need - cfg.maxGb * 1_000_000_000L)
+    /**
+     * Makes room for [need] bytes according to the policy, or throws QUOTA. Serialised per destination so
+     * parallel uploads never delete more than necessary. Free space is cached for a minute.
+     */
+    private fun ensureSpace(ctx: Context, p: CloudProvider, cfg: CloudConfig, folder: String, need: Long) =
+        synchronized(spaceLocks[cfg.kind]!!) {
+            var mustFree = 0L
+            if (cfg.maxGb > 0) {
+                val used = listing(cfg, p, folder).values.filter { isOurClip(it.name) }.sumOf { it.size }
+                mustFree = maxOf(mustFree, used + need - cfg.maxGb * 1_000_000_000L)
+            }
+            val now = System.currentTimeMillis()
+            val cached = synchronized(lock) { freeSpace[cfg.kind]?.takeIf { now - it.at < 60_000L } }
+            val free = cached?.free ?: (try { p.quota(folder)?.free } catch (e: CloudException) { null }).also {
+                synchronized(lock) { freeSpace[cfg.kind] = FreeSpace(now, it) }
+            }
+            if (free != null) mustFree = maxOf(mustFree, need + 64_000_000L - free)
+            if (mustFree <= 0) return@synchronized
+            if (cfg.fullPolicy == CloudConfig.PAUSE) throw CloudException("Not enough space", CloudException.Kind.QUOTA)
+            val keep = protectedNames(ctx, cfg)
+            val candidates = listing(cfg, p, folder).values.toList()
+                .filter { isOurClip(it.name) && it.name !in keep }.sortedBy { it.name }
+            var freed = 0L
+            for (f in candidates) {
+                if (freed >= mustFree) break
+                p.delete(folder, f)
+                freed += f.size
+                forget(ctx, cfg.kind, f.name)
+            }
+            synchronized(lock) { freeSpace.remove(cfg.kind) }
+            if (freed < mustFree) throw CloudException("Full: only protected clips are left", CloudException.Kind.QUOTA)
         }
-        val free = try { p.quota(folder)?.free } catch (e: CloudException) { null }
-        if (free != null) mustFree = maxOf(mustFree, need + 64_000_000L - free)
-        if (mustFree <= 0) return
-        if (cfg.fullPolicy == CloudConfig.PAUSE) throw CloudException("Not enough space", CloudException.Kind.QUOTA)
-        activity = "Making room in ${cfg.kind.label}"
-        val keep = protectedNames(ctx, cfg)
-        val candidates = (files ?: p.list(folder)).filter { isOurClip(it.name) && it.name !in keep }.sortedBy { it.name }
-        var freed = 0L
-        for (f in candidates) {
-            if (freed >= mustFree) break
-            p.delete(folder, f)
-            freed += f.size
-            forget(ctx, cfg.kind, f.name)
-        }
-        if (freed < mustFree) throw CloudException("Full: only protected clips are left", CloudException.Kind.QUOTA)
-    }
 
     private fun forget(ctx: Context, kind: CloudKind, name: String) = synchronized(lock) {
         index!!.removeAll { it.kind == kind && it.name == name }
+        listings[kind]?.files?.remove(name)
         save(ctx)
     }
 
+    private fun retentionDue(ctx: Context, k: CloudKind): Boolean {
+        val cfg = CloudConfig(ctx, k)
+        return cfg.enabled && cfg.isConfigured && cfg.keepDays > 0 && cfg.folderId != null &&
+            System.currentTimeMillis() - cfg.lastRetentionAt > 6 * 3_600_000L
+    }
+
     /** Deletes cloud copies older than the configured number of days (protected clips excepted). */
-    private fun retention(ctx: Context, kinds: List<CloudKind>) {
+    private fun retention(ctx: Context, cfg: CloudConfig, p: CloudProvider) {
         val now = System.currentTimeMillis()
-        for (k in kinds) {
-            val cfg = CloudConfig(ctx, k)
-            if (cfg.keepDays <= 0 || now - cfg.lastRetentionAt < 6 * 3_600_000L || waitReason(ctx) != null) continue
-            cfg.lastRetentionAt = now
-            var p: CloudProvider? = null
-            try {
-                p = provider(ctx, cfg)
-                val folder = cfg.folderId ?: continue
-                val keep = protectedNames(ctx, cfg)
-                val cutoff = now - cfg.keepDays * 86_400_000L
-                val fmt = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+        if (waitReason(ctx) != null) return
+        cfg.lastRetentionAt = now
+        try {
+            val folder = cfg.folderId ?: return
+            val keep = protectedNames(ctx, cfg)
+            val cutoff = now - cfg.keepDays * 86_400_000L
+            val fmt = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+            synchronized(spaceLocks[cfg.kind]!!) {
                 for (f in p.list(folder)) {
                     if (!isOurClip(f.name) || f.name in keep) continue
                     val t = try { fmt.parse(f.name.substring(3, 18))?.time } catch (e: Exception) { null } ?: f.modifiedMs
-                    if (t in 1 until cutoff) { p.delete(folder, f); forget(ctx, k, f.name) }
+                    if (t in 1 until cutoff) { p.delete(folder, f); forget(ctx, cfg.kind, f.name) }
                 }
-            } catch (_: Exception) {
-            } finally { try { p?.close() } catch (_: Exception) {} }
-        }
+            }
+        } catch (_: Exception) {}
     }
 
     // ------------------------------------------------------------------ notifications

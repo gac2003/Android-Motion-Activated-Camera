@@ -15,6 +15,7 @@ import java.util.TimeZone
 class DriveProvider(private val accessToken: () -> String, private val invalidate: (String) -> Unit) : CloudProvider {
     private val api = "https://www.googleapis.com/drive/v3"
     private val folderMime = "application/vnd.google-apps.folder"
+    private val SMALL = 5L * 1024 * 1024
 
     private fun call(method: String, url: String, json: JSONObject? = null, what: String): JSONObject {
         repeat(2) { attempt ->
@@ -73,9 +74,13 @@ class DriveProvider(private val accessToken: () -> String, private val invalidat
         return Quota(used, limit)
     }
 
-    /** Resumable upload in 8 MB chunks; the session URL is the resume state (valid about a week). */
+    /**
+     * Small clips: one multipart request. Larger: resumable upload in 8 MB chunks; the session URL is the
+     * resume state (valid about a week).
+     */
     override fun upload(folder: String, name: String, src: UploadSource, resume: String?,
                         saveResume: (String?) -> Unit, progress: (Long) -> Unit): RemoteFile {
+        if (resume == null && src.size <= SMALL) return uploadSmall(folder, name, src, progress)
         var session = resume
         var offset = 0L
         if (session != null) {
@@ -111,6 +116,28 @@ class DriveProvider(private val accessToken: () -> String, private val invalidat
                 else -> Http.fail(r, "Upload")
             }
         }
+    }
+
+    private fun uploadSmall(folder: String, name: String, src: UploadSource, progress: (Long) -> Unit): RemoteFile {
+        val data = src.open(0).use { it.readBytes() }
+        val boundary = "motioncam" + System.nanoTime()
+        val meta = JSONObject().put("name", name).put("parents", JSONArray().put(folder)).toString()
+        val body = java.io.ByteArrayOutputStream(data.size + 512).apply {
+            write("--$boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n$meta\r\n--$boundary\r\nContent-Type: video/mp4\r\n\r\n".toByteArray())
+            write(data)
+            write("\r\n--$boundary--\r\n".toByteArray())
+        }.toByteArray()
+        repeat(2) { attempt ->
+            val tok = accessToken()
+            val r = Http.request("POST", "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,createdTime",
+                mapOf("Authorization" to "Bearer $tok", "Content-Type" to "multipart/related; boundary=$boundary"),
+                body = body, timeoutMs = 120_000)
+            if (r.code == 401 && attempt == 0) { invalidate(tok); return@repeat }
+            if (!r.ok) Http.fail(r, "Upload")
+            progress(data.size.toLong())
+            return fileOf(JSONObject(r.body))
+        }
+        throw CloudException("Upload: not signed in", CloudException.Kind.AUTH)
     }
 
     /** Bytes the server has (>= 0), -1 if complete, null if the session is gone. */

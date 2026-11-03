@@ -118,6 +118,18 @@ class DropboxProvider(private val appKey: String, private val refreshToken: Stri
                         saveResume: (String?) -> Unit, progress: (Long) -> Unit): RemoteFile {
         val path = folder.trimEnd('/') + "/" + name
         val chunk = 8L * 1024 * 1024
+        if (resume == null && src.size <= chunk) {
+            // small clip: one request
+            val r = src.open(0).use { input ->
+                Http.request("POST", "https://content.dropboxapi.com/2/files/upload",
+                    mapOf("Authorization" to "Bearer ${token()}", "Content-Type" to "application/octet-stream",
+                        "Dropbox-API-Arg" to arg(JSONObject().put("path", path).put("mode", "add").put("autorename", true).put("mute", true))),
+                    stream = input, bodyLength = src.size, progress = progress, timeoutMs = 120_000)
+            }
+            if (!r.ok) fail(r, "Upload")
+            val m = JSONObject(r.body)
+            return RemoteFile(m.optString("path_display", path), m.optString("name", name), m.optLong("size", src.size), System.currentTimeMillis())
+        }
         var sid = resume?.substringBefore("|")
         var offset = resume?.substringAfter("|")?.toLongOrNull() ?: 0L
         if (sid == null) {

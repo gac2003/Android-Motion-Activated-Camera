@@ -222,6 +222,10 @@ class FtpProvider(
         if (r.code != 550) expect(r, 250, what = "Delete")
     }
 
+    override fun discardPartial(folder: String, name: String) {
+        try { connect(); cmd("DELE ${path(folder, name)}.part") } catch (_: Exception) {}
+    }
+
     override fun close() {
         try { out?.write("QUIT\r\n".toByteArray()); out?.flush() } catch (_: Exception) {}
         try { sock?.close() } catch (_: Exception) {}

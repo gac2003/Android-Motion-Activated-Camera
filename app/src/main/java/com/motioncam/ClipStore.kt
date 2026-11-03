@@ -84,7 +84,12 @@ object ClipStore {
     }
 
     /** All finished clips, newest first. */
-    fun list(ctx: Context): List<Clip> {
+    fun list(ctx: Context): List<Clip> = query(ctx, null)
+
+    /** One clip by id (cheap; used by the upload queue). */
+    fun get(ctx: Context, id: Long): Clip? = query(ctx, id).firstOrNull()
+
+    private fun query(ctx: Context, onlyId: Long?): List<Clip> {
         val out = ArrayList<Clip>()
         val proj = arrayOf(
             MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME, MediaStore.Video.Media.SIZE,
@@ -92,7 +97,9 @@ object ClipStore {
         )
         try {
             ctx.contentResolver.query(
-                COLLECTION, proj, "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("$REL_PATH/%"), null,
+                COLLECTION, proj,
+                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?" + if (onlyId != null) " AND ${MediaStore.Video.Media._ID}=?" else "",
+                if (onlyId != null) arrayOf("$REL_PATH/%", onlyId.toString()) else arrayOf("$REL_PATH/%"), null,
             )?.use { c ->
                 while (c.moveToNext()) {
                     val id = c.getLong(0)

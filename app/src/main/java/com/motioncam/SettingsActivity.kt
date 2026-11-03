@@ -123,6 +123,10 @@ class SettingsActivity : Activity() {
                 }
             }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
         }
+        val q = com.motioncam.cloud.CloudSync.counts(this, null)
+        box.addView(Ui.chip(this, "Upload queue  ·  ${q.queued} waiting" + if (q.failed > 0) " · ${q.failed} failed" else "").apply {
+            setOnClickListener { startActivity(Intent(this@SettingsActivity, com.motioncam.cloud.UploadQueueActivity::class.java)) }
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
         toggle("Upload only on Wi-Fi (not mobile data)", prefs.cloudWifiOnly) { prefs.cloudWifiOnly = it; com.motioncam.cloud.CloudSync.kick(this) }
         toggle("Upload only while charging", prefs.cloudChargingOnly) { prefs.cloudChargingOnly = it; com.motioncam.cloud.CloudSync.kick(this) }
         choice("Upload quality", listOf("Original (largest, best quality)", "720p (about 1/3 the size)", "480p (smallest)"), prefs.cloudQuality) {

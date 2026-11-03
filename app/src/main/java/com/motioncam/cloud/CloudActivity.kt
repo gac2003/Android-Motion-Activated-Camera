@@ -98,9 +98,9 @@ class CloudActivity : Activity() {
         if (cfg.isConfigured && (kind == CloudKind.DRIVE || kind == CloudKind.DROPBOX)) {
             title("View from other devices")
             if (kind == CloudKind.DRIVE) {
-                note("Another device signed in to the same Google account can open this folder in Clips → Remote folders right away. " +
-                    "For a different Google account, share the folder with it (view only); it then appears under \"shared with me\" there.")
-                row(button("Share folder…") { shareDrive() }, button("Shared with…") { showDriveSharing() })
+                note("Another device signed in to this same Google account (${cfg.account ?: ""}) can open this folder in " +
+                    "Clips → cloud icon → ＋ Add → Google Drive. Other Google accounts can't: MotionCam's Drive access only " +
+                    "sees files MotionCam created in the signed-in account.")
             } else {
                 note("Another device signed in to the same Dropbox account can open this folder in Clips → Remote folders right away. " +
                     "For anyone else, create a view-only link and send it to them. Anyone who has the link can watch the clips, so " +
@@ -274,37 +274,6 @@ class CloudActivity : Activity() {
     }
 
     // ------------------------------------------------------------------ sharing (remote folders)
-
-    private fun shareDrive() {
-        val input = EditText(this).apply { hint = "their.name@gmail.com"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS }
-        AlertDialog.Builder(this).setTitle("Share the backup folder (view only)").setView(input)
-            .setMessage("The Google account you enter can view the clips and thumbnails in this folder (not change or delete them). Google emails them a link.")
-            .setPositiveButton("Share") { _, _ ->
-                val email = input.text.toString().trim()
-                if (!email.contains("@")) { toast("Enter an email address"); return@setPositiveButton }
-                Thread {
-                    val msg = try {
-                        val f = CloudSync.backupFolder(this, kind)
-                        DriveProvider({ GoogleAuth.token(this, cfg.account) }, { GoogleAuth.invalidate(this, it) }).share(f.id, email)
-                        "Shared \"${f.name}\" with $email. On their device: Clips → cloud icon → ＋ Add → Google Drive: a folder shared with me."
-                    } catch (e: Exception) { "Could not share: ${e.message}" }
-                    runOnUiThread { AlertDialog.Builder(this).setTitle("Share folder").setMessage(msg).setPositiveButton("OK", null).show(); build() }
-                }.start()
-            }
-            .setNegativeButton("Cancel", null).show()
-    }
-
-    private fun showDriveSharing() {
-        Thread {
-            val msg = try {
-                val f = CloudSync.backupFolder(this, kind)
-                val who = DriveProvider({ GoogleAuth.token(this, cfg.account) }, { GoogleAuth.invalidate(this, it) }).sharedWith(f.id)
-                if (who.isEmpty()) "\"${f.name}\" is not shared with anyone." else "\"${f.name}\" can be viewed by:\n\n" + who.joinToString("\n") +
-                    "\n\nTo stop sharing, open the folder in the Google Drive app → Share → change their access to Remove."
-            } catch (e: Exception) { "Could not read sharing: ${e.message}" }
-            runOnUiThread { AlertDialog.Builder(this).setTitle("Shared with").setMessage(msg).setPositiveButton("OK", null).show() }
-        }.start()
-    }
 
     private fun dropboxProvider() = DropboxProvider(DropboxProvider.APP_KEY,
         cfg.refreshToken ?: throw CloudException("Dropbox not connected", CloudException.Kind.AUTH))

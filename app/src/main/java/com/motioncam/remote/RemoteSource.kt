@@ -19,9 +19,9 @@ import java.io.InputStream
 
 /**
  * A folder of MotionCam clips on another device's backup destination, viewed read-only.
- *  - [MODE_OWN]: the viewer is signed in to the same account as the recording phone.
- *  - [MODE_SHARED]: a Google Drive folder another account shared with this one (read-only Drive access).
- *  - [MODE_LINK]: a Dropbox viewer link made on the recording phone.
+ *  - [MODE_OWN]: the viewer is signed in to the same account as the recording phone (Google Drive only
+ *    supports this: MotionCam's limited Drive access only sees files MotionCam created in that account).
+ *  - [MODE_LINK]: a Dropbox viewer link made on the recording phone (any Dropbox account can open it).
  * Passwords, keys and sign-in tokens are kept encrypted in [SecretStore], never in the JSON.
  */
 class RemoteSource(
@@ -50,7 +50,7 @@ class RemoteSource(
     var refreshToken: String? = null
 
     val describe: String get() = when (kind) {
-        CloudKind.DRIVE -> "Google Drive · " + (if (mode == RemoteSources.MODE_SHARED) "shared with " else "") + (account ?: "")
+        CloudKind.DRIVE -> "Google Drive · " + (account ?: "")
         CloudKind.DROPBOX -> if (mode == RemoteSources.MODE_LINK) "Dropbox · viewer link" else "Dropbox · " + (account ?: "")
         CloudKind.FTP -> (if (tls) "FTPS · " else "FTP · ") + "$user@$host"
         CloudKind.SFTP -> "SFTP · $user@$host"
@@ -70,8 +70,6 @@ class RemoteReader(private val p: CloudProvider) : java.io.Closeable {
     fun list(folder: String): List<RemoteFile> = p.list(folder)
     fun open(file: RemoteFile, offset: Long): InputStream = p.open(file, offset)
     fun serviceThumbnail(file: RemoteFile): ByteArray? = p.serviceThumbnail(file)
-    /** Drive only: folders shared with this account. */
-    fun listShared(): List<RemoteFolder> = (p as? DriveProvider)?.listShared() ?: emptyList()
     /** Dropbox link only: the shared folder's name. */
     fun linkFolderName(): String? = (p as? DropboxLinkProvider)?.folderName()
     override fun close() = p.close()
@@ -79,7 +77,6 @@ class RemoteReader(private val p: CloudProvider) : java.io.Closeable {
 
 object RemoteSources {
     const val MODE_OWN = "own"
-    const val MODE_SHARED = "shared"
     const val MODE_LINK = "link"
 
     private var cache: MutableList<RemoteSource>? = null
@@ -157,10 +154,7 @@ object RemoteSources {
     fun reader(ctx: Context, s: RemoteSource): RemoteReader = RemoteReader(provider(ctx.applicationContext, s))
 
     private fun provider(ctx: Context, s: RemoteSource): CloudProvider = when (s.kind) {
-        CloudKind.DRIVE -> {
-            val scope = if (s.mode == MODE_SHARED) GoogleAuth.SCOPE_READONLY else GoogleAuth.SCOPE
-            DriveProvider({ GoogleAuth.token(ctx, s.account, scope) }, { GoogleAuth.invalidate(ctx, it) })
-        }
+        CloudKind.DRIVE -> DriveProvider({ GoogleAuth.token(ctx, s.account) }, { GoogleAuth.invalidate(ctx, it) })
         CloudKind.DROPBOX -> {
             val dbx = DropboxProvider(DropboxProvider.APP_KEY,
                 s.refreshToken ?: throw CloudException("Dropbox is not signed in on this device", CloudException.Kind.AUTH))

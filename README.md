@@ -101,10 +101,10 @@ Clips → **cloud icon** opens backup folders from other devices **read-only** (
 renamed or deleted) in the normal gallery and timeline player: day sections, calendar, Favourites/collections
 (kept on the viewing device only), filmstrip and back-to-back playback.
 
-* **Same account** on both phones: ＋ Add → "my own backups" and pick the folder.
-* **Google Drive, another account**: on the recording phone, Cloud backup → Google Drive → **Share folder…** (view
-  only). On the viewing device, ＋ Add → "a folder shared with me" (asks Google for read-only Drive access; Google
-  may show an "unverified app" screen – Advanced → continue).
+* **Google Drive**: sign in on the viewing device with the **same Google account** the recording phone backs up
+  to (＋ Add → Google Drive) and pick the folder. Other Google accounts aren't supported, because MotionCam's
+  `drive.file` access only sees files MotionCam itself created in the signed-in account.
+* **Dropbox, same account**: ＋ Add → "my own backups".
 * **Dropbox, another account**: on the recording phone, Cloud backup → Dropbox → **Create viewer link**, send it,
   and paste it on the viewing device (＋ Add → "a viewer link"). Anyone with the link can view; **Revoke link** stops it.
 * **FTP / SFTP**: enter the server login (a read-only account is best). Can be turned off in Settings → Remote folders.

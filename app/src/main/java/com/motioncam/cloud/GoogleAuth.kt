@@ -17,12 +17,11 @@ import java.util.concurrent.TimeUnit
  * signing certificate (registered as an Android OAuth client).
  */
 object GoogleAuth {
-    const val SCOPE = "https://www.googleapis.com/auth/drive.file"
     /**
-     * Read-only access to the whole Drive. Only requested when the user adds a folder another Google account
-     * shared with them (Remote folders); backups never use it.
+     * The only Drive access MotionCam uses: files and folders it created itself. It also covers Remote folders
+     * on another device signed in to the same Google account (same app, same files).
      */
-    const val SCOPE_READONLY = "https://www.googleapis.com/auth/drive.readonly"
+    const val SCOPE = "https://www.googleapis.com/auth/drive.file"
     /** Android OAuth client registered for package com.motioncam + the release signing key (informational). */
     const val CLIENT_ID = "198396848516-1288dfl5tulora61kltqdnrdd57882ks.apps.googleusercontent.com"
 

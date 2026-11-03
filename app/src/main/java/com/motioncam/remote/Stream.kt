@@ -253,13 +253,13 @@ object StreamProxy {
                     if (e.src.streams) { upstream(ctx, e, pos, stop - pos, out); return }
                     return
                 }
-                if (raf == null) raf = try { RandomAccessFile(if (dl.complete) dl.done else dl.part, "r") }
-                    catch (ex: IOException) { RandomAccessFile(dl.done, "r") }   // renamed just now
+                val file = raf ?: (try { RandomAccessFile(if (dl.complete) dl.done else dl.part, "r") }
+                    catch (ex: IOException) { RandomAccessFile(dl.done, "r") }).also { raf = it }   // (renamed just now)
                 val availNow = if (dl.complete) size else dl.available
                 val n = minOf(buf.size.toLong(), stop - pos, availNow - pos).toInt()
                 if (n <= 0) continue
-                raf.seek(pos)
-                val r = raf.read(buf, 0, n)
+                file.seek(pos)
+                val r = file.read(buf, 0, n)
                 if (r <= 0) { Thread.sleep(50); continue }
                 out.write(buf, 0, r)
                 pos += r

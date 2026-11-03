@@ -54,11 +54,6 @@ class DriveProvider(private val accessToken: () -> String, private val invalidat
                 parseTime(it.optString("createdTime")), it.optString("thumbnailLink").ifEmpty { null })
         }
 
-    /** Folders other Google accounts shared with this one (needs the read-only Drive access). */
-    fun listShared(): List<RemoteFolder> =
-        pages("sharedWithMe and mimeType='$folderMime' and trashed=false", "files(id,name)")
-            .map { RemoteFolder(it.getString("id"), it.getString("name")) }.sortedBy { it.name.lowercase() }
-
     override fun open(file: RemoteFile, offset: Long): java.io.InputStream {
         repeat(2) { attempt ->
             val tok = accessToken()
@@ -83,23 +78,6 @@ class DriveProvider(private val accessToken: () -> String, private val invalidat
         } catch (e: Exception) { null }
     }
 
-    /**
-     * Gives another Google account read-only access to a folder this app created (and everything in it).
-     * Google emails them a link; the folder then shows under "Shared with me" in their MotionCam.
-     */
-    fun share(folderId: String, email: String) {
-        call("POST", "$api/files/${Http.enc(folderId)}/permissions?sendNotificationEmail=true&fields=id",
-            JSONObject().put("role", "reader").put("type", "user").put("emailAddress", email.trim()), "Share folder")
-    }
-
-    /** Accounts the folder is shared with (email addresses), excluding the owner. */
-    fun sharedWith(folderId: String): List<String> {
-        val o = call("GET", "$api/files/${Http.enc(folderId)}/permissions?fields=permissions(emailAddress,role,type)", what = "Read sharing")
-        val arr = o.optJSONArray("permissions") ?: return emptyList()
-        return (0 until arr.length()).map { arr.getJSONObject(it) }
-            .filter { it.optString("role") != "owner" }
-            .map { it.optString("emailAddress").ifEmpty { if (it.optString("type") == "anyone") "anyone with the link" else "?" } }
-    }
 
     private fun pages(q: String, fields: String): List<JSONObject> {
         val out = ArrayList<JSONObject>()

@@ -42,12 +42,8 @@ any server run by the developer.
   available storage space, and delete its own older clips when you have enabled automatic clean-up.
 - Your Google sign-in token is stored **encrypted on your phone** (Android Keystore). It is never sent to the
   developer or any third party.
-- **Sharing (optional):** "Share folder…" gives a Google account you name view-only access to the backup folder,
-  using Google Drive's own sharing.
-- **Remote folders (optional):** to view a folder **another** Google account shared with you, MotionCam asks for
-  the read-only `drive.readonly` permission. It is requested only when you add such a folder, and is used only
-  to list the folder you pick and download (stream) its clips and thumbnails to your phone for playback. MotionCam
-  never changes, uploads or deletes anything with this permission, and it never reads other files in your Drive.
+- **Remote folders (optional):** another device signed in to the same Google account can use the same
+  `drive.file` access to list and stream (read only) the clips and thumbnails MotionCam uploaded, for playback.
 
 MotionCam's use and transfer of information received from Google APIs adheres to the
 [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy),

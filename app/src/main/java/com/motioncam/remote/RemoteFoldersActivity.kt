@@ -41,8 +41,7 @@ import com.motioncam.topBar
  */
 class RemoteFoldersActivity : Activity() {
     companion object {
-        private const val REQ_GOOGLE_OWN = 911
-        private const val REQ_GOOGLE_SHARED = 912
+        private const val REQ_GOOGLE = 911
     }
 
     private lateinit var box: LinearLayout
@@ -82,12 +81,12 @@ class RemoteFoldersActivity : Activity() {
         note("Remote folders are read-only: this device never uploads, renames or deletes anything in them. Clips stream " +
             "when you play them and are kept in a cache (Settings → Remote folders) so replaying and scrubbing are instant. " +
             "Favourites and collections you make here stay on this device.")
-        title("Viewing another account's clips")
-        note("• Google Drive: on the recording phone open Settings → Cloud backup → Google Drive → Share folder…, and enter " +
-            "this device's Google account. Then here: ＋ Add → Google Drive: shared with me.\n" +
-            "• Dropbox: on the recording phone open Settings → Cloud backup → Dropbox → Create viewer link, and send the link " +
-            "to this device. Then here: ＋ Add → Dropbox: viewer link.\n" +
-            "• Same account on both phones: ＋ Add → \"my own backups\" (no sharing needed).\n" +
+        title("Which account to use")
+        note("• Google Drive: sign in here with the same Google account the recording phone backs up to (＋ Add → Google Drive). " +
+            "Other Google accounts can't be used: MotionCam's Drive access only sees files MotionCam created in that account.\n" +
+            "• Dropbox, same account: ＋ Add → Dropbox: my own backups.\n" +
+            "• Dropbox, another account: on the recording phone open Settings → Cloud backup → Dropbox → Create viewer link, " +
+            "and send the link to this device. Then here: ＋ Add → Dropbox: a viewer link.\n" +
             "Thumbnails show the moment with the most motion when the recording phone has \"Upload thumbnails for other " +
             "devices\" on (default).")
     }
@@ -150,8 +149,7 @@ class RemoteFoldersActivity : Activity() {
 
     private fun addSource() {
         val opts = ArrayList<Pair<String, () -> Unit>>()
-        opts += "Google Drive: my own backups (same Google account)" to { googleSignIn(shared = false) }
-        opts += "Google Drive: a folder shared with me" to { googleSignIn(shared = true) }
+        opts += "Google Drive (same Google account as the recording phone)" to { googleSignIn() }
         opts += "Dropbox: my own backups (same Dropbox account)" to { dropboxAccount { t, w -> dropboxOwn(t, w) } }
         opts += "Dropbox: a viewer link" to { dropboxAccount { t, w -> dropboxLink(t, w) } }
         if (prefs.remoteFtp) {
@@ -165,37 +163,25 @@ class RemoteFoldersActivity : Activity() {
 
     // ---- Google Drive
 
-    private fun googleSignIn(shared: Boolean) {
-        if (shared) {
-            AlertDialog.Builder(this).setTitle("Read-only Google Drive access")
-                .setMessage("To see folders other accounts shared with you, MotionCam asks Google for read-only access to your Drive. " +
-                    "It only ever opens the folder you pick, and never changes anything.\n\nGoogle may say the app is unverified: " +
-                    "tap Advanced → Go to MotionCam to continue.")
-                .setPositiveButton("Continue") { _, _ ->
-                    GoogleAuth.start(this, REQ_GOOGLE_SHARED, { t -> afterGoogle(t, true) }, { toast("Google sign-in failed: $it") }, GoogleAuth.SCOPE_READONLY)
-                }
-                .setNegativeButton("Cancel", null).show()
-        } else {
-            GoogleAuth.start(this, REQ_GOOGLE_OWN, { t -> afterGoogle(t, false) }, { toast("Google sign-in failed: $it") }, GoogleAuth.SCOPE)
-        }
+    private fun googleSignIn() {
+        GoogleAuth.start(this, REQ_GOOGLE, { t -> afterGoogle(t) }, { toast("Google sign-in failed: $it") })
     }
 
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode == REQ_GOOGLE_OWN || requestCode == REQ_GOOGLE_SHARED) {
+        if (requestCode == REQ_GOOGLE) {
             val t = if (resultCode == RESULT_OK) GoogleAuth.result(this, data) else null
-            if (t != null) afterGoogle(t, requestCode == REQ_GOOGLE_SHARED) else toast("Google sign-in was cancelled")
+            if (t != null) afterGoogle(t) else toast("Google sign-in was cancelled")
             return
         }
         @Suppress("DEPRECATION") super.onActivityResult(requestCode, resultCode, data)
     }
 
-    private fun afterGoogle(token: String, shared: Boolean) {
+    private fun afterGoogle(token: String) {
         Thread {
             try {
                 val email = DriveProvider({ token }, {}).test()
-                val draft = RemoteSource(RemoteSources.newId(), "", CloudKind.DRIVE,
-                    if (shared) RemoteSources.MODE_SHARED else RemoteSources.MODE_OWN, "", "", email)
+                val draft = RemoteSource(RemoteSources.newId(), "", CloudKind.DRIVE, RemoteSources.MODE_OWN, "", "", email)
                 runOnUiThread { browse(draft, null, emptyList()) }
             } catch (e: Exception) { runOnUiThread { toast("Google Drive: ${e.message}") } }
         }.start()
@@ -324,7 +310,7 @@ class RemoteFoldersActivity : Activity() {
         Thread {
             try {
                 val (folders, clipCount) = RemoteSources.reader(this, draft).use { r ->
-                    val fs = if (parent == null && draft.mode == RemoteSources.MODE_SHARED) r.listShared() else r.listFolders(parent?.id)
+                    val fs = r.listFolders(parent?.id)
                     Pair(fs.filter { !it.name.startsWith(".") }, parent?.let { p -> r.list(p.id).count { isOurClip(it.name) } } ?: 0)
                 }
                 runOnUiThread {
@@ -333,15 +319,11 @@ class RemoteFoldersActivity : Activity() {
                     if (parent != null) items += "⬆ Up"
                     folders.forEach { items += "▸ ${it.name}" }
                     val head = items.size - folders.size
-                    val title = when {
-                        parent != null -> parent.name
-                        draft.mode == RemoteSources.MODE_SHARED -> "Shared with ${draft.account}"
-                        else -> "Choose the backup folder"
-                    }
+                    val title = parent?.name ?: "Choose the backup folder"
                     if (items.isEmpty()) {
                         AlertDialog.Builder(this).setTitle(title).setMessage(
-                            if (draft.mode == RemoteSources.MODE_SHARED) "No folders are shared with ${draft.account} yet. Share the backup folder " +
-                                "from the recording phone first (Cloud backup → Google Drive → Share folder…)."
+                            if (draft.kind == CloudKind.DRIVE) "No MotionCam folders in ${draft.account}. Sign in with the Google account the " +
+                                "recording phone backs up to (MotionCam can only see folders it created in that account)."
                             else "No folders found.").setPositiveButton("OK", null).show()
                         return@runOnUiThread
                     }
@@ -366,7 +348,7 @@ class RemoteFoldersActivity : Activity() {
 
     private fun confirmAdd(src: RemoteSource, folderName: String, clipCount: Int) {
         val suggested = when (src.kind) {
-            CloudKind.DRIVE -> if (src.mode == RemoteSources.MODE_SHARED) "$folderName (shared)" else folderName
+            CloudKind.DRIVE -> folderName
             CloudKind.DROPBOX -> if (src.mode == RemoteSources.MODE_LINK) "$folderName (link)" else folderName
             else -> "$folderName on ${src.host}"
         }

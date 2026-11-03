@@ -70,7 +70,7 @@ class SettingsActivity : Activity() {
         }
         decimal("Minimum moving area", "% of frame", 0.2f, 20f, prefs.minAreaPct) { prefs.minAreaPct = it }
         number("Motion must last at least", "ms", 0, 3000, prefs.minMotionMs) { prefs.minMotionMs = it }
-        number("Stop recording after no motion for", "s", 5, 600, prefs.stopDelaySec) { prefs.stopDelaySec = it }
+        number("Stop recording after no motion for (0 = as soon as motion ends)", "s", 0, 600, prefs.stopDelaySec) { prefs.stopDelaySec = it }
         number("Split long events into clips of", "min", 1, 60, prefs.maxClipMin) { prefs.maxClipMin = it }
         note("Draw detection zones with the ZONES button on the main screen: red = moving, dark = ignored. " +
             "For a peephole, mask everything outside the lens circle and pick the Strong light filter.")

@@ -893,7 +893,8 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         if (mode == Mode.RECORDING) {
             val sinceMotion = now - max(lastMotionElapsed, recordStartedElapsed)
             val clipLen = now - recordStartedElapsed
-            if (sinceMotion >= prefs.stopDelaySec * 1000L) {
+            // 0 s means "when motion ends": still wait ~0.75 s (a few analyses) so one missed frame doesn't cut the clip
+            if (sinceMotion >= max(prefs.stopDelaySec * 1000L, 750L)) {
                 stopRecording(rearm = true)
             } else if (clipLen >= prefs.maxClipMin * 60_000L || (pre?.bytesWritten ?: 0L) > 3_800_000_000L) {
                 // split long events: stop and immediately continue in a new file

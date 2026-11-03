@@ -78,6 +78,7 @@ class PlayerActivity : Activity() {
     private lateinit var skipL: TextView
     private lateinit var skipR: TextView
     private lateinit var speedBtn: TextView
+    private lateinit var skipBtn: TextView
     private lateinit var muteBtn: android.widget.ImageView
     private var playing = true
     private var muted = false
@@ -136,8 +137,8 @@ class PlayerActivity : Activity() {
         }
         val bp = Ui.dp(this, 38)
         video.addView(bigPlay, FrameLayout.LayoutParams(bp, bp, Gravity.CENTER))
-        skipL = skipLabel("«  5s").also { video.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = Ui.dp(this@PlayerActivity, 40) }) }
-        skipR = skipLabel("5s  »").also { video.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = Ui.dp(this@PlayerActivity, 40) }) }
+        skipL = skipLabel("").also { video.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = Ui.dp(this@PlayerActivity, 40) }) }
+        skipR = skipLabel("").also { video.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = Ui.dp(this@PlayerActivity, 40) }) }
 
         // top overlay: back, time stamp, menu
         topBar = LinearLayout(this).apply {
@@ -172,8 +173,8 @@ class PlayerActivity : Activity() {
             override fun onDoubleTap(e: MotionEvent): Boolean {
                 val w = video.width
                 when {
-                    e.x < w / 3f -> seekBy(-5000)
-                    e.x > w * 2f / 3f -> seekBy(5000)
+                    e.x < w / 3f -> skip(-1)
+                    e.x > w * 2f / 3f -> skip(1)
                     else -> togglePlay()
                 }
                 return true
@@ -194,8 +195,25 @@ class PlayerActivity : Activity() {
             }
             override fun onScaleEnd(d: android.view.ScaleGestureDetector) { pinching = false; if (vScale < 1.03f) resetZoom() }
         })
+        var tapSkipping = false
         video.setOnTouchListener { _, e ->
             sd.onTouchEvent(e)
+            // after a double-tap skip, each further quick tap on that side skips again (like YouTube)
+            if (e.actionMasked == MotionEvent.ACTION_DOWN && vScale <= 1.01f) {
+                val side = when { e.x < video.width / 3f -> -1; e.x > video.width * 2f / 3f -> 1; else -> 0 }
+                if (side != 0 && side == lastSkipDir && System.currentTimeMillis() - lastSkipAt < 700) {
+                    tapSkipping = true
+                    skip(side)
+                    val cancel = MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }
+                    gd.onTouchEvent(cancel)   // reset the double-tap detector
+                    cancel.recycle()
+                    return@setOnTouchListener true
+                }
+            }
+            if (tapSkipping) {
+                if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) tapSkipping = false
+                return@setOnTouchListener true
+            }
             if (!pinching && e.pointerCount == 1) gd.onTouchEvent(e)
             true
         }
@@ -223,6 +241,14 @@ class PlayerActivity : Activity() {
             setOnClickListener { showSpeedMenu(this) }
         }
         bar.addView(speedBtn)
+        skipBtn = Ui.label(this, "", 15f).apply {
+            gravity = Gravity.CENTER
+            minWidth = Ui.dp(this@PlayerActivity, 52)
+            contentDescription = "Double-tap skip length"
+            setOnClickListener { showSkipMenu(this) }
+        }
+        bar.addView(skipBtn)
+        updateSkipLabels()
         muteBtn = iconButton(this, IconDrawable.Kind.VOLUME, 48, 12) { toggleMute() }
         bar.addView(muteBtn)
         info = Ui.label(this, "", 12f, Ui.GREY).apply { gravity = Gravity.END; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
@@ -302,6 +328,7 @@ class PlayerActivity : Activity() {
 
     private fun startAt(index: Int, offsetMs: Int) {
         if (index !in clips.indices) return
+        stepPos = -1
         a.release(); b.release()
         cur = a; nxt = b
         holdAt(offsetMs.toLong())
@@ -449,6 +476,7 @@ class PlayerActivity : Activity() {
 
     private fun togglePlay() {
         setPlaying(!playing)
+        if (playing) stepPos = -1
         val m = cur.mp
         if (m == null || !cur.prepared) return
         try {
@@ -458,19 +486,95 @@ class PlayerActivity : Activity() {
 
     private fun curPos(): Int = try { if (cur.prepared) cur.mp?.currentPosition ?: 0 else 0 } catch (_: Exception) { 0 }
 
-    /** YouTube-style double-tap skip; crosses into the previous / next clip when needed. */
+    // ------------------------------------------------------------------ double-tap skip
+
+    private val skipOptions = listOf(0, 500, 1000, 2000, 5000, 10_000)   // 0 = one frame
+
+    private fun skipText(ms: Int) = when {
+        ms == 0 -> "1 frame"
+        ms < 1000 -> "%.1fs".format(ms / 1000f)
+        else -> "${ms / 1000}s"
+    }
+
+    private fun updateSkipLabels() {
+        val t = skipText(prefs.skipMs)
+        skipL.text = "«  $t"
+        skipR.text = "$t  »"
+        skipBtn.text = "±" + if (prefs.skipMs == 0) "1 fr" else t
+    }
+
+    /** Skip length for double-taps (kept for all clips and next time): a time, or frame by frame. */
+    private fun showSkipMenu(anchor: View) {
+        val pm = PopupMenu(this, anchor)
+        skipOptions.forEachIndexed { i, v ->
+            pm.menu.add(0, i, i, (if (v == 0) "Frame by frame" else "Skip " + skipText(v)) + if (v == 1000) "  (default)" else "").apply {
+                isCheckable = true
+                isChecked = v == prefs.skipMs
+            }
+        }
+        pm.menu.setGroupCheckable(0, true, true)
+        pm.setOnMenuItemClickListener { item -> prefs.skipMs = skipOptions[item.itemId]; updateSkipLabels(); true }
+        pm.show()
+    }
+
+    /** Frame length per clip (ms), measured once per clip; the recording frame rate until then. */
+    private val frameMs = HashMap<Long, Float>()
+
+    private fun frameLen(c: Clip): Float {
+        frameMs[c.id]?.let { return it }
+        frameMs[c.id] = 1000f / prefs.fps.coerceAtLeast(1)
+        Thread {
+            val r = MediaMetadataRetriever()
+            try {
+                ClipThumbs.source(r, this, c.uri)
+                val n = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT)?.toLongOrNull() ?: 0
+                val d = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0
+                if (n > 1 && d > 0) runOnUiThread { frameMs[c.id] = d.toFloat() / n }
+            } catch (_: Exception) {} finally { try { r.release() } catch (_: Exception) {} }
+        }.start()
+        return frameMs[c.id]!!
+    }
+
+    /** Double-tap: one step back (-1) or forward (+1) by the chosen length; frame steps pause playback. */
+    private var lastSkipAt = 0L
+    private var lastSkipDir = 0
+
+    private fun skip(dir: Int) {
+        val i = cur.index
+        if (i !in clips.indices) return
+        lastSkipAt = System.currentTimeMillis()
+        lastSkipDir = dir
+        val ms = prefs.skipMs
+        if (ms == 0) {
+            if (playing) togglePlay()   // frame by frame is done paused
+            val f = frameLen(clips[i])
+            // step from the last frame we stepped to (the player may report a nearby key frame instead)
+            val now = System.currentTimeMillis()
+            val base = if (stepPos >= 0 && stepIndex == i && now - stepAt < 60_000) stepPos else curPos()
+            stepPos = seekBy(Math.round(dir * f).let { if (it == 0) dir else it }, base)
+            stepIndex = i
+            stepAt = now
+        } else { stepPos = -1; seekBy(dir * ms) }
+    }
+
     /**
-     * YouTube-style double-tap skip, kept inside the current clip: with less than 5 s left it goes to the
-     * clip's start / end instead of into the neighbouring clip.
+     * Skip within the current clip: with less than the skip length left it goes to the clip's start / end
+     * instead of into the neighbouring clip.
      */
-    private fun seekBy(delta: Int) {
+    private var stepPos = -1
+    private var stepIndex = -1
+    private var stepAt = 0L
+
+    /** Returns the position it went to (or -1). */
+    private fun seekBy(delta: Int, from: Int = -1): Int {
         flash(if (delta < 0) skipL else skipR)
         val i = cur.index
-        if (i !in clips.indices || !cur.prepared) return
-        val p = (curPos() + delta).coerceIn(0, lastFrameMs(i))
+        if (i !in clips.indices || !cur.prepared) return -1
+        val p = ((if (from >= 0) from else curPos()) + delta).coerceIn(0, lastFrameMs(i))
         holdAt(p.toLong())
         cur.mp?.let { m -> m.setOnSeekCompleteListener { releaseHoldIfReached(m) } }
         try { cur.mp?.seekTo(p.toLong(), MediaPlayer.SEEK_CLOSEST) } catch (_: Exception) {}
+        return p
     }
 
     /** Just before the end of clip [i]: seeking exactly to the end would count as "finished" and jump to the next clip. */
@@ -504,6 +608,7 @@ class PlayerActivity : Activity() {
      * key frame, which looked like jitter). Playback resumes on release if it was playing.
      */
     private fun scrubTo(index: Int, posMs: Long, final: Boolean) {
+        stepPos = -1
         if (!final && !scrubbing) {
             scrubbing = true
             if (playing) try { cur.mp?.pause() } catch (_: Exception) {}
@@ -701,7 +806,7 @@ class PlayerActivity : Activity() {
         strip.setPosition(pos.toLong())
         stamp.text = stampFmt.format(Date(clips[i].startMs + pos))
         val c = clips[i]
-        info.text = "${i + 1} / ${clips.size}  ·  ${fmtDur(pos.toLong())} / ${fmtDur(c.durationMs)}"
+        info.text = "${i + 1}/${clips.size} · ${fmtDur(pos.toLong())}/${fmtDur(c.durationMs)}"   // compact: shares the bar
     }
 
     private fun fmtDur(ms: Long): String { val s = ms / 1000; return "%d:%02d".format(s / 60, s % 60) }

@@ -76,7 +76,8 @@ Clips are saved to **Movies/MotionCam** (visible in Gallery and over USB file tr
 The **Clips** screen shows thumbnails by day; tapping a clip opens the **player**, which plays every following clip
 back to back like one continuous video. Below the video is a filmstrip (like modern phone gallery players): the playing clip is expanded
 into its frames (tap it to collapse/expand), pinch to resize, drag to scrub (stops at the clip's ends while expanded; letting go at the end stays there, paused).
-Tap the video to pause/play, double-tap left/right to skip 5 s within the clip; the ⋮ menu has share / open with / delete.
+Tap the video to pause/play, double-tap left/right to skip within the clip (1 s by default; the **±1s** button below the
+filmstrip changes it to 0.5–10 s or **frame by frame**, and keep tapping to keep skipping); the ⋮ menu has share / open with / delete.
 
 Long-press any control button on the main screen to choose which buttons are shown and their order.
 

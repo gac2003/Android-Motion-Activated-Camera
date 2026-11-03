@@ -117,6 +117,10 @@ class Prefs(ctx: Context) {
     /** All uploads paused from the queue screen. */
     var cloudPaused: Boolean get() = b("cloudPaused", false); set(v) = put("cloudPaused", v)
 
+    // ---- player ----
+    /** Double-tap skip in the player: milliseconds, or 0 = one frame. */
+    var skipMs: Int get() = i("skipMs", 1000); set(v) = put("skipMs", v)
+
     // ---- remote view ----
     var serverOn: Boolean get() = b("serverOn", false); set(v) = put("serverOn", v)
     var streamHd: Boolean get() = b("streamHd", false); set(v) = put("streamHd", v)

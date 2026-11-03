@@ -540,7 +540,8 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             ClipStore.finish(ctx, pc, ok, recordStartedWall)
             if (ok) {
                 val id = android.content.ContentUris.parseId(pc.uri)
-                savePeak(id, (pre?.preRollMs ?: 0L) + (peakElapsed - recordStartedElapsed))
+                val preRoll = pre?.preRollMs ?: 0L
+                savePeak(id, preRoll + (peakElapsed - recordStartedElapsed), preRoll)
                 com.motioncam.cloud.CloudSync.onClipSaved(ctx, id)
             }
             publish()
@@ -573,12 +574,12 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     }
 
     /** Remembers the peak-motion moment and makes the thumbnail right away (in the background). */
-    private fun savePeak(clipId: Long, offsetMs: Long) {
+    private fun savePeak(clipId: Long, offsetMs: Long, preRollMs: Long = 0) {
         val off = offsetMs.coerceAtLeast(0)
         peakBlocks = 0
         Thread {
             try {
-                ClipThumbs.setPeak(ctx, clipId, off)
+                ClipThumbs.setPeak(ctx, clipId, off, preRollMs)
                 ClipStore.get(ctx, clipId)?.let { ClipThumbs.load(ctx, it) }
             } catch (_: Exception) {}
         }.start()

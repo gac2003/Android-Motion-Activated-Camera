@@ -21,6 +21,8 @@ object ClipThumbs {
     const val W = 384
     const val H = 216
     private var peaks: MutableMap<Long, Long>? = null
+    /** Length of each clip's pre-recording (ms), for the placeholder frame. */
+    private val preRolls = HashMap<Long, Long>()
 
     private fun peaksFile(ctx: Context) = File(ctx.filesDir, "clip_peaks.json")
     private fun cacheFile(ctx: Context, id: Long) = File(File(ctx.cacheDir, "thumbs").apply { mkdirs() }, "$id.jpg")
@@ -33,7 +35,9 @@ object ClipThumbs {
             val f = peaksFile(ctx)
             if (f.exists()) {
                 val o = JSONObject(f.readText())
-                for (k in o.keys()) m[k.toLong()] = o.getLong(k)
+                for (k in o.keys()) {
+                    if (k.startsWith("p")) preRolls[k.substring(1).toLong()] = o.getLong(k) else m[k.toLong()] = o.getLong(k)
+                }
             }
         } catch (_: Exception) {}
         peaks = m
@@ -44,12 +48,16 @@ object ClipThumbs {
     private fun savePeaks(ctx: Context) {
         val o = JSONObject()
         for ((k, v) in peaks(ctx)) o.put(k.toString(), v)
+        for ((k, v) in preRolls) o.put("p$k", v)
         try { val t = File(peaksFile(ctx).path + ".tmp"); t.writeText(o.toString()); t.renameTo(peaksFile(ctx)) } catch (_: Exception) {}
     }
 
-    /** Called by the camera engine when a clip is saved: [offsetMs] = time of peak motion within the clip. */
-    fun setPeak(ctx: Context, clipId: Long, offsetMs: Long) {
-        synchronized(this) { peaks(ctx)[clipId] = offsetMs.coerceAtLeast(0) }
+    /**
+     * Called by the camera engine when a clip is saved: [offsetMs] = time of peak motion within the clip,
+     * [preRollMs] = how much pre-recorded video the clip starts with.
+     */
+    fun setPeak(ctx: Context, clipId: Long, offsetMs: Long, preRollMs: Long = 0) {
+        synchronized(this) { peaks(ctx)[clipId] = offsetMs.coerceAtLeast(0); preRolls[clipId] = preRollMs.coerceAtLeast(0) }
         savePeaks(ctx)
         cacheFile(ctx, clipId).delete()
     }
@@ -57,7 +65,7 @@ object ClipThumbs {
     /** Clip deleted: drop its thumbnail and peak. */
     fun forget(ctx: Context, clipId: Long) {
         cacheFile(ctx, clipId).delete()
-        val had = synchronized(this) { peaks(ctx).remove(clipId) != null }
+        val had = synchronized(this) { preRolls.remove(clipId); peaks(ctx).remove(clipId) != null }
         if (had) savePeaks(ctx)
     }
 
@@ -65,16 +73,20 @@ object ClipThumbs {
     fun isReady(ctx: Context, clip: Clip) = cacheFile(ctx, clip.id).exists()
 
     /**
-     * Quick placeholder while the best frame is being found: one fast key-frame decode just after the
-     * pre-record window (about when the motion started). Not saved.
+     * Placeholder while the peak-motion thumbnail is being made: the first frame after the pre-recording
+     * (the moment motion was detected). Uses the clip's recorded pre-roll length when known, otherwise the
+     * current pre-record setting. One fast key-frame decode; not saved.
      */
     fun quick(ctx: Context, clip: Clip): Bitmap? {
         val r = MediaMetadataRetriever()
         return try {
             r.setDataSource(ctx, clip.uri)
             val dur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: clip.durationMs
-            val t = (Prefs(ctx).preRecordMs + 500L).coerceAtMost(maxOf(0, dur / 2))
-            r.getScaledFrameAtTime(t * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, W, H)
+            val pre = synchronized(this) { peaks(ctx); preRolls[clip.id] } ?: Prefs(ctx).preRecordMs.toLong()
+            val t = pre.coerceAtMost(maxOf(0, dur - 1))
+            // first key frame at or after the end of the pre-recording (never inside it)
+            r.getScaledFrameAtTime(t * 1000, MediaMetadataRetriever.OPTION_NEXT_SYNC, W, H)
+                ?: r.getScaledFrameAtTime(t * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, W, H)
         } catch (e: Exception) { null } finally { try { r.release() } catch (_: Exception) {} }
     }
 

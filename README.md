@@ -75,9 +75,9 @@ With the Android SDK installed (`ANDROID_HOME` set, platform 34): `./gradlew ass
 Clips are saved to **Movies/MotionCam** (visible in Gallery and over USB file transfer).
 The **Clips** screen shows thumbnails by day; tapping a clip opens the **player**, which plays every following clip
 back to back like one continuous video. Below the video is a filmstrip (like modern phone gallery players): the playing clip is expanded
-into its frames (tap it to collapse/expand), pinch to resize, drag to scrub (stops at the clip's ends while expanded; letting go at the end stays there, paused).
+into its frames (tap it to collapse/expand; one frame per second, pinch for more – down to exact frames – or fewer), drag to scrub (stops at the clip's ends while expanded; letting go at the end stays there, paused).
 Tap the video to pause/play, double-tap left/right to skip within the clip (1 s by default; the **±1s** button below the
-filmstrip changes it to 0.5–10 s or **frame by frame**, and keep tapping to keep skipping); the ⋮ menu has share / open with / delete.
+filmstrip or Settings → Player changes it to 0.5–10 s or **frame by frame**, and keep tapping to keep skipping); the ⋮ menu has share / open with / delete.
 
 Long-press any control button on the main screen to choose which buttons are shown and their order.
 

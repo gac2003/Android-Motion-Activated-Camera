@@ -83,6 +83,13 @@ class SettingsActivity : Activity() {
         note("Draw detection zones with the ZONES button on the main screen: red = moving, dark = ignored. " +
             "For a peephole, mask everything outside the lens circle and pick the Strong light filter.")
 
+        title("Player", Prefs.PLAYER_KEYS)
+        val skipOpts = listOf(0, 500, 1000, 2000, 5000, 10_000)
+        choice("Double-tap skip (left / right of the video)", listOf("Frame by frame", "0.5 s", "1 s (default)", "2 s", "5 s", "10 s"),
+            skipOpts.indexOf(prefs.skipMs).coerceAtLeast(0)) { prefs.skipMs = skipOpts[it] }
+        note("Also changeable in the player with the ± button next to the speed. Frame by frame pauses and steps one frame " +
+            "per tap. Pinch the filmstrip to show more or fewer frames of the playing clip.")
+
         title("Storage", Prefs.STORAGE_KEYS)
         number("Delete clips older than", "days", 0, 365, prefs.keepDays, offLabel = "never") { prefs.keepDays = it }
         number("Storage limit for clips", "GB", 0, 500, prefs.maxStorageGb, offLabel = "no limit") { prefs.maxStorageGb = it }

@@ -301,6 +301,7 @@ class PlayerActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        updateSkipLabels()   // may have been changed in Settings
         if (playing) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         ui.post(ticker)
     }

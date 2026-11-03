@@ -61,16 +61,23 @@ class ThumbLoader(private val ctx: Context, private val onLoaded: () -> Unit) {
 
     fun poster(c: Clip): Bitmap? = request("p${c.id}") { ClipThumbs.load(ctx, c) }
 
-    /** A frame near [tMs] (cached per second). */
-    fun frame(c: Clip, tMs: Long): Bitmap? {
-        val sec = tMs / 1000
-        return request("f${c.id}@$sec") {
+    /** An already-loaded key-frame picture near [tMs], without asking for one (placeholder for exact frames). */
+    fun nearbyLoaded(c: Clip, tMs: Long): Bitmap? = cache.get("f${c.id}@${(tMs / 100) * 100}")
+
+    /**
+     * The frame at [tMs] (cached per 100 ms). With [exact] it is that very frame (decoded from the previous key
+     * frame: slower); otherwise the nearest key frame (fast; clips have about one per second).
+     */
+    fun frame(c: Clip, tMs: Long, exact: Boolean = false): Bitmap? {
+        val t = (tMs / 100) * 100
+        return request("f${c.id}@$t${if (exact) "x" else ""}") {
             if (retrieverFor != c.id) {
                 try { retriever?.release() } catch (_: Exception) {}
                 retriever = MediaMetadataRetriever().also { ClipThumbs.source(it, ctx, c.uri) }
                 retrieverFor = c.id
             }
-            retriever!!.getScaledFrameAtTime(sec * 1_000_000L + 500_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 240, 240)
+            retriever!!.getScaledFrameAtTime(t * 1000L,
+                if (exact) MediaMetadataRetriever.OPTION_CLOSEST else MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 240, 240)
         }
     }
 
@@ -95,7 +102,8 @@ class FilmstripView(ctx: Context) : View(ctx) {
     var current = 0; private set
     var expanded = true; private set
     private var posMs = 0L
-    private var zoom = 1f
+    /** Frame density of the expanded clip (pinch): 1 = one frame per second; remembered. */
+    private var zoom = try { Prefs(ctx).stripZoom } catch (_: Exception) { 1f }
 
     val thumbs = ThumbLoader(ctx) { invalidate() }
     private val d = resources.displayMetrics.density
@@ -123,8 +131,13 @@ class FilmstripView(ctx: Context) : View(ctx) {
     private val dst = RectF()
 
     private val gap get() = 3 * d
-    private fun tileW() = 54 * d * zoom
-    private fun pxPerMs() = tileW() / 2500f   // one frame per 2.5 s at normal zoom
+    /** Clip tiles (posters). They only grow with pinching when no clip is expanded. */
+    private fun tileW() = 54 * d * (if (expanded) 1f else zoom.coerceIn(0.6f, 3.5f))
+    /** Frame tiles of the expanded clip: fixed size, so pinching adds frames instead of enlarging them. */
+    private fun frameW() = 40 * d
+    private fun pxPerMs() = frameW() * zoom / 1000f   // zoom 1 = one frame per second
+    /** Time between neighbouring frame tiles (ms). */
+    private fun frameStepMs() = 1000f / zoom
 
     /** Makes [index] the current clip, positioned at [atMs] (where the user landed, not 0:00). */
     fun setCurrent(index: Int, expand: Boolean? = null, atMs: Long = 0) {
@@ -147,7 +160,7 @@ class FilmstripView(ctx: Context) : View(ctx) {
         var x = 0f
         for (i in 0 until n) {
             starts[i] = x
-            widths[i] = if (expanded && i == current) max(tileW() * 2, clips[i].durationMs * pxPerMs()) else tileW()
+            widths[i] = if (expanded && i == current) max(frameW() * 3, clips[i].durationMs * pxPerMs()) else tileW()
             x += widths[i] + gap
         }
         total = max(0f, x - gap)
@@ -187,15 +200,18 @@ class FilmstripView(ctx: Context) : View(ctx) {
             val x0 = sx - left
             val clip = clips[i]
             if (expanded && i == current) {
-                val tw = tileW()
+                val tw = frameW()
                 val n = ceil(widths[i] / tw).toInt()
+                // finer than the key frames (about 1 per second): decode the exact frames
+                val exact = frameStepMs() < 900
                 c.save()
                 c.clipRect(x0, top, x0 + widths[i], bot)
                 for (k in 0 until n) {
                     val tx = x0 + k * tw
                     if (tx + tw < 0 || tx > w) continue
                     val tMs = ((k * tw + tw / 2) / widths[i] * clip.durationMs).toLong()
-                    drawThumb(c, thumbs.frame(clip, tMs) ?: thumbs.poster(clip), tx, top, tx + tw, bot)
+                    val b = if (exact) thumbs.frame(clip, tMs, true) ?: thumbs.nearbyLoaded(clip, tMs) else thumbs.frame(clip, tMs)
+                    drawThumb(c, b ?: thumbs.poster(clip), tx, top, tx + tw, bot)
                 }
                 c.restore()
                 pBorder.strokeWidth = 2.5f * d
@@ -244,7 +260,7 @@ class FilmstripView(ctx: Context) : View(ctx) {
             return true
         }
         override fun onScale(detector: ScaleGestureDetector): Boolean {
-            zoom = (zoom * detector.scaleFactor).coerceIn(0.6f, 3.5f)
+            zoom = (zoom * detector.scaleFactor).coerceIn(0.4f, 6f)
             relayout()
             // keep the same clip and timestamp under the playhead while the tiles resize
             scroll = contentX(anchorIndex, anchorMs)
@@ -252,7 +268,10 @@ class FilmstripView(ctx: Context) : View(ctx) {
             invalidate()
             return true
         }
-        override fun onScaleEnd(detector: ScaleGestureDetector) { scaling = false }
+        override fun onScaleEnd(detector: ScaleGestureDetector) {
+            scaling = false
+            try { Prefs(context).stripZoom = zoom } catch (_: Exception) {}
+        }
     })
 
     private var anchorIndex = 0

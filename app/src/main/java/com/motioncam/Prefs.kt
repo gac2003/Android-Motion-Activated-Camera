@@ -120,6 +120,8 @@ class Prefs(ctx: Context) {
     // ---- player ----
     /** Double-tap skip in the player: milliseconds, or 0 = one frame. */
     var skipMs: Int get() = i("skipMs", 1000); set(v) = put("skipMs", v)
+    /** Filmstrip frame density (pinch), 1 = one frame per second. */
+    var stripZoom: Float get() = f("stripZoom", 1f); set(v) = put("stripZoom", v)
 
     // ---- remote view ----
     var serverOn: Boolean get() = b("serverOn", false); set(v) = put("serverOn", v)
@@ -145,9 +147,10 @@ class Prefs(ctx: Context) {
         val REMOTE_KEYS = listOf("serverOn", "streamHd", "port")
         val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal", "cloudThumbs")
         val REMOTE_FOLDER_KEYS = listOf("remoteFtp")
+        val PLAYER_KEYS = listOf("skipMs", "stripZoom")
         val CAMERA_KEYS = listOf("camera", "exposureAuto", "evIndex", "iso", "shutterNs", "focusAuto", "focusPos",
             "wbAuto", "wbKelvin", "zoom", "chipLayout")
         /** Everything except the web password (so you are not locked out of the viewer). */
-        val ALL_KEYS = PREVIEW_KEYS + RECORDING_KEYS + MOTION_KEYS + STORAGE_KEYS + PROTECTION_KEYS + REMOTE_KEYS + CLOUD_KEYS + REMOTE_FOLDER_KEYS + CAMERA_KEYS
+        val ALL_KEYS = PREVIEW_KEYS + RECORDING_KEYS + MOTION_KEYS + STORAGE_KEYS + PROTECTION_KEYS + REMOTE_KEYS + CLOUD_KEYS + REMOTE_FOLDER_KEYS + PLAYER_KEYS + CAMERA_KEYS
     }
 }

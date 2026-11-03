@@ -55,4 +55,6 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:21.2.0")
     // SFTP (SSH) client
     implementation("com.github.mwiede:jsch:0.2.20")
+    // pull-down-to-refresh in remote folders
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 }

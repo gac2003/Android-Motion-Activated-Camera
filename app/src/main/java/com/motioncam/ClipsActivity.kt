@@ -46,6 +46,7 @@ class ClipsActivity : Activity() {
         override fun run() { updateRemoteSummary(); ui.postDelayed(this, 30_000L) }
     }
     private var missing = 0
+    private var swipe: androidx.swiperefreshlayout.widget.SwipeRefreshLayout? = null
     private var favIds: Set<Long> = emptySet()
     private sealed class Row {
         class Header(val dayStart: Long, val clips: List<Clip>) : Row()
@@ -129,9 +130,6 @@ class ClipsActivity : Activity() {
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            if (collectionId == null && remote != null) addView(iconButton(this@ClipsActivity, IconDrawable.Kind.REFRESH, 44, 10) {
-                refreshRemote(quiet = false)
-            })
             if (collectionId == null && remote == null) addView(iconButton(this@ClipsActivity, IconDrawable.Kind.CLOUD, 44, 10) {
                 startActivity(Intent(this@ClipsActivity, com.motioncam.remote.RemoteFoldersActivity::class.java))
             })
@@ -193,8 +191,23 @@ class ClipsActivity : Activity() {
         }
         selBar.addView(more)
         root.addView(selBar)
-        summary = Ui.label(this, "", 12f, Ui.GREY).apply { setPadding(Ui.dp(this@ClipsActivity, 52), 0, 0, Ui.dp(this@ClipsActivity, 6)) }
-        root.addView(summary)
+        summary = Ui.label(this, "", 12f, Ui.GREY)
+        if (remote == null) {
+            summary.setPadding(Ui.dp(this, 52), 0, 0, Ui.dp(this, 6))
+            root.addView(summary)
+        } else {
+            // remote folder: "N clips · checked 3 min ago  ⟳" – the refresh button sits next to the status it updates
+            val status = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(Ui.dp(this@ClipsActivity, 52), 0, Ui.dp(this@ClipsActivity, 6), Ui.dp(this@ClipsActivity, 2))
+            }
+            status.addView(summary, LinearLayout.LayoutParams(0, -2, 1f))
+            status.addView(iconButton(this, IconDrawable.Kind.REFRESH, 34, 7) { refreshRemote(quiet = false) }.apply {
+                contentDescription = "Check for new clips"
+            })
+            root.addView(status)
+        }
         banner = Ui.label(this, "Clips from earlier installs are hidden. Tap to show them.", 13f, Ui.ACCENT).apply {
             setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8))
             setBackgroundColor(0xFF2A2416.toInt())
@@ -211,7 +224,17 @@ class ClipsActivity : Activity() {
         listBox.addView(list, FrameLayout.LayoutParams(-1, -1))
         pinned = headerView().apply { setBackgroundColor(Ui.BG); visibility = View.GONE; elevation = Ui.dp(this@ClipsActivity, 2).toFloat() }
         listBox.addView(pinned, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
-        root.addView(listBox, LinearLayout.LayoutParams(-1, 0, 1f))
+        if (remote != null) {
+            // pull down at the top of the list to check for new clips
+            swipe = androidx.swiperefreshlayout.widget.SwipeRefreshLayout(this).apply {
+                setColorSchemeColors(Ui.ACCENT)
+                setProgressBackgroundColorSchemeColor(0xFF2A2D33.toInt())
+                setOnChildScrollUpCallback { _, _ -> list.canScrollVertically(-1) }
+                setOnRefreshListener { refreshRemote(quiet = true, pulled = true) }
+                addView(listBox, ViewGroup.LayoutParams(-1, -1))
+            }
+            root.addView(swipe, LinearLayout.LayoutParams(-1, 0, 1f))
+        } else root.addView(listBox, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         list.adapter = adapter
         list.setOnScrollListener(object : AbsListView.OnScrollListener {
@@ -281,21 +304,23 @@ class ClipsActivity : Activity() {
     // ------------------------------------------------------------------ remote folder
 
     /** Lists the remote folder again; [quiet] = no toast (automatic refresh). */
-    private fun refreshRemote(quiet: Boolean) {
+    private fun refreshRemote(quiet: Boolean, pulled: Boolean = false) {
         val src = remote ?: return
-        if (refreshing) return
+        if (refreshing) { if (pulled) swipe?.isRefreshing = true; return }
         refreshing = true
-        if (!quiet) Toast.makeText(this, "Checking for new clips…", Toast.LENGTH_SHORT).show()
+        // the spinner shows for refreshes the user asked for (pull or button), not for the automatic checks
+        if (!quiet || pulled) swipe?.isRefreshing = true
         Thread {
             val result = try { Result.success(RemoteRepo.refresh(this, src)) } catch (e: Exception) { Result.failure(e) }
             runOnUiThread {
                 refreshing = false
+                swipe?.isRefreshing = false
                 if (isFinishing) return@runOnUiThread
                 result.onSuccess { lastError = null; showRemote(it) }
                 result.onFailure { e ->
                     lastError = e.message ?: e.javaClass.simpleName
                     showRemote(clips.takeIf { collectionId == null } ?: RemoteRepo.cached(this, src))
-                    if (!quiet) Toast.makeText(this, "Could not refresh: ${e.message}", Toast.LENGTH_LONG).show()
+                    if (!quiet || pulled) Toast.makeText(this, "Could not refresh: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }.start()

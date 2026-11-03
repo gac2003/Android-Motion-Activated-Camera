@@ -60,9 +60,9 @@ class SettingsActivity : Activity() {
             "motion was detected. It uses noticeably more power and heat than Off (all lengths cost about the same). " +
             "With audio on, the microphone stays active while monitoring.")
         toggle("Discard very short clips when I stop monitoring", prefs.discardShortOnStop) { prefs.discardShortOnStop = it }
-        val shortOpts = listOf(1000, 1500, 2000, 3000, 5000)
-        choice("Counts as very short (from when motion was detected)", listOf("1 s", "1.5 s", "2 s", "3 s", "5 s"),
-            shortOpts.indexOf(prefs.discardShortMs).coerceAtLeast(1)) { prefs.discardShortMs = shortOpts[it] }
+        decimal("Very short = less than (from when motion was detected)", "s", 0.5f, 10f, prefs.discardShortMs / 1000f) {
+            prefs.discardShortMs = (it * 1000).roundToInt()
+        }
         note("Picking the phone up to turn monitoring off often starts a clip. If you stop monitoring on this screen while such " +
             "a short clip is recording, it is discarded and a small Undo appears for a few seconds. Clips that end on their " +
             "own (no more motion) are never affected, and stopping from the notification keeps the clip.")

@@ -110,6 +110,8 @@ class FilmstripView(ctx: Context) : View(ctx) {
     private var hi = 0f
     private var lastScrubAt = 0L
     private var moved = false
+    /** A pinch happened in this gesture: it only resizes, it never scrubs or changes clip. */
+    private var scaledInGesture = false
     private val scroller = OverScroller(ctx)
 
     private val pTile = Paint().apply { color = 0xFF2A2D33.toInt() }
@@ -231,17 +233,30 @@ class FilmstripView(ctx: Context) : View(ctx) {
     // ------------------------------------------------------------------ touch
 
     private val scaleDetector = ScaleGestureDetector(ctx, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-        override fun onScaleBegin(detector: ScaleGestureDetector): Boolean { scaling = true; return true }
+        override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+            scaling = true
+            if (!scaledInGesture) {
+                // anchor: the clip and moment under the playhead when the pinch started
+                val (i, p) = if (moved) hit(scroll) else Pair(current, posMs)
+                anchorIndex = i; anchorMs = p
+            }
+            scaledInGesture = true
+            return true
+        }
         override fun onScale(detector: ScaleGestureDetector): Boolean {
-            val (i, p) = hit(scroll)
             zoom = (zoom * detector.scaleFactor).coerceIn(0.6f, 3.5f)
             relayout()
-            scroll = contentX(i, p)
+            // keep the same clip and timestamp under the playhead while the tiles resize
+            scroll = contentX(anchorIndex, anchorMs)
+            setRange()
             invalidate()
             return true
         }
         override fun onScaleEnd(detector: ScaleGestureDetector) { scaling = false }
     })
+
+    private var anchorIndex = 0
+    private var anchorMs = 0L
 
     private val gestures = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean {
@@ -252,7 +267,7 @@ class FilmstripView(ctx: Context) : View(ctx) {
             return true
         }
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
-            if (scaling) return true
+            if (scaling || scaledInGesture || e2.pointerCount > 1) return true   // two fingers = resize, not scrub
             moved = true
             scroll = (scroll + dx).coerceIn(lo, hi)
             scrub(false)
@@ -260,13 +275,14 @@ class FilmstripView(ctx: Context) : View(ctx) {
             return true
         }
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
-            if (scaling) return true
+            if (scaling || scaledInGesture) return true
             flinging = true
             scroller.fling(scroll.toInt(), 0, -vx.toInt(), 0, lo.toInt(), hi.toInt(), 0, 0)
             postInvalidateOnAnimation()
             return true
         }
         override fun onSingleTapUp(e: MotionEvent): Boolean {
+            if (scaledInGesture) return true
             val (i, _) = hit(scroll + (e.x - width / 2f))
             if (i == current) {
                 expanded = !expanded
@@ -312,12 +328,21 @@ class FilmstripView(ctx: Context) : View(ctx) {
     override fun onTouchEvent(e: MotionEvent): Boolean {
         parent?.requestDisallowInterceptTouchEvent(true)
         scaleDetector.onTouchEvent(e)
-        if (e.actionMasked == MotionEvent.ACTION_DOWN) touching = true
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) { touching = true; scaledInGesture = false }
         gestures.onTouchEvent(e)
         if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
             touching = false
-            if (moved && !flinging && !scaling) scrub(true)
-            if (!moved && !flinging) { scroll = contentX(current, posMs); invalidate() }
+            when {
+                // a pinch: stay where the playhead is (a scrub before the pinch is applied at the anchor)
+                scaledInGesture -> {
+                    if (moved) listener?.onScrub(anchorIndex, anchorMs, true)   // finish a drag made before the pinch
+                    scroll = contentX(anchorIndex, anchorMs)
+                    invalidate()
+                }
+                moved && !flinging && !scaling -> scrub(true)
+                !moved && !flinging -> { scroll = contentX(current, posMs); invalidate() }
+            }
+            scaledInGesture = false
         }
         return true
     }

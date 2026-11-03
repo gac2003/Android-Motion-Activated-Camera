@@ -68,7 +68,7 @@ With the Android SDK installed (`ANDROID_HOME` set, platform 34): `./gradlew ass
    * If a clip shorter than 1.5 s is recording when you tap **STOP MONITORING** (usually set off by picking the phone
      up), it is discarded and a small *Short clip discarded · UNDO* pill appears in the top-right corner for 6 seconds.
      Tap it and confirm to keep the clip. Change or turn this off in Settings → Recording → *Discard very short clips
-     when I stop monitoring* (1, 1.5, 2, 3 or 5 s). Clips that end on their own and stops from the notification
+     when I stop monitoring* (slider or type any length from 0.5 to 10 s, e.g. 1.2). Clips that end on their own and stops from the notification
      are never affected.
 4. Settings → *Exempt from battery optimisation*. Set *Video rotation* explicitly if the phone is on a fixed stand.
 

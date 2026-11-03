@@ -27,7 +27,9 @@ New versions install over the old one and keep your settings and clips.
 
 A motion-triggered security camera for Android (built for a Galaxy S20 FE, works on any Android 11+ phone).
 
-* Records only when something moves; keeps recording until there has been no motion for N seconds (default 30, adjustable 10–120).
+* Records only when something moves; keeps recording until there has been no motion for N seconds (default 30, adjustable 0–600).
+* **No accidental clips when you stop it**: picking the phone up to turn monitoring off usually starts a clip; one shorter
+  than 1.5 s (adjustable) is discarded, with a few seconds to Undo.
 * **Pick the exact lens** (main / ultra-wide / telephoto / front) – not just "front" or "rear".
 * **Pro Video style controls**: EV, ISO, shutter speed, manual focus (with focus peaking), white balance, zoom, resolution/fps.
 * 1080p / 30 fps H.264 by default (720p, 4K, 24/60 fps and HEVC are options).
@@ -63,13 +65,18 @@ With the Android SDK installed (`ANDROID_HOME` set, platform 34): `./gradlew ass
    * **FOCUS** shows green focus peaking while it is open.
    * **ZONES** shows detected motion in red; drag on the image to mask areas (dark = ignored). The slider is sensitivity.
 3. Tap **START MONITORING**, then lock the phone. Stop from the notification or the app.
+   * If a clip shorter than 1.5 s is recording when you tap **STOP MONITORING** (usually set off by picking the phone
+     up), it is discarded and a small *Short clip discarded · UNDO* pill appears in the top-right corner for 6 seconds.
+     Tap it and confirm to keep the clip. Change or turn this off in Settings → Recording → *Discard very short clips
+     when I stop monitoring* (1, 1.5, 2, 3 or 5 s). Clips that end on their own and stops from the notification
+     are never affected.
 4. Settings → *Exempt from battery optimisation*. Set *Video rotation* explicitly if the phone is on a fixed stand.
 
 Clips are saved to **Movies/MotionCam** (visible in Gallery and over USB file transfer).
 The **Clips** screen shows thumbnails by day; tapping a clip opens the **player**, which plays every following clip
 back to back like one continuous video. Below the video is a filmstrip (like modern phone gallery players): the playing clip is expanded
-into its frames (tap it to collapse/expand), pinch to resize, drag to scrub (stops at the clip's end while expanded).
-Tap the video to pause/play, double-tap left/right to skip 5 s; the ⋮ menu has share / open with / delete.
+into its frames (tap it to collapse/expand), pinch to resize, drag to scrub (stops at the clip's ends while expanded; letting go at the end stays there, paused).
+Tap the video to pause/play, double-tap left/right to skip 5 s within the clip; the ⋮ menu has share / open with / delete.
 
 Long-press any control button on the main screen to choose which buttons are shown and their order.
 

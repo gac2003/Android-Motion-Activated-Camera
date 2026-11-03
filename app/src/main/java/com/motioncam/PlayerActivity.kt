@@ -335,7 +335,12 @@ class PlayerActivity : Activity() {
                     load(nxt, index + 1)
                 } else link()
             }
-            mp.setOnCompletionListener { if (slot === cur) onCurrentCompleted() }
+            mp.setOnCompletionListener {
+                if (slot !== cur) return@setOnCompletionListener
+                // the finger is still on the strip: never move on to another clip, stay on the last frame
+                if (scrubbing) try { mp.seekTo(lastFrameMs(slot.index).toLong(), MediaPlayer.SEEK_CLOSEST) } catch (_: Exception) {}
+                else onCurrentCompleted()
+            }
             mp.setOnErrorListener { _, _, _ ->
                 if (slot === cur && remote != null) Toast.makeText(this, "Could not load this clip (no connection?)", Toast.LENGTH_SHORT).show()
                 if (slot === cur) ui.post { advanceTo(slot.index + 1) } else slot.release()
@@ -480,8 +485,10 @@ class PlayerActivity : Activity() {
         if (!final && !scrubbing) {
             scrubbing = true
             if (playing) try { cur.mp?.pause() } catch (_: Exception) {}
+            // unchain the next clip while scrubbing, so it can never start by itself under the finger
+            try { cur.mp?.setNextMediaPlayer(null) } catch (_: Exception) {}
         }
-        if (final) scrubbing = false
+        if (final) { scrubbing = false; link() }   // re-chain for seamless playback
         if (index == cur.index && cur.prepared) {
             val m = cur.mp ?: return
             // stop just short of the end, so dragging to the end shows the last frame instead of finishing the clip

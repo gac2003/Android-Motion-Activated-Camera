@@ -15,18 +15,24 @@ android {
         versionName = "1.0"
     }
 
-    // A fixed debug key committed to the repo: every CI build has the same signature,
-    // so a new APK installs over the old one (keeps settings and permissions).
+    // Release signing key comes from GitHub Actions secrets (never stored in the repo). Builds without it
+    // (e.g. local Android Studio builds) fall back to the normal local debug key.
+    val ksPath = System.getenv("MOTIONCAM_KEYSTORE")
     signingConfigs {
-        getByName("debug") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        if (ksPath != null) {
+            create("motioncam") {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("MOTIONCAM_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("MOTIONCAM_KEY_ALIAS") ?: "motioncam"
+                keyPassword = System.getenv("MOTIONCAM_KEYSTORE_PASSWORD")
+            }
         }
     }
 
     buildTypes {
+        debug {
+            if (ksPath != null) signingConfig = signingConfigs.getByName("motioncam")
+        }
         release {
             isMinifyEnabled = false
         }

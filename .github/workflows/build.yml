@@ -17,7 +17,23 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0"
       - run: chmod +x gradlew
-      - name: Build debug APK
+      - name: Set up signing key (from repository secrets)
+        env:
+          KEYSTORE_B64: ${{ secrets.MOTIONCAM_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/motioncam.jks"
+            echo "MOTIONCAM_KEYSTORE=$RUNNER_TEMP/motioncam.jks" >> "$GITHUB_ENV"
+          elif [ "$GITHUB_REPOSITORY" = "gac2003/Android-Motion-Activated-Camera" ]; then
+            echo "::error::Signing secrets are missing. Add MOTIONCAM_KEYSTORE_B64, MOTIONCAM_KEYSTORE_PASSWORD and MOTIONCAM_KEY_ALIAS under Settings > Secrets and variables > Actions."
+            exit 1
+          else
+            echo "No signing secrets (fork): building with a temporary debug key."
+          fi
+      - name: Build APK
+        env:
+          MOTIONCAM_KEYSTORE_PASSWORD: ${{ secrets.MOTIONCAM_KEYSTORE_PASSWORD }}
+          MOTIONCAM_KEY_ALIAS: ${{ secrets.MOTIONCAM_KEY_ALIAS }}
         run: ./gradlew --no-daemon assembleDebug
       - uses: actions/upload-artifact@v4
         with:

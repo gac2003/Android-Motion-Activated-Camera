@@ -112,6 +112,29 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
     override fun getOpacity() = PixelFormat.TRANSLUCENT
 }
 
+/** A button with an icon above a short label (for a row of evenly spaced actions). */
+fun labeledButton(ctx: Context, kind: IconDrawable.Kind, label: String, tint: Int = 0xFFFFFFFF.toInt(), click: () -> Unit): android.widget.LinearLayout =
+    android.widget.LinearLayout(ctx).apply {
+        orientation = android.widget.LinearLayout.VERTICAL
+        gravity = android.view.Gravity.CENTER_HORIZONTAL
+        val p = Ui.dp(ctx, 6)
+        setPadding(p / 2, p, p / 2, p)
+        val tv = android.util.TypedValue()
+        ctx.theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)
+        if (tv.resourceId != 0) setBackgroundResource(tv.resourceId)
+        isClickable = true
+        contentDescription = label
+        setOnClickListener { click() }
+        addView(ImageView(ctx).apply { setImageDrawable(IconDrawable(kind, tint)) },
+            android.widget.LinearLayout.LayoutParams(Ui.dp(ctx, 24), Ui.dp(ctx, 24)))
+        addView(Ui.label(ctx, label, 11f, if (tint == 0xFFFFFFFF.toInt()) 0xFFD0D3D8.toInt() else tint).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, Ui.dp(ctx, 3), 0, 0)
+        }, android.widget.LinearLayout.LayoutParams(-1, -2))
+    }
+
 /** An ImageView showing an [IconDrawable], with padding for a comfortable touch target. */
 fun iconButton(ctx: Context, kind: IconDrawable.Kind, sizeDp: Int = 44, padDp: Int = 10, click: (() -> Unit)? = null): ImageView =
     ImageView(ctx).apply {

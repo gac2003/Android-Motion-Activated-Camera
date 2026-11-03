@@ -46,6 +46,7 @@ class ClipsActivity : Activity() {
         override fun run() { updateRemoteSummary(); ui.postDelayed(this, 30_000L) }
     }
     private var missing = 0
+    private lateinit var actionRow: LinearLayout
     private var swipe: androidx.swiperefreshlayout.widget.SwipeRefreshLayout? = null
     private var favIds: Set<Long> = emptySet()
     private sealed class Row {
@@ -119,28 +120,29 @@ class ClipsActivity : Activity() {
             store = Collections.forRemote(rid)
         }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
-        val playAll = Ui.chip(this, "▶ Timeline").apply {
-            setOnClickListener {
+        // actions as a labelled row under the title, so the title keeps the whole top bar
+        actionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val p = Ui.dp(this@ClipsActivity, 8)
+            setPadding(p, 0, p, Ui.dp(this@ClipsActivity, 4))
+            fun add(kind: IconDrawable.Kind, label: String, tint: Int = 0xFFFFFFFF.toInt(), click: () -> Unit) =
+                addView(labeledButton(this@ClipsActivity, kind, label, tint, click), LinearLayout.LayoutParams(0, -2, 1f))
+            if (remote != null) add(IconDrawable.Kind.REFRESH, "Refresh") { refreshRemote(quiet = false) }
+            if (collectionId == null && remote == null) add(IconDrawable.Kind.CLOUD, "Remote folders") {
+                startActivity(Intent(this@ClipsActivity, com.motioncam.remote.RemoteFoldersActivity::class.java))
+            }
+            if (collectionId == null) add(IconDrawable.Kind.FOLDER, "Collections") {
+                startActivity(Intent(this@ClipsActivity, CollectionsActivity::class.java).putExtra(CollectionsActivity.EXTRA_REMOTE, remote?.id))
+            }
+            add(IconDrawable.Kind.CALENDAR, "Calendar") { showCalendar() }
+            add(IconDrawable.Kind.PLAY, "Timeline", Ui.ACCENT) {
                 // newest day, from its first clip
                 val h = rows.firstOrNull { it is Row.Header } as Row.Header?
                 h?.clips?.minByOrNull { it.startMs }?.let { play(it) }
             }
         }
-        val calBtn = iconButton(this, IconDrawable.Kind.CALENDAR, 44, 10) { showCalendar() }
-        val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            if (collectionId == null && remote == null) addView(iconButton(this@ClipsActivity, IconDrawable.Kind.CLOUD, 44, 10) {
-                startActivity(Intent(this@ClipsActivity, com.motioncam.remote.RemoteFoldersActivity::class.java))
-            })
-            if (collectionId == null) addView(iconButton(this@ClipsActivity, IconDrawable.Kind.FOLDER, 44, 10) {
-                startActivity(Intent(this@ClipsActivity, CollectionsActivity::class.java).putExtra(CollectionsActivity.EXTRA_REMOTE, remote?.id))
-            })
-            addView(calBtn)
-            addView(playAll)
-        }
         val title = collectionId?.let { store.get(this, it)?.name } ?: remote?.name ?: "Clips"
-        normalBar = topBar(this, title, actions)
+        normalBar = topBar(this, title)
         root.addView(normalBar)
         val fit = FitRow(this).apply {
             setBackgroundColor(0xFF2A2416.toInt())
@@ -191,23 +193,9 @@ class ClipsActivity : Activity() {
         }
         selBar.addView(more)
         root.addView(selBar)
-        summary = Ui.label(this, "", 12f, Ui.GREY)
-        if (remote == null) {
-            summary.setPadding(Ui.dp(this, 52), 0, 0, Ui.dp(this, 6))
-            root.addView(summary)
-        } else {
-            // remote folder: "N clips · checked 3 min ago  ⟳" – the refresh button sits next to the status it updates
-            val status = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(Ui.dp(this@ClipsActivity, 52), 0, Ui.dp(this@ClipsActivity, 6), Ui.dp(this@ClipsActivity, 2))
-            }
-            status.addView(summary, LinearLayout.LayoutParams(0, -2, 1f))
-            status.addView(iconButton(this, IconDrawable.Kind.REFRESH, 34, 7) { refreshRemote(quiet = false) }.apply {
-                contentDescription = "Check for new clips"
-            })
-            root.addView(status)
-        }
+        summary = Ui.label(this, "", 12f, Ui.GREY).apply { setPadding(Ui.dp(this@ClipsActivity, 52), 0, Ui.dp(this@ClipsActivity, 12), Ui.dp(this@ClipsActivity, 4)) }
+        root.addView(summary)
+        root.addView(actionRow)
         banner = Ui.label(this, "Clips from earlier installs are hidden. Tap to show them.", 13f, Ui.ACCENT).apply {
             setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8))
             setBackgroundColor(0xFF2A2416.toInt())
@@ -736,6 +724,7 @@ class ClipsActivity : Activity() {
 
     private fun updateSelection() {
         normalBar.visibility = if (selecting) View.GONE else View.VISIBLE
+        actionRow.visibility = normalBar.visibility
         selBar.visibility = if (selecting) View.VISIBLE else View.GONE
         selTitle.text = "${selected.size} selected"
         adapter.notifyDataSetChanged()

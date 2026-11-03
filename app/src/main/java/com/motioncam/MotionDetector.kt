@@ -22,6 +22,24 @@ class MotionDetector {
         const val GW = 32
         const val GH = 18
         const val N = GW * GH
+        const val MAX_SENSITIVITY = 14
+
+        /**
+         * Minimum relative brightness change for a block to count as moving.
+         * 1: 40 %, 5 (default): 28 %, 10: 13 %; levels 11-14 use smaller steps (10 %, 7 %, 5.5 %, 4 %) so the
+         * most sensitive end catches low-contrast people (clothes similar to the walls) without reacting to
+         * plain sensor noise.
+         */
+        fun threshold(s: Int): Float = when {
+            s <= 10 -> 0.13f + (10 - s) * 0.03f
+            else -> floatArrayOf(0.10f, 0.07f, 0.055f, 0.04f)[(s - 11).coerceIn(0, 3)]
+        }
+
+        fun patternThreshold(s: Int): Float = when {
+            s <= 10 -> 0.084f + (10 - s) * 0.012f
+            // levels 11-14 keep the structure test strict, so light sweeping across the scene stays ignored
+            else -> 0.072f
+        }
     }
 
     private val bgM = FloatArray(N)
@@ -53,7 +71,7 @@ class MotionDetector {
             changed.fill(false)
             return 0
         }
-        val s = sensitivity.coerceIn(1, 10)
+        val s = sensitivity.coerceIn(1, MAX_SENSITIVITY)
 
         // relative brightness change per block
         var cnt = 0
@@ -63,9 +81,8 @@ class MotionDetector {
         }
         val global = if (lightFilter >= 1 && cnt > 0) median(tmp, cnt) else 0f
 
-        // s=10: 13 %, s=5: 28 %, s=1: 40 % brightness change (default 5 tuned for people/animals)
-        val thr = 0.13f + (10 - s) * 0.03f
-        val patThr = 0.084f + (10 - s) * 0.012f
+        val thr = threshold(s)
+        val patThr = patternThreshold(s)
         for (i in 0 until N) {
             val c = (zones == null || zones[i]) && abs(rel[i] - global) > thr
             changed[i] = c

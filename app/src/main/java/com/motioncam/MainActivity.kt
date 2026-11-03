@@ -718,7 +718,7 @@ class MainActivity : Activity() {
             }
             "ZONES" -> {
                 setAutoBtn("RESET", false)
-                seek.max = 9
+                seek.max = MotionDetector.MAX_SENSITIVITY - 1
                 seek.progress = prefs.sensitivity - 1
             }
         }
@@ -848,7 +848,7 @@ class MainActivity : Activity() {
             "FOCUS" -> Triple("Focus distance in cm (empty = infinity)", "e.g. 150", "")
             "WB" -> Triple("White balance in Kelvin (snaps to nearest preset)", "e.g. 5200", "${prefs.wbKelvin}")
             "ZOOM" -> Triple("Zoom (%.1f–%.1f)".format(c.zoomMin, c.zoomMax), "e.g. 2.0", "%.1f".format(prefs.zoom))
-            "ZONES" -> Triple("Motion sensitivity (1–10)", "5", "${prefs.sensitivity}")
+            "ZONES" -> Triple("Motion sensitivity (1–${MotionDetector.MAX_SENSITIVITY})", "5", "${prefs.sensitivity}")
             else -> return
         }
         val input = EditText(this).apply {
@@ -875,7 +875,7 @@ class MainActivity : Activity() {
                     }
                     "WB" -> if (v != null) { prefs.wbKelvin = ProCaps.wbPresets[ProCaps.nearestPreset(v.toInt())].second; prefs.wbAuto = false }
                     "ZOOM" -> if (v != null) prefs.zoom = v.toFloat().coerceIn(c.zoomMin, c.zoomMax)
-                    "ZONES" -> if (v != null) prefs.sensitivity = v.toInt().coerceIn(1, 10)
+                    "ZONES" -> if (v != null) prefs.sensitivity = v.toInt().coerceIn(1, MotionDetector.MAX_SENSITIVITY)
                 }
                 engine?.applyPro()
                 configurePanel()

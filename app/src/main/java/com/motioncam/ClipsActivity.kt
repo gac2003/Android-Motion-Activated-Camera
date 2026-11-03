@@ -34,6 +34,10 @@ class ClipsActivity : Activity() {
     private lateinit var summary: TextView
     private lateinit var banner: TextView
     private lateinit var normalBar: View
+    private lateinit var pinned: LinearLayout
+    private var pinnedDay = Long.MIN_VALUE
+    /** Days the user collapsed (session only). */
+    private val collapsed = HashSet<Long>()
     private lateinit var selBar: LinearLayout
     private lateinit var selTitle: TextView
 
@@ -80,7 +84,14 @@ class ClipsActivity : Activity() {
                 h?.clips?.minByOrNull { it.startMs }?.let { play(it) }
             }
         }
-        normalBar = topBar(this, "Clips", playAll)
+        val calBtn = iconButton(this, IconDrawable.Kind.CALENDAR, 44, 10) { showCalendar() }
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(calBtn)
+            addView(playAll)
+        }
+        normalBar = topBar(this, "Clips", actions)
         root.addView(normalBar)
         selBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -99,7 +110,7 @@ class ClipsActivity : Activity() {
         fun selAction(t: String, click: () -> Unit) = Ui.chip(this, t).apply { setOnClickListener { click() } }.also {
             selBar.addView(it, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(this@ClipsActivity, 6) })
         }
-        selAction("All") { if (selected.size == display.size) selected.clear() else display.forEach { selected += it.id }; updateSelection() }
+        selAction("All") { if (selected.size == clips.size) selected.clear() else clips.forEach { selected += it.id }; updateSelection() }
         selAction("Share") { shareSelected() }
         selAction("Delete") { deleteSelected() }
         root.addView(selBar)
@@ -116,9 +127,17 @@ class ClipsActivity : Activity() {
             divider = null
             setBackgroundColor(Ui.BG)
         }
-        root.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
+        val listBox = FrameLayout(this)
+        listBox.addView(list, FrameLayout.LayoutParams(-1, -1))
+        pinned = headerView().apply { setBackgroundColor(Ui.BG); visibility = View.GONE; elevation = Ui.dp(this@ClipsActivity, 2).toFloat() }
+        listBox.addView(pinned, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+        root.addView(listBox, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         list.adapter = adapter
+        list.setOnScrollListener(object : AbsListView.OnScrollListener {
+            override fun onScrollStateChanged(v: AbsListView?, state: Int) {}
+            override fun onScroll(v: AbsListView?, first: Int, visible: Int, total: Int) = updatePinned()
+        })
     }
 
     override fun onResume() {
@@ -157,12 +176,13 @@ class ClipsActivity : Activity() {
         val out = ArrayList<Row>()
         for ((day, items) in clips.groupBy { dayStart(it.startMs) }.toSortedMap(compareByDescending { it })) {
             out += Row.Header(day, items)
-            items.chunked(cols).forEach { out += Row.Items(it) }
+            if (day !in collapsed) items.chunked(cols).forEach { out += Row.Items(it) }
         }
         rows = out
         display = out.filterIsInstance<Row.Items>().flatMap { it.clips }
-        selected.retainAll(display.map { it.id }.toSet())
+        selected.retainAll(clips.map { it.id }.toSet())
         if (selecting && selected.isEmpty()) exitSelection() else updateSelection()
+        list.post { updatePinned() }
     }
 
     private fun dayLabel(day: Long): String {
@@ -195,15 +215,164 @@ class ClipsActivity : Activity() {
     }
 
     private fun dayOptions(h: Row.Header) {
+        val collapsedNow = h.dayStart in collapsed
+        val items = arrayOf(
+            "Play day in timeline",
+            "Select all ${h.clips.size} clips",
+            if (collapsedNow) "Expand" else "Collapse",
+            "Collapse all days",
+            "Expand all days",
+            "Delete all ${h.clips.size} clips of this day",
+        )
         AlertDialog.Builder(this).setTitle(dayLabel(h.dayStart))
-            .setItems(arrayOf("Play day in timeline", "Delete all ${h.clips.size} clips of this day")) { _, which ->
-                if (which == 0) h.clips.minByOrNull { it.startMs }?.let { play(it) }
-                else AlertDialog.Builder(this).setTitle("Delete ${h.clips.size} clips?")
-                    .setPositiveButton("Delete") { _, _ ->
-                        ClipDeleter.delete(this, h.clips) { reload() }
-                    }
-                    .setNegativeButton("Cancel", null).show()
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> h.clips.minByOrNull { it.startMs }?.let { play(it) }
+                    1 -> { selecting = true; selected.addAll(h.clips.map { it.id }); if (collapsedNow) toggleDay(h.dayStart) else updateSelection() }
+                    2 -> toggleDay(h.dayStart)
+                    3 -> { collapsed.addAll(clips.map { dayStart(it.startMs) }); buildRows(); scrollToDay(h.dayStart) }
+                    4 -> { collapsed.clear(); buildRows(); scrollToDay(h.dayStart) }
+                    5 -> AlertDialog.Builder(this).setTitle("Delete ${h.clips.size} clips?")
+                        .setPositiveButton("Delete") { _, _ -> ClipDeleter.delete(this, h.clips) { reload() } }
+                        .setNegativeButton("Cancel", null).show()
+                }
             }.show()
+    }
+
+    /** Collapses / expands a day and keeps its header where the user is looking. */
+    private fun toggleDay(day: Long) {
+        if (!collapsed.remove(day)) collapsed += day
+        buildRows()
+        scrollToDay(day)
+    }
+
+    private fun scrollToDay(day: Long) {
+        val pos = rows.indexOfFirst { it is Row.Header && it.dayStart == day }
+        if (pos >= 0) list.post { list.setSelectionFromTop(pos, 0); updatePinned() }
+    }
+
+    // ------------------------------------------------------------------ day headers (list + sticky copy)
+
+    private fun headerView(): LinearLayout {
+        val ctx = this
+        return LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(Ui.dp(ctx, 10), Ui.dp(ctx, 10), Ui.dp(ctx, 4), Ui.dp(ctx, 4))
+            addView(Ui.label(ctx, "▾", 16f, Ui.ACCENT).apply { minWidth = Ui.dp(ctx, 22) })
+            addView(Ui.label(ctx, "", 15f, Ui.ACCENT), LinearLayout.LayoutParams(0, -2, 1f))
+            addView(iconButton(ctx, IconDrawable.Kind.MORE, 40, 10))
+        }
+    }
+
+    /**
+     * Header: tap = collapse / expand the day (in selection mode: select / deselect the day),
+     * ⋮ = day options (play, select, collapse all, delete…).
+     */
+    private fun bindHeader(v: LinearLayout, row: Row.Header) {
+        val isCollapsed = row.dayStart in collapsed
+        (v.getChildAt(0) as TextView).text = if (isCollapsed) "▸" else "▾"
+        val dur = row.clips.sumOf { it.durationMs }
+        val sel = if (selecting) row.clips.count { it.id in selected } else 0
+        (v.getChildAt(1) as TextView).text = "${dayLabel(row.dayStart)}  ·  ${row.clips.size} clips · ${durText(dur)}" +
+            if (sel > 0) "  ·  $sel selected" else ""
+        v.setOnClickListener {
+            if (selecting) {
+                val ids = row.clips.map { it.id }
+                if (selected.containsAll(ids)) selected.removeAll(ids.toSet()) else selected.addAll(ids)
+                updateSelection()
+            } else toggleDay(row.dayStart)
+        }
+        v.getChildAt(2).setOnClickListener { dayOptions(row) }
+    }
+
+    /** Keeps the current day's header pinned at the top; the next header pushes it up. */
+    private fun updatePinned() {
+        val first = list.firstVisiblePosition
+        if (rows.isEmpty() || first < 0 || first >= rows.size) { pinned.visibility = View.GONE; return }
+        var hi = first
+        while (hi > 0 && rows[hi] !is Row.Header) hi--
+        val h = rows[hi] as? Row.Header ?: run { pinned.visibility = View.GONE; return }
+        // the day's own header fully on screen at the top: no need for the copy
+        val firstView = list.getChildAt(0)
+        if (hi == first && firstView != null && firstView.top >= 0) { pinned.visibility = View.GONE; return }
+        if (pinnedDay != h.dayStart || pinned.visibility != View.VISIBLE) {
+            pinnedDay = h.dayStart
+            bindHeader(pinned, h)
+            pinned.visibility = View.VISIBLE
+        }
+        // push up by the next header
+        var dy = 0f
+        for (i in 0 until list.childCount) {
+            val pos = first + i
+            if (pos > hi && pos < rows.size && rows[pos] is Row.Header) {
+                val top = list.getChildAt(i).top
+                if (top < pinned.height) dy = (top - pinned.height).toFloat()
+                break
+            }
+        }
+        pinned.translationY = dy
+    }
+
+    // ------------------------------------------------------------------ calendar
+
+    /** Month calendar where only days that have clips are highlighted and tappable. */
+    private fun showCalendar() {
+        if (clips.isEmpty()) { Toast.makeText(this, "No clips yet", Toast.LENGTH_SHORT).show(); return }
+        val counts = clips.groupingBy { dayStart(it.startMs) }.eachCount()
+        fun monthOf(ms: Long) = Calendar.getInstance().apply { timeInMillis = ms; set(Calendar.DAY_OF_MONTH, 1) }.let { it.get(Calendar.YEAR) * 12 + it.get(Calendar.MONTH) }
+        val months = counts.keys.map { monthOf(it) }.toSortedSet()
+        val start = if (pinnedDay != Long.MIN_VALUE) monthOf(pinnedDay) else months.last()
+        var month = if (start in months) start else months.last()
+        val ctx = this
+        val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; val p = Ui.dp(ctx, 12); setPadding(p, p, p, 0) }
+        val head = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val prev = Ui.label(ctx, "‹", 26f).apply { setPadding(Ui.dp(ctx, 12), 0, Ui.dp(ctx, 12), 0) }
+        val next = Ui.label(ctx, "›", 26f).apply { setPadding(Ui.dp(ctx, 12), 0, Ui.dp(ctx, 12), 0) }
+        val title = Ui.label(ctx, "", 17f).apply { gravity = Gravity.CENTER }
+        head.addView(prev); head.addView(title, LinearLayout.LayoutParams(0, -2, 1f)); head.addView(next)
+        box.addView(head)
+        val grid = GridLayout(ctx).apply { columnCount = 7 }
+        box.addView(grid, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(ctx, 8) })
+        lateinit var dialog: AlertDialog
+        val cell = Ui.dp(ctx, 40)
+        fun render() {
+            grid.removeAllViews()
+            val cal = Calendar.getInstance().apply { clear(); set(month / 12, month % 12, 1) }
+            title.text = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(cal.time)
+            prev.alpha = if (months.headSet(month).isEmpty()) 0.25f else 1f
+            next.alpha = if (months.tailSet(month + 1).isEmpty()) 0.25f else 1f
+            // weekday names, starting on the locale's first day of the week
+            val fdw = cal.firstDayOfWeek
+            val names = java.text.DateFormatSymbols.getInstance().shortWeekdays
+            for (i in 0 until 7) {
+                grid.addView(Ui.label(ctx, names[(fdw - 1 + i) % 7 + 1].take(2), 12f, Ui.GREY).apply { gravity = Gravity.CENTER },
+                    GridLayout.LayoutParams().apply { width = cell; height = Ui.dp(ctx, 26) })
+            }
+            val lead = (cal.get(Calendar.DAY_OF_WEEK) - fdw + 7) % 7
+            repeat(lead) { grid.addView(View(ctx), GridLayout.LayoutParams().apply { width = cell; height = cell }) }
+            val today = dayStart(System.currentTimeMillis())
+            for (d in 1..cal.getActualMaximum(Calendar.DAY_OF_MONTH)) {
+                cal.set(Calendar.DAY_OF_MONTH, d)
+                val day = dayStart(cal.timeInMillis)
+                val n = counts[day] ?: 0
+                val tv = Ui.label(ctx, "$d", 14f, if (n > 0) Color.BLACK else 0xFF55595F.toInt()).apply {
+                    gravity = Gravity.CENTER
+                    if (n > 0) {
+                        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Ui.ACCENT) }
+                        setOnClickListener { dialog.dismiss(); collapsed.remove(day); buildRows(); scrollToDay(day) }
+                    } else if (day == today) {
+                        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setStroke(Ui.dp(ctx, 1), Ui.GREY) }
+                    }
+                }
+                grid.addView(tv, GridLayout.LayoutParams().apply { width = cell - Ui.dp(ctx, 4); height = cell - Ui.dp(ctx, 4); setMargins(Ui.dp(ctx, 2), Ui.dp(ctx, 2), Ui.dp(ctx, 2), Ui.dp(ctx, 2)) })
+            }
+        }
+        prev.setOnClickListener { months.headSet(month).lastOrNull()?.let { month = it; render() } }
+        next.setOnClickListener { months.tailSet(month + 1).firstOrNull()?.let { month = it; render() } }
+        render()
+        dialog = AlertDialog.Builder(ctx).setView(box).setNegativeButton("Close", null).create()
+        dialog.show()
     }
 
     private fun bindThumb(iv: ImageView, c: Clip) {
@@ -233,19 +402,9 @@ class ClipsActivity : Activity() {
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
             val row = rows[position]
             if (row is Row.Header) {
-                val tv = (convertView as? TextView) ?: Ui.label(this@ClipsActivity, "", 15f, Ui.ACCENT).apply {
-                    setPadding(Ui.dp(context, 14), Ui.dp(context, 16), Ui.dp(context, 14), Ui.dp(context, 6))
-                }
-                val dur = row.clips.sumOf { it.durationMs }
-                tv.text = "${dayLabel(row.dayStart)}   ·   ${row.clips.size} clips · ${durText(dur)}"
-                tv.setOnClickListener {
-                    if (selecting) {
-                        val ids = row.clips.map { it.id }
-                        if (selected.containsAll(ids)) selected.removeAll(ids.toSet()) else selected.addAll(ids)
-                        updateSelection()
-                    } else dayOptions(row)
-                }
-                return tv
+                val v = (convertView as? LinearLayout)?.takeIf { it.tag == "header" } ?: headerView().apply { tag = "header" }
+                bindHeader(v, row)
+                return v
             }
             row as Row.Items
             val line = (convertView as? LinearLayout)?.takeIf { it.childCount == cols } ?: LinearLayout(this@ClipsActivity).apply {
@@ -337,7 +496,7 @@ class ClipsActivity : Activity() {
         updateSelection()
     }
 
-    private fun selectedClips() = display.filter { it.id in selected }
+    private fun selectedClips() = clips.filter { it.id in selected }
 
     private fun deleteSelected() {
         val list = selectedClips()

@@ -12,7 +12,7 @@ import android.widget.ImageView
 
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
-    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET }
+    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -60,6 +60,14 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 path.moveTo(15f, 4.5f); path.lineTo(7.5f, 12f); path.lineTo(15f, 19.5f); c.drawPath(path, stroke)
             }
             Kind.MORE -> for (y in listOf(5f, 12f, 19f)) c.drawCircle(12f, y, 2f, fill)
+            Kind.CALENDAR -> {
+                stroke.strokeWidth = 2f
+                c.drawRoundRect(RectF(3.5f, 5f, 20.5f, 20f), 2.5f, 2.5f, stroke)
+                c.drawLine(3.5f, 9.5f, 20.5f, 9.5f, stroke)
+                c.drawLine(8f, 3f, 8f, 6.5f, stroke)
+                c.drawLine(16f, 3f, 16f, 6.5f, stroke)
+                for (y in listOf(13f, 16.5f)) for (x in listOf(8f, 12f, 16f)) c.drawCircle(x, y, 1.1f, fill)
+            }
             Kind.ZOOM_RESET -> {
                 // four corner brackets pointing outwards = "fit to screen"
                 stroke.strokeWidth = 2.2f

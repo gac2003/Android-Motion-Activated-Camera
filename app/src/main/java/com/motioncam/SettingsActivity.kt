@@ -64,7 +64,7 @@ class SettingsActivity : Activity() {
         note("For a phone fixed on a stand, set the rotation explicitly so clips are always upright, even with the screen locked.")
 
         title("Motion detection", Prefs.MOTION_KEYS)
-        number("Sensitivity (1 = least, 10 = most)", "", 1, 10, prefs.sensitivity) { prefs.sensitivity = it }
+        number("Sensitivity (1 = least, 14 = most; default 5)", "", 1, MotionDetector.MAX_SENSITIVITY, prefs.sensitivity) { prefs.sensitivity = it }
         choice("Light filter", listOf("Off (any brightness change)", "Normal — ignore lights turning on/off, exposure changes", "Strong — also ignore glare and reflections (peepholes, windows)"), prefs.lightFilter) {
             prefs.lightFilter = it
         }

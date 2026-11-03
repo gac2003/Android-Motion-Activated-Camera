@@ -309,7 +309,8 @@ class FilmstripView(ctx: Context) : View(ctx) {
         val (i, p) = hit(scroll)
         val now = System.currentTimeMillis()
         if (final) { listener?.onScrub(i, p, true); return }
-        if (i == current && now - lastScrubAt > 80) { lastScrubAt = now; listener?.onScrub(i, p, false) }
+        // any clip under the playhead, so the video follows the finger across clips too
+        if (now - lastScrubAt > 80) { lastScrubAt = now; listener?.onScrub(i, p, false) }
     }
 
     override fun computeScroll() {

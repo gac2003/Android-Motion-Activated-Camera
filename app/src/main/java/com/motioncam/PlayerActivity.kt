@@ -326,11 +326,13 @@ class PlayerActivity : Activity() {
                 slot.prepared = true
                 fixDuration(index, mp)
                 if (slot === cur) {
-                    if (offsetMs > 0) {
+                    // previewing under the finger: go to where the finger is now (it may have moved while loading)
+                    val off = if (scrubbing && previewIndex == index) previewPos.toInt().coerceAtMost(lastFrameMs(index)) else offsetMs
+                    if (off > 0) {
                         mp.setOnSeekCompleteListener { releaseHoldIfReached(mp) }
-                        mp.seekTo(offsetMs.toLong(), MediaPlayer.SEEK_CLOSEST)
+                        mp.seekTo(off.toLong(), MediaPlayer.SEEK_CLOSEST)
                     } else holdMs = -1
-                    if (playing) { mp.start(); applySpeed(mp) }
+                    if (playing && !scrubbing) { mp.start(); applySpeed(mp) }
                     show(cur)
                     load(nxt, index + 1)
                 } else link()
@@ -361,6 +363,7 @@ class PlayerActivity : Activity() {
         if (d <= 0 || Math.abs(d - c.durationMs) < 300) return
         clips[index] = c.copy(durationMs = d)
         com.motioncam.remote.RemoteRepo.setDuration(this, c.id, d)
+        if (scrubbing) { stripStale = true; return }   // don't re-layout the strip under the finger
         val curIdx = cur.index
         val pos = curPos().toLong()
         strip.clips = clips
@@ -369,6 +372,7 @@ class PlayerActivity : Activity() {
 
     /** Chains the prepared next clip so it starts the instant the current one ends. */
     private fun link() {
+        if (scrubbing) return   // re-chained when the finger lifts
         val cm = cur.mp ?: return
         val nm = nxt.mp ?: return
         if (cur.prepared && nxt.prepared && nxt.index == cur.index + 1) {
@@ -475,6 +479,22 @@ class PlayerActivity : Activity() {
     }
 
     private var scrubbing = false
+    private var previewIndex = -1
+    private var stripStale = false
+    private var previewPos = 0L
+    private var lastPreviewSwitch = 0L
+    private val previewSwitch = Runnable { switchPreview() }
+
+    /** Loads the clip under the finger (paused) so its frames show while scrubbing across clips. */
+    private fun switchPreview() {
+        val i = previewIndex
+        if (i !in clips.indices || !scrubbing || i == cur.index) return
+        lastPreviewSwitch = System.currentTimeMillis()
+        a.release(); b.release()
+        cur = a; nxt = b
+        holdAt(previewPos)
+        load(cur, i, previewPos.toInt())
+    }
 
     /**
      * Filmstrip scrubbing, like YouTube/Samsung: playback pauses while the finger is down and every preview
@@ -488,7 +508,24 @@ class PlayerActivity : Activity() {
             // unchain the next clip while scrubbing, so it can never start by itself under the finger
             try { cur.mp?.setNextMediaPlayer(null) } catch (_: Exception) {}
         }
-        if (final) { scrubbing = false; link() }   // re-chain for seamless playback
+        if (!final && index != cur.index) {
+            // dragging over another clip: show that clip's frame (loaded paused; switching is rate-limited)
+            previewIndex = index
+            previewPos = posMs
+            ui.removeCallbacks(previewSwitch)
+            val wait = 120 - (System.currentTimeMillis() - lastPreviewSwitch)
+            if (wait <= 0) switchPreview() else ui.postDelayed(previewSwitch, wait)
+            return
+        }
+        if (!final && !cur.prepared) { previewIndex = index; previewPos = posMs; return }   // applied once it has loaded
+        if (final) {
+            ui.removeCallbacks(previewSwitch)
+            previewIndex = -1
+            scrubbing = false
+            if (stripStale) { stripStale = false; strip.clips = clips }
+            if (index in clips.indices && strip.current != index) strip.setCurrent(index, atMs = posMs)
+            link()   // re-chain for seamless playback
+        }
         if (index == cur.index && cur.prepared) {
             val m = cur.mp ?: return
             // stop just short of the end, so dragging to the end shows the last frame instead of finishing the clip

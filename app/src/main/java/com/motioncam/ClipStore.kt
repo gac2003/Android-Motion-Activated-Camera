@@ -114,7 +114,8 @@ object ClipStore {
     }
 
     fun delete(ctx: Context, clip: Clip): Boolean =
-        try { ctx.contentResolver.delete(clip.uri, null, null) > 0 } catch (_: Exception) { false }
+        (try { ctx.contentResolver.delete(clip.uri, null, null) > 0 } catch (_: Exception) { false })
+            .also { if (it) ClipThumbs.forget(ctx, clip.id) }
 
     fun freeBytes(): Long = try {
         StatFs(Environment.getExternalStorageDirectory().path).availableBytes

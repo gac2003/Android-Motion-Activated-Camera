@@ -356,7 +356,7 @@ class UploadQueueActivity : Activity() {
         thumbs.get(c.id)?.let { iv.setImageBitmap(it); return }
         iv.setImageDrawable(null)
         pool.execute {
-            val bmp = try { contentResolver.loadThumbnail(c.uri, Size(192, 108), null) } catch (e: Exception) { null }
+            val bmp = com.motioncam.ClipThumbs.load(this, c)
             if (bmp != null) thumbs.put(c.id, bmp)
             runOnUiThread { if (iv.tag == c.id) iv.setImageBitmap(bmp) }
         }

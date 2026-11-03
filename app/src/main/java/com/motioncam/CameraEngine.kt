@@ -165,6 +165,9 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     @Volatile private var lastFrameAt = SystemClock.elapsedRealtime()
     @Volatile private var lastMotionElapsed = 0L
     @Volatile private var lastMotionWall = 0L
+    /** Largest moving area seen in the current clip and when (for the clip's thumbnail). */
+    @Volatile private var peakBlocks = 0
+    @Volatile private var peakElapsed = 0L
 
     // protection
     private var hotSince = 0L
@@ -535,7 +538,11 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             pushRepeating()
             val ok = pre?.stopClip() == true
             ClipStore.finish(ctx, pc, ok, recordStartedWall)
-            if (ok) com.motioncam.cloud.CloudSync.onClipSaved(ctx, android.content.ContentUris.parseId(pc.uri))
+            if (ok) {
+                val id = android.content.ContentUris.parseId(pc.uri)
+                savePeak(id, (pre?.preRollMs ?: 0L) + (peakElapsed - recordStartedElapsed))
+                com.motioncam.cloud.CloudSync.onClipSaved(ctx, id)
+            }
             publish()
             if (rebuildPending) rebuildSession()
             maybeCleanup(force = false)
@@ -552,13 +559,29 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         try { rec.release() } catch (_: Exception) {}
         pending?.let {
             ClipStore.finish(ctx, it, ok, recordStartedWall)
-            if (ok) com.motioncam.cloud.CloudSync.onClipSaved(ctx, android.content.ContentUris.parseId(it.uri))
+            if (ok) {
+                val id = android.content.ContentUris.parseId(it.uri)
+                savePeak(id, peakElapsed - recordStartedElapsed)
+                com.motioncam.cloud.CloudSync.onClipSaved(ctx, id)
+            }
         }
         pending = null
         publish()
         if (rebuildPending) rebuildSession()
         if (rearm && monitoring) h.post { arm() }
         maybeCleanup(force = false)
+    }
+
+    /** Remembers the peak-motion moment and makes the thumbnail right away (in the background). */
+    private fun savePeak(clipId: Long, offsetMs: Long) {
+        val off = offsetMs.coerceAtLeast(0)
+        peakBlocks = 0
+        Thread {
+            try {
+                ClipThumbs.setPeak(ctx, clipId, off)
+                ClipStore.get(ctx, clipId)?.let { ClipThumbs.load(ctx, it) }
+            } catch (_: Exception) {}
+        }.start()
     }
 
     private fun maybeCleanup(force: Boolean) {
@@ -799,12 +822,17 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             val need = max(1, ceil(prefs.minAreaPct / 100f * MotionDetector.N).toInt())
             val hit = largest >= need
             consecutive = if (hit) consecutive + 1 else 0
+            if (m == Mode.RECORDING && largest > peakBlocks) { peakBlocks = largest; peakElapsed = now }
             if (monitoringNow && hit) {
                 val needHits = max(1, ceil(prefs.minMotionMs / 125f).toInt())
                 if (m == Mode.RECORDING || consecutive >= needHits) {
                     lastMotionElapsed = now
                     lastMotionWall = System.currentTimeMillis()
-                    if (m == Mode.WATCHING) h.post { startRecording() }
+                    if (m == Mode.WATCHING) {
+                        peakBlocks = largest     // the frame that triggered the clip is the first candidate
+                        peakElapsed = now
+                        h.post { startRecording() }
+                    }
                 }
             }
         }

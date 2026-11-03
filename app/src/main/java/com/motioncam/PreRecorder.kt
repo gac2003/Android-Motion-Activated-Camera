@@ -54,6 +54,8 @@ class PreRecorder(
     private var lastAPts = -1L
     private var videoSamples = 0
     @Volatile var bytesWritten = 0L; private set
+    /** How many ms of buffered video the current clip started with (for locating moments in the clip). */
+    @Volatile var preRollMs = 0L; private set
     private val info = MediaCodec.BufferInfo()
 
     // audio
@@ -164,8 +166,10 @@ class PreRecorder(
         // write what is buffered, starting at a key frame
         val keys = vq.withIndex().filter { it.value.key }.map { it.index }
         val from = if (startFromLatestKey) keys.lastOrNull() else keys.firstOrNull()
+        preRollMs = 0
         if (from != null) {
             clipStartPts = vq.elementAt(from).ptsUs
+            preRollMs = ((vq.last().ptsUs - clipStartPts) / 1000).coerceAtLeast(0)
             for (i in from until vq.size) writeLocked(vq.elementAt(i), true)
             for (p in aq) if (p.ptsUs >= clipStartPts) writeLocked(p, false)
         }

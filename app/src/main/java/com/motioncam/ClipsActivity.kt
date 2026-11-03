@@ -430,7 +430,7 @@ class ClipsActivity : Activity() {
         if (cached != null) { iv.setImageBitmap(cached); return }
         iv.setImageDrawable(null)
         pool.execute {
-            val bmp = try { contentResolver.loadThumbnail(c.uri, Size(384, 216), null) } catch (e: Exception) { null }
+            val bmp = ClipThumbs.load(this, c)   // frame with the action, not the empty background
             if (bmp != null) thumbs.put(c.id, bmp)
             runOnUiThread { if (iv.tag == c.id) iv.setImageBitmap(bmp) }
         }

@@ -59,7 +59,7 @@ class ThumbLoader(private val ctx: Context, private val onLoaded: () -> Unit) {
         return null
     }
 
-    fun poster(c: Clip): Bitmap? = request("p${c.id}") { ctx.contentResolver.loadThumbnail(c.uri, Size(320, 320), null) }
+    fun poster(c: Clip): Bitmap? = request("p${c.id}") { ClipThumbs.load(ctx, c) }
 
     /** A frame near [tMs] (cached per second). */
     fun frame(c: Clip, tMs: Long): Bitmap? {

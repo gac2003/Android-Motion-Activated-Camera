@@ -84,7 +84,7 @@ class CollectionsActivity : Activity() {
         r.addView(cover, LinearLayout.LayoutParams(coverW, coverW * 9 / 16))
         clips.firstOrNull()?.let { first ->
             pool.execute {
-                val bmp: Bitmap? = try { contentResolver.loadThumbnail(first.uri, Size(320, 180), null) } catch (e: Exception) { null }
+                val bmp: Bitmap? = ClipThumbs.load(this, first)
                 runOnUiThread { iv.setImageBitmap(bmp) }
             }
         }

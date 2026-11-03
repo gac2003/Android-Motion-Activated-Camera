@@ -35,6 +35,8 @@ jobs:
           MOTIONCAM_KEYSTORE_PASSWORD: ${{ secrets.MOTIONCAM_KEYSTORE_PASSWORD }}
           MOTIONCAM_KEY_ALIAS: ${{ secrets.MOTIONCAM_KEY_ALIAS }}
         run: ./gradlew --no-daemon assembleDebug
+      - name: Show signing certificate (should match the release key's SHA-1)
+        run: '"$ANDROID_HOME"/build-tools/34.0.0/apksigner verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -E "SHA-1|SHA-256|DN"'
       - uses: actions/upload-artifact@v4
         with:
           name: MotionCam-debug-apk

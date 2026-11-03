@@ -12,7 +12,7 @@ import android.widget.ImageView
 
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
-    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER }
+    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -64,6 +64,24 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 stroke.strokeWidth = 2f
                 path.moveTo(3.5f, 18.5f); path.lineTo(3.5f, 6f); path.lineTo(9.5f, 6f); path.lineTo(11.5f, 8.5f)
                 path.lineTo(20.5f, 8.5f); path.lineTo(20.5f, 18.5f); path.close()
+                c.drawPath(path, stroke)
+            }
+            Kind.CLOUD -> {
+                stroke.strokeWidth = 2f
+                path.moveTo(7f, 18.5f)
+                path.cubicTo(4.2f, 18.5f, 2.5f, 16.6f, 2.5f, 14.3f)
+                path.cubicTo(2.5f, 12f, 4.3f, 10.2f, 6.6f, 10.2f)
+                path.cubicTo(7.3f, 7.2f, 9.6f, 5.5f, 12.3f, 5.5f)
+                path.cubicTo(15.6f, 5.5f, 18.2f, 8f, 18.4f, 11.2f)
+                path.cubicTo(20.2f, 11.5f, 21.5f, 13f, 21.5f, 14.9f)
+                path.cubicTo(21.5f, 16.9f, 19.9f, 18.5f, 17.9f, 18.5f)
+                path.close()
+                c.drawPath(path, stroke)
+            }
+            Kind.REFRESH -> {
+                stroke.strokeWidth = 2.2f
+                c.drawArc(RectF(5f, 5f, 19f, 19f), -60f, 290f, false, stroke)
+                path.moveTo(19.2f, 5.1f); path.lineTo(15.5f, 5.9f); path.lineTo(16.7f, 9.5f)
                 c.drawPath(path, stroke)
             }
             Kind.CALENDAR -> {

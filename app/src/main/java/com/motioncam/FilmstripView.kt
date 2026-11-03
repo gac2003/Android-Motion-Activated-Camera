@@ -67,7 +67,7 @@ class ThumbLoader(private val ctx: Context, private val onLoaded: () -> Unit) {
         return request("f${c.id}@$sec") {
             if (retrieverFor != c.id) {
                 try { retriever?.release() } catch (_: Exception) {}
-                retriever = MediaMetadataRetriever().also { it.setDataSource(ctx, c.uri) }
+                retriever = MediaMetadataRetriever().also { ClipThumbs.source(it, ctx, c.uri) }
                 retrieverFor = c.id
             }
             retriever!!.getScaledFrameAtTime(sec * 1_000_000L + 500_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 240, 240)

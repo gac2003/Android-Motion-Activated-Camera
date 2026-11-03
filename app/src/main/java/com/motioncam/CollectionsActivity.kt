@@ -19,16 +19,27 @@ import java.util.concurrent.Executors
 
 /** List of collections (Favourites + user-made). Each opens the normal clip gallery filtered to it. */
 class CollectionsActivity : Activity() {
+    companion object {
+        /** Collections of a remote folder (kept on this device only). */
+        const val EXTRA_REMOTE = "remote"
+    }
+
+    private var remote: com.motioncam.remote.RemoteSource? = null
+    private var store: CollectionStore = Collections
     private lateinit var box: LinearLayout
     private val pool = Executors.newFixedThreadPool(2)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        intent.getStringExtra(EXTRA_REMOTE)?.let { rid ->
+            remote = com.motioncam.remote.RemoteSources.get(this, rid) ?: run { finish(); return }
+            store = Collections.forRemote(rid)
+        }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
         val add = Ui.chip(this, "＋ New").apply {
-            setOnClickListener { CollectionPicker.askName(this@CollectionsActivity, "New collection", "") { Collections.create(this@CollectionsActivity, it); reload() } }
+            setOnClickListener { CollectionPicker.askName(this@CollectionsActivity, "New collection", "") { store.create(this@CollectionsActivity, it); reload() } }
         }
-        root.addView(topBar(this, "Collections", add))
+        root.addView(topBar(this, remote?.let { "Collections · ${it.name}" } ?: "Collections", add))
         box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@CollectionsActivity, 12)
@@ -45,9 +56,10 @@ class CollectionsActivity : Activity() {
 
     private fun reload() {
         Thread {
-            val existing = ClipStore.list(this)
+            val src = remote
+            val existing = if (src != null) com.motioncam.remote.RemoteRepo.cached(this, src) else ClipStore.list(this)
             val byId = existing.associateBy { it.id }
-            val cols = Collections.all(this).map { c -> Pair(c, c.clipIds.mapNotNull { byId[it] }.sortedByDescending { it.startMs }) }
+            val cols = store.all(this).map { c -> Pair(c, c.clipIds.mapNotNull { byId[it] }.sortedByDescending { it.startMs }) }
             runOnUiThread { render(cols) }
         }.start()
     }
@@ -55,7 +67,8 @@ class CollectionsActivity : Activity() {
     private fun render(cols: List<Pair<ClipCollection, List<Clip>>>) {
         box.removeAllViews()
         for ((c, clips) in cols) box.addView(row(c, clips))
-        box.addView(Ui.label(this, "Collections only link to clips: a clip can be in several collections, and removing it " +
+        box.addView(Ui.label(this, (if (remote != null) "These collections are kept on this device only; nothing is written to the remote folder. " else "") +
+            "Collections only link to clips: a clip can be in several collections, and removing it " +
             "from one never deletes it. To add clips, hold a clip in Clips to select it, then tap Add to…", 12f, Ui.GREY).apply {
             setPadding(Ui.dp(this@CollectionsActivity, 4), Ui.dp(this@CollectionsActivity, 16), 0, 0)
         })
@@ -69,7 +82,8 @@ class CollectionsActivity : Activity() {
             setPadding(0, Ui.dp(ctx, 8), 0, Ui.dp(ctx, 8))
             isClickable = true
             setOnClickListener {
-                startActivity(Intent(ctx, ClipsActivity::class.java).putExtra(ClipsActivity.EXTRA_COLLECTION, c.id))
+                startActivity(Intent(ctx, ClipsActivity::class.java).putExtra(ClipsActivity.EXTRA_COLLECTION, c.id)
+                    .putExtra(ClipsActivity.EXTRA_REMOTE, remote?.id))
             }
         }
         val coverW = Ui.dp(ctx, 112)
@@ -99,10 +113,10 @@ class CollectionsActivity : Activity() {
                 pm.menu.add(0, 1, 0, "Rename")
                 pm.menu.add(0, 2, 1, "Delete collection")
                 pm.setOnMenuItemClickListener {
-                    if (it.itemId == 1) CollectionPicker.askName(ctx, "Rename collection", c.name) { n -> Collections.rename(ctx, c.id, n); reload() }
+                    if (it.itemId == 1) CollectionPicker.askName(ctx, "Rename collection", c.name) { n -> store.rename(ctx, c.id, n); reload() }
                     else AlertDialog.Builder(ctx).setTitle("Delete \"${c.name}\"?")
                         .setMessage("Only the collection is deleted. The ${clips.size} clips stay in Clips.")
-                        .setPositiveButton("Delete") { _, _ -> Collections.delete(ctx, c.id); reload() }
+                        .setPositiveButton("Delete") { _, _ -> store.delete(ctx, c.id); reload() }
                         .setNegativeButton("Cancel", null).show()
                     true
                 }

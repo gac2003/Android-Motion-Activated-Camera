@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.util.Size
+import com.motioncam.remote.RemoteRepo
 import org.json.JSONObject
 import java.io.File
 import kotlin.math.abs
@@ -70,7 +71,40 @@ object ClipThumbs {
     }
 
     /** Whether the best thumbnail is already made (cheap check). */
-    fun isReady(ctx: Context, clip: Clip) = cacheFile(ctx, clip.id).exists()
+    fun isReady(ctx: Context, clip: Clip) =
+        if (RemoteRepo.isRemote(clip)) RemoteRepo.thumbReady(ctx, clip) else cacheFile(ctx, clip.id).exists()
+
+    /** Uses an existing JPEG as a clip's thumbnail (a clip saved from a remote folder). */
+    fun adopt(ctx: Context, clipId: Long, jpg: File) {
+        try { jpg.copyTo(cacheFile(ctx, clipId), overwrite = true) } catch (_: Exception) {}
+    }
+
+    /** Points a retriever at a clip: local content uri, or the remote-folder stream (http on 127.0.0.1). */
+    fun source(r: MediaMetadataRetriever, ctx: Context, uri: android.net.Uri) {
+        if (uri.scheme != "http") { r.setDataSource(ctx, uri); return }
+        // a remote clip that is already downloaded is read from the file (much faster than over the stream)
+        val e = uri.lastPathSegment?.removeSuffix(".mp4")?.toLongOrNull()?.let { RemoteRepo.entry(it) }
+        val local = e?.let { com.motioncam.remote.StreamCache.completeFile(ctx, it) }
+        if (local != null) r.setDataSource(local.path) else r.setDataSource(uri.toString(), HashMap())
+    }
+
+    /** Length (ms) of a video file, or null. */
+    fun durationOf(f: File): Long? {
+        val r = MediaMetadataRetriever()
+        return try { r.setDataSource(f.path); r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() }
+        catch (e: Exception) { null } finally { try { r.release() } catch (_: Exception) {} }
+    }
+
+    /** The frame with the most change in a downloaded video file (remote clips without an uploaded thumbnail). */
+    fun bestFromFile(f: File): Bitmap? {
+        val r = MediaMetadataRetriever()
+        return try {
+            r.setDataSource(f.path)
+            val dur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            val t = bestFrame(r, dur)
+            r.getScaledFrameAtTime(t.coerceIn(0, maxOf(0, dur - 1)) * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, W, H)
+        } catch (e: Exception) { null } finally { try { r.release() } catch (_: Exception) {} }
+    }
 
     /**
      * Placeholder while the peak-motion thumbnail is being made: the first frame after the pre-recording
@@ -78,6 +112,7 @@ object ClipThumbs {
      * current pre-record setting. One fast key-frame decode; not saved.
      */
     fun quick(ctx: Context, clip: Clip): Bitmap? {
+        if (RemoteRepo.isRemote(clip)) return null   // remote: never download a video just for a placeholder
         val r = MediaMetadataRetriever()
         return try {
             r.setDataSource(ctx, clip.uri)
@@ -92,12 +127,14 @@ object ClipThumbs {
 
     /** Cached thumbnail if it exists (fast, for scrolling lists). */
     fun cached(ctx: Context, clip: Clip): Bitmap? {
+        if (RemoteRepo.isRemote(clip)) return RemoteRepo.thumbCached(ctx, clip)
         val f = cacheFile(ctx, clip.id)
         return if (f.exists()) BitmapFactory.decodeFile(f.path) else null
     }
 
     /** Best thumbnail for [clip] (blocking; call off the main thread). */
     fun load(ctx: Context, clip: Clip): Bitmap? {
+        if (RemoteRepo.isRemote(clip)) return RemoteRepo.thumbLoad(ctx, clip)
         cached(ctx, clip)?.let { return it }
         var bmp: Bitmap? = null
         val r = MediaMetadataRetriever()

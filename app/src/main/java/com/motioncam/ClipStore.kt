@@ -113,6 +113,64 @@ object ClipStore {
         return out
     }
 
+    // ------------------------------------------------------------------ copies saved from remote folders
+
+    private fun savedFile(ctx: Context) = java.io.File(ctx.filesDir, "saved_from_remote.json")
+    private var saved: MutableSet<Long>? = null
+
+    @Synchronized
+    private fun savedIds(ctx: Context): MutableSet<Long> {
+        saved?.let { return it }
+        val s = HashSet<Long>()
+        try {
+            val f = savedFile(ctx)
+            if (f.exists()) { val a = org.json.JSONArray(f.readText()); for (i in 0 until a.length()) s += a.getLong(i) }
+        } catch (_: Exception) {}
+        saved = s
+        return s
+    }
+
+    /**
+     * Clips saved from a remote folder: never uploaded to cloud backup (they are already in someone's cloud)
+     * and never removed by the phone's automatic clean-up.
+     */
+    @Synchronized
+    fun isSavedCopy(ctx: Context, id: Long) = id in savedIds(ctx)
+
+    @Synchronized
+    private fun markSaved(ctx: Context, id: Long) {
+        savedIds(ctx) += id
+        try {
+            val f = savedFile(ctx)
+            val t = java.io.File(f.path + ".tmp")
+            t.writeText(org.json.JSONArray(savedIds(ctx).toList()).toString())
+            t.renameTo(f)
+        } catch (_: Exception) {}
+    }
+
+    /** Copies a downloaded remote clip into Movies/MotionCam (keeping its name and time). Returns the new id. */
+    fun importCopy(ctx: Context, file: java.io.File, name: String, startMs: Long): Long {
+        val cv = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, name)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.RELATIVE_PATH, REL_PATH)
+            put(MediaStore.Video.Media.DATE_TAKEN, startMs)
+            put(MediaStore.Video.Media.IS_PENDING, 1)
+        }
+        val uri = ctx.contentResolver.insert(COLLECTION, cv) ?: error("Cannot create the copy")
+        val id = ContentUris.parseId(uri)
+        markSaved(ctx, id)   // before it becomes visible, so backup can never pick it up
+        try {
+            ctx.contentResolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out, 256 * 1024) } }
+                ?: error("Cannot write the copy")
+            ctx.contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+        } catch (e: Exception) {
+            try { ctx.contentResolver.delete(uri, null, null) } catch (_: Exception) {}
+            throw e
+        }
+        return id
+    }
+
     fun delete(ctx: Context, clip: Clip): Boolean =
         (try { ctx.contentResolver.delete(clip.uri, null, null) > 0 } catch (_: Exception) { false })
             .also { if (it) ClipThumbs.forget(ctx, clip.id) }
@@ -123,7 +181,8 @@ object ClipStore {
 
     /** Applies the optional age / size limits and (optionally) frees space when the phone is nearly full. */
     fun cleanup(ctx: Context, prefs: Prefs, minFree: Long = 1_000_000_000L) {
-        val clips = list(ctx).sortedBy { it.startMs }.toMutableList()
+        // copies saved from remote folders are kept until the user deletes them
+        val clips = list(ctx).filter { !isSavedCopy(ctx, it.id) }.sortedBy { it.startMs }.toMutableList()
         if (prefs.keepDays > 0) {
             val cutoff = System.currentTimeMillis() - prefs.keepDays * 86_400_000L
             val iter = clips.iterator()

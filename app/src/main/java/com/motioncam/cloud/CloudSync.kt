@@ -17,6 +17,7 @@ import android.os.BatteryManager
 import android.os.SystemClock
 import com.motioncam.Clip
 import com.motioncam.ClipStore
+import com.motioncam.ClipThumbs
 import com.motioncam.Collections
 import com.motioncam.Prefs
 import org.json.JSONArray
@@ -45,7 +46,7 @@ object CloudSync {
     }
 
     class Uploaded(val clipId: Long, val kind: CloudKind, val name: String, val remoteId: String,
-                   val size: Long, val at: Long, var pinned: Boolean)
+                   val size: Long, val at: Long, var pinned: Boolean, var thumb: Boolean = false)
 
     /** Read-only view of a job for the queue screen. */
     class JobView(val key: String, val clipId: Long, val kind: CloudKind, val state: String, val progress: Int,
@@ -101,7 +102,7 @@ object CloudSync {
                 for (i in 0 until a.length()) {
                     val o = a.getJSONObject(i)
                     val k = CloudKind.of(o.getString("kind")) ?: continue
-                    ix += Uploaded(o.getLong("clip"), k, o.getString("name"), o.getString("rid"), o.optLong("size"), o.optLong("at"), o.optBoolean("pinned"))
+                    ix += Uploaded(o.getLong("clip"), k, o.getString("name"), o.getString("rid"), o.optLong("size"), o.optLong("at"), o.optBoolean("pinned"), o.optBoolean("thumb"))
                 }
             }
         } catch (_: Exception) {}
@@ -116,7 +117,7 @@ object CloudSync {
             .put("added", j.addedAt).put("seq", j.seq).put("paused", j.paused))
         val ix = JSONArray()
         for (u in index ?: return) ix.put(JSONObject().put("clip", u.clipId).put("kind", u.kind.key).put("name", u.name).put("rid", u.remoteId)
-            .put("size", u.size).put("at", u.at).put("pinned", u.pinned))
+            .put("size", u.size).put("at", u.at).put("pinned", u.pinned).put("thumb", u.thumb))
         writeAtomic(qFile(ctx), q.toString())
         writeAtomic(iFile(ctx), ix.toString())
     }
@@ -135,13 +136,15 @@ object CloudSync {
         if (kinds.isEmpty()) return
         synchronized(lock) {
             load(ctx)
-            for (k in kinds) addJobLocked(clipId, k)
+            for (k in kinds) addJobLocked(ctx, clipId, k)
             save(ctx)
         }
         kick(ctx)
     }
 
-    private fun addJobLocked(clipId: Long, k: CloudKind): Boolean {
+    private fun addJobLocked(ctx: Context, clipId: Long, k: CloudKind): Boolean {
+        // a copy saved from someone's remote folder is already in the cloud: never upload it
+        if (ClipStore.isSavedCopy(ctx, clipId)) return false
         if (jobs!!.any { it.clipId == clipId && it.kind == k }) return false
         if (index!!.any { it.clipId == clipId && it.kind == k }) return false
         jobs!!.add(Job(clipId, k))
@@ -155,7 +158,7 @@ object CloudSync {
         synchronized(lock) {
             load(ctx)
             var seq = (jobs!!.maxOfOrNull { it.seq } ?: System.currentTimeMillis()) + 1
-            for (c in clips) if (addJobLocked(c.id, kind)) { jobs!!.last().seq = seq++; n++ }
+            for (c in clips) if (addJobLocked(ctx, c.id, kind)) { jobs!!.last().seq = seq++; n++ }
             save(ctx)
         }
         kick(ctx)
@@ -336,7 +339,7 @@ object CloudSync {
                 val pending = jobs!!.filter { it.kind == k && !it.failed && !it.paused && !it.running }
                 val due = pending.count { it.nextAt <= now }
                 pending.filter { it.nextAt > now }.minOfOrNull { it.nextAt }?.let { nextWake = minOf(nextWake, it) }
-                val retentionDue = retentionDue(app, k)
+                val retentionDue = retentionDue(app, k) || thumbsDue(app, k)
                 val active = lanes[k] ?: 0
                 val want = minOf(laneLimit(k), due + active).coerceAtLeast(if (retentionDue && active == 0) 1 else 0)
                 for (i in active until want) {
@@ -413,7 +416,14 @@ object CloudSync {
             if (retentionDue(ctx, k)) { p = provider(ctx, cfg); retention(ctx, cfg, p) }
             while (!stop) {
                 if (waitReason(ctx) != null) { watchNetwork(ctx); scheduleJob(ctx, 0); break }
-                val job = claim(ctx, k) ?: break
+                val job = claim(ctx, k)
+                if (job == null) {
+                    // nothing to upload: add thumbnails for clips backed up before thumbnails existed
+                    if (!thumbsDue(ctx, k)) break
+                    if (p == null) p = try { provider(ctx, cfg) } catch (e: Exception) { break }
+                    if (!backfillThumb(ctx, cfg, p!!)) break
+                    continue
+                }
                 if (p == null) {
                     p = try { provider(ctx, cfg) } catch (e: Exception) {
                         val ce = e as? CloudException ?: CloudException(e.message ?: "Cannot connect", CloudException.Kind.OTHER, e)
@@ -488,7 +498,7 @@ object CloudSync {
             // already in the cloud folder (e.g. uploaded before a reinstall)? then don't upload it again
             val existing = listing(cfg, p, folder)[clip.name]
             if (existing != null && existing.size > 0) {
-                done(ctx, job, cfg, clip, existing)
+                done(ctx, job, cfg, clip, existing, uploadThumb(ctx, cfg, p, folder, clip))
                 return true
             }
             val src = source(ctx, clip, job)
@@ -502,7 +512,8 @@ object CloudSync {
                     sent += n
                     job.progress = (sent * 100 / src.size.coerceAtLeast(1)).toInt().coerceIn(0, 100)
                 })
-            done(ctx, job, cfg, clip, rf)
+            job.phase = "Thumbnail"
+            done(ctx, job, cfg, clip, rf, uploadThumb(ctx, cfg, p, folder, clip))
             synchronized(lock) { freeSpace[cfg.kind]?.let { fs -> fs.free = fs.free?.minus(rf.size) } }
             return true
         } catch (e: CloudException) {
@@ -518,11 +529,11 @@ object CloudSync {
         }
     }
 
-    private fun done(ctx: Context, job: Job, cfg: CloudConfig, clip: Clip, rf: RemoteFile) {
+    private fun done(ctx: Context, job: Job, cfg: CloudConfig, clip: Clip, rf: RemoteFile, thumb: Boolean) {
         synchronized(lock) {
             jobs!!.remove(job)
             index!!.removeAll { it.clipId == clip.id && it.kind == job.kind }
-            index!!.add(Uploaded(clip.id, job.kind, rf.name, rf.id, rf.size, System.currentTimeMillis(), isProtected(ctx, cfg, clip.id)))
+            index!!.add(Uploaded(clip.id, job.kind, rf.name, rf.id, rf.size, System.currentTimeMillis(), isProtected(ctx, cfg, clip.id), thumb))
             listings[cfg.kind]?.files?.put(rf.name, rf)
             save(ctx)
         }
@@ -613,6 +624,88 @@ object CloudSync {
         if (everywhere && !inCollection) ClipStore.delete(ctx, clip)
     }
 
+    // ------------------------------------------------------------------ thumbnails for viewers
+
+    /** Per destination: thumbnail folder id and its contents (clip name -> thumbnail file). */
+    private class Thumbs(val parent: String, val folder: String, val at: Long, val byClip: java.util.concurrent.ConcurrentHashMap<String, RemoteFile>)
+    private val thumbs = HashMap<CloudKind, Thumbs>()
+    /** Index entries tried this session by the back-fill (so a failing one is not retried in a loop). */
+    private val thumbTried = HashSet<String>()
+
+    private fun thumbsFor(cfg: CloudConfig, p: CloudProvider, folder: String, create: Boolean): Thumbs? {
+        synchronized(lock) {
+            thumbs[cfg.kind]?.let { if (it.parent == folder && System.currentTimeMillis() - it.at < 30 * 60_000L) return it }
+        }
+        val f = p.listFolders(folder).firstOrNull { it.name == THUMB_FOLDER }
+            ?: if (create) p.createFolder(folder, THUMB_FOLDER) else return null
+        val map = java.util.concurrent.ConcurrentHashMap<String, RemoteFile>()
+        for (rf in p.list(f.id)) parseThumbName(rf.name)?.let { map[it.first] = rf }
+        val t = Thumbs(folder, f.id, System.currentTimeMillis(), map)
+        synchronized(lock) { thumbs[cfg.kind] = t }
+        return t
+    }
+
+    /**
+     * Uploads the clip's peak-motion thumbnail (a ~20 KB JPEG) into the ".thumbnails" subfolder, so devices
+     * viewing this folder as a remote folder see the right frame without downloading the video. The clip's
+     * length is part of the name. Best effort: returns false if it could not be done now.
+     */
+    private fun uploadThumb(ctx: Context, cfg: CloudConfig, p: CloudProvider, folder: String, clip: Clip): Boolean {
+        if (!Prefs(ctx).cloudThumbs) return false
+        return try {
+            val t = synchronized(spaceLocks[cfg.kind]!!) { thumbsFor(cfg, p, folder, create = true) } ?: return false
+            if (t.byClip.containsKey(clip.name)) return true
+            val bmp = ClipThumbs.load(ctx, clip) ?: return false
+            val bytes = java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, it) }.toByteArray()
+            val dur = clip.durationMs.takeIf { it > 0 } ?: probeDuration(ctx, clip)
+            val rf = p.upload(t.folder, thumbName(clip.name, dur), bytesSource(bytes), null, {}, {})
+            t.byClip[clip.name] = rf
+            true
+        } catch (e: Exception) { false }
+    }
+
+    private fun probeDuration(ctx: Context, clip: Clip): Long {
+        val r = android.media.MediaMetadataRetriever()
+        return try { r.setDataSource(ctx, clip.uri); r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L }
+        catch (e: Exception) { 0L } finally { try { r.release() } catch (_: Exception) {} }
+    }
+
+    private fun thumbsDue(ctx: Context, k: CloudKind): Boolean {
+        if (!Prefs(ctx).cloudThumbs) return false
+        val cfg = CloudConfig(ctx, k)
+        if (!cfg.enabled || !cfg.isConfigured || cfg.folderId == null) return false
+        return synchronized(lock) { load(ctx); index!!.any { it.kind == k && !it.thumb && "${it.clipId}:${k.key}" !in thumbTried } }
+    }
+
+    /** One thumbnail for a clip uploaded earlier without one. Returns false when there is nothing to do. */
+    private fun backfillThumb(ctx: Context, cfg: CloudConfig, p: CloudProvider): Boolean {
+        val u = synchronized(lock) {
+            index!!.firstOrNull { it.kind == cfg.kind && !it.thumb && "${it.clipId}:${cfg.kind.key}" !in thumbTried }
+                ?.also { thumbTried += "${it.clipId}:${cfg.kind.key}" }
+        } ?: return false
+        val folder = cfg.folderId ?: return false
+        val clip = ClipStore.get(ctx, u.clipId)
+        val ok = if (clip == null) true   // no longer on the phone: nothing to make it from
+        else uploadThumb(ctx, cfg, p, folder, clip)
+        if (ok) synchronized(lock) { u.thumb = true; save(ctx) }
+        return true
+    }
+
+    private fun deleteThumb(cfg: CloudConfig, p: CloudProvider, folder: String, clipName: String) {
+        try {
+            val t = thumbsFor(cfg, p, folder, create = false) ?: return
+            val rf = t.byClip.remove(clipName) ?: return
+            p.delete(t.folder, rf)
+        } catch (_: Exception) {}
+    }
+
+    /** The backup folder (created if needed), for sharing it from the settings screen. */
+    fun backupFolder(ctx: Context, kind: CloudKind): RemoteFolder {
+        val cfg = CloudConfig(ctx, kind)
+        val id = providerFor(ctx, kind).use { folder(cfg, it) }
+        return RemoteFolder(id, cfg.folderName ?: "MotionCam")
+    }
+
     // ------------------------------------------------------------------ space & retention
 
     private fun isProtected(ctx: Context, cfg: CloudConfig, clipId: Long): Boolean =
@@ -654,6 +747,7 @@ object CloudSync {
                 p.delete(folder, f)
                 freed += f.size
                 forget(ctx, cfg.kind, f.name)
+                deleteThumb(cfg, p, folder, f.name)
             }
             synchronized(lock) { freeSpace.remove(cfg.kind) }
             if (freed < mustFree) throw CloudException("Full: only protected clips are left", CloudException.Kind.QUOTA)
@@ -685,7 +779,7 @@ object CloudSync {
                 for (f in p.list(folder)) {
                     if (!isOurClip(f.name) || f.name in keep) continue
                     val t = try { fmt.parse(f.name.substring(3, 18))?.time } catch (e: Exception) { null } ?: f.modifiedMs
-                    if (t in 1 until cutoff) { p.delete(folder, f); forget(ctx, cfg.kind, f.name) }
+                    if (t in 1 until cutoff) { p.delete(folder, f); forget(ctx, cfg.kind, f.name); deleteThumb(cfg, p, folder, f.name) }
                 }
             }
         } catch (_: Exception) {}

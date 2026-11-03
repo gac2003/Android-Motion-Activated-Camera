@@ -95,6 +95,20 @@ class CloudActivity : Activity() {
         box.addView(Ui.label(this, "Current: " + (cfg.folderName ?: "MotionCam (created automatically)"), 14f))
         if (cfg.isConfigured) box.addView(button("Choose or create folder…") { browse(null, listOf()) })
 
+        if (cfg.isConfigured && (kind == CloudKind.DRIVE || kind == CloudKind.DROPBOX)) {
+            title("View from other devices")
+            if (kind == CloudKind.DRIVE) {
+                note("Another device signed in to the same Google account can open this folder in Clips → Remote folders right away. " +
+                    "For a different Google account, share the folder with it (view only); it then appears under \"shared with me\" there.")
+                row(button("Share folder…") { shareDrive() }, button("Shared with…") { showDriveSharing() })
+            } else {
+                note("Another device signed in to the same Dropbox account can open this folder in Clips → Remote folders right away. " +
+                    "For anyone else, create a view-only link and send it to them. Anyone who has the link can watch the clips, so " +
+                    "share it like a password; revoking it stops it working instantly.")
+                row(button("Create viewer link") { dropboxLink() }, button("Revoke link") { revokeDropboxLink() })
+            }
+        }
+
         title("When ${kind.label} is full")
         choice(listOf("Delete the oldest backed-up clips to make room", "Pause uploads and notify me"), cfg.fullPolicy) { cfg.fullPolicy = it }
         number("Use at most (0 = no limit)", "GB", cfg.maxGb) { cfg.maxGb = it }
@@ -256,6 +270,81 @@ class CloudActivity : Activity() {
         val input = EditText(this).apply { hint = "Folder name"; setText("MotionCam") ; setSelectAllOnFocus(true) }
         AlertDialog.Builder(this).setTitle("New folder").setView(input)
             .setPositiveButton("Create") { _, _ -> input.text.toString().trim().takeIf { it.isNotEmpty() }?.let(ok) }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    // ------------------------------------------------------------------ sharing (remote folders)
+
+    private fun shareDrive() {
+        val input = EditText(this).apply { hint = "their.name@gmail.com"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS }
+        AlertDialog.Builder(this).setTitle("Share the backup folder (view only)").setView(input)
+            .setMessage("The Google account you enter can view the clips and thumbnails in this folder (not change or delete them). Google emails them a link.")
+            .setPositiveButton("Share") { _, _ ->
+                val email = input.text.toString().trim()
+                if (!email.contains("@")) { toast("Enter an email address"); return@setPositiveButton }
+                Thread {
+                    val msg = try {
+                        val f = CloudSync.backupFolder(this, kind)
+                        DriveProvider({ GoogleAuth.token(this, cfg.account) }, { GoogleAuth.invalidate(this, it) }).share(f.id, email)
+                        "Shared \"${f.name}\" with $email. On their device: Clips → cloud icon → ＋ Add → Google Drive: a folder shared with me."
+                    } catch (e: Exception) { "Could not share: ${e.message}" }
+                    runOnUiThread { AlertDialog.Builder(this).setTitle("Share folder").setMessage(msg).setPositiveButton("OK", null).show(); build() }
+                }.start()
+            }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun showDriveSharing() {
+        Thread {
+            val msg = try {
+                val f = CloudSync.backupFolder(this, kind)
+                val who = DriveProvider({ GoogleAuth.token(this, cfg.account) }, { GoogleAuth.invalidate(this, it) }).sharedWith(f.id)
+                if (who.isEmpty()) "\"${f.name}\" is not shared with anyone." else "\"${f.name}\" can be viewed by:\n\n" + who.joinToString("\n") +
+                    "\n\nTo stop sharing, open the folder in the Google Drive app → Share → change their access to Remove."
+            } catch (e: Exception) { "Could not read sharing: ${e.message}" }
+            runOnUiThread { AlertDialog.Builder(this).setTitle("Shared with").setMessage(msg).setPositiveButton("OK", null).show() }
+        }.start()
+    }
+
+    private fun dropboxProvider() = DropboxProvider(DropboxProvider.APP_KEY,
+        cfg.refreshToken ?: throw CloudException("Dropbox not connected", CloudException.Kind.AUTH))
+
+    private fun dropboxLink() {
+        toast("Creating link…")
+        Thread {
+            try {
+                val f = CloudSync.backupFolder(this, kind)
+                val url = dropboxProvider().viewerLink(f.id)
+                runOnUiThread {
+                    AlertDialog.Builder(this).setTitle("Viewer link for \"${f.name}\"").setMessage(url + "\n\nOn the other device: Clips → cloud icon → ＋ Add → Dropbox: a viewer link, and paste it.")
+                        .setPositiveButton("Send…") { _, _ ->
+                            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url), "Send viewer link"))
+                        }
+                        .setNeutralButton("Copy") { _, _ ->
+                            (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                                .setPrimaryClip(android.content.ClipData.newPlainText("MotionCam viewer link", url))
+                            toast("Link copied")
+                        }
+                        .setNegativeButton("Close", null).show()
+                }
+            } catch (e: Exception) { runOnUiThread { toast("Could not create link: ${e.message}") } }
+        }.start()
+    }
+
+    private fun revokeDropboxLink() {
+        AlertDialog.Builder(this).setTitle("Revoke the viewer link?")
+            .setMessage("Every device using the link loses access immediately. You can create a new link afterwards.")
+            .setPositiveButton("Revoke") { _, _ ->
+                Thread {
+                    val msg = try {
+                        val f = CloudSync.backupFolder(this, kind)
+                        val p = dropboxProvider()
+                        val url = p.existingLink(f.id)
+                        if (url == null) "There is no viewer link for this folder." else { p.revokeLink(url); "Link revoked." }
+                    } catch (e: Exception) { "Could not revoke: ${e.message}" }
+                    runOnUiThread { toast(msg) }
+                }.start()
+            }
             .setNegativeButton("Cancel", null).show()
     }
 

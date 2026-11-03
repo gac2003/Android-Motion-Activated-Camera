@@ -1,6 +1,6 @@
 # MotionCam Privacy Policy
 
-_Last updated: November 3, 2026_
+_Last updated: November 3, 2026 (remote folders)_
 
 MotionCam is an open-source Android app that turns a phone into a motion-activated security camera.
 It is a personal project with no company, servers, accounts, advertising or analytics behind it.
@@ -42,11 +42,17 @@ any server run by the developer.
   available storage space, and delete its own older clips when you have enabled automatic clean-up.
 - Your Google sign-in token is stored **encrypted on your phone** (Android Keystore). It is never sent to the
   developer or any third party.
+- **Sharing (optional):** "Share folder…" gives a Google account you name view-only access to the backup folder,
+  using Google Drive's own sharing.
+- **Remote folders (optional):** to view a folder **another** Google account shared with you, MotionCam asks for
+  the read-only `drive.readonly` permission. It is requested only when you add such a folder, and is used only
+  to list the folder you pick and download (stream) its clips and thumbnails to your phone for playback. MotionCam
+  never changes, uploads or deletes anything with this permission, and it never reads other files in your Drive.
 
 MotionCam's use and transfer of information received from Google APIs adheres to the
 [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy),
-including the Limited Use requirements. Data from Google APIs is used only to provide the backup feature you
-turned on; it is not used for advertising, not sold, not shared with third parties, and not read by humans.
+including the Limited Use requirements. Data from Google APIs is used only to provide the backup and viewing
+features you turned on; it is not used for advertising, not sold, not shared with third parties, and not read by humans.
 
 ### Dropbox
 
@@ -54,11 +60,21 @@ turned on; it is not used for advertising, not sold, not shared with third parti
   and cannot see anything else.
 - It uses this access to upload clips, list its own clips, check available space, and delete its own older
   clips when automatic clean-up is enabled. The sign-in token is stored encrypted on your phone.
+- **Viewer links (optional):** "Create viewer link" makes a Dropbox view-only link to the backup folder. Anyone
+  who has that link can view the clips, until you tap "Revoke link". Opening someone's viewer link in Remote
+  folders only reads (streams) the clips.
 
 ### FTP / SFTP
 
 - Uploads go to the server and folder you enter. Your server address, username and password or key are stored
   **encrypted on your phone** and used only to connect to that server.
+
+### Thumbnails and remote folders
+
+- With cloud backup on, a small thumbnail picture of each clip is uploaded next to it (in a `.thumbnails`
+  subfolder) so your other devices can show it. This can be turned off in Settings.
+- Remote folders you add are read-only. Clips you play are cached on the viewing phone (deleted automatically
+  when the cache is full, or with "Clear downloaded remote clips"). Collections you make for them stay on that phone.
 
 ## Your control over your data
 

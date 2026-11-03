@@ -36,7 +36,12 @@ class PlayerActivity : Activity() {
         const val EXTRA_START_ID = "startId"
         /** Play only the clips of this collection. */
         const val EXTRA_COLLECTION = "collection"
+        /** Play a remote folder (read-only). */
+        const val EXTRA_REMOTE = "remote"
     }
+
+    private var remote: com.motioncam.remote.RemoteSource? = null
+    private var store: CollectionStore = Collections
 
     private inner class Slot(val tv: TextureView) {
         var surface: Surface? = null
@@ -91,6 +96,10 @@ class PlayerActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
+        intent.getStringExtra(EXTRA_REMOTE)?.let { rid ->
+            remote = com.motioncam.remote.RemoteSources.get(this, rid) ?: run { finish(); return }
+            store = Collections.forRemote(rid)
+        }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
 
         // ---- video area
@@ -224,9 +233,12 @@ class PlayerActivity : Activity() {
         val startId = intent.getLongExtra(EXTRA_START_ID, -1L)
         Thread {
             val cid = intent.getStringExtra(EXTRA_COLLECTION)
-            val inCollection = cid?.let { Collections.get(this, it)?.clipIds }
-            val list = ClipStore.list(this).filter { inCollection == null || it.id in inCollection }.sortedBy { it.startMs }.map { c ->
-                if (c.durationMs > 0) c else c.copy(durationMs = probeDuration(c))
+            val inCollection = cid?.let { store.get(this, it)?.clipIds }
+            val src = remote
+            // remote clips: lengths come from the uploaded thumbnails (or an estimate, corrected when each one loads)
+            val all = if (src != null) (try { com.motioncam.remote.RemoteRepo.clips(this, src) } catch (e: Exception) { emptyList() }) else ClipStore.list(this)
+            val list = all.filter { inCollection == null || it.id in inCollection }.sortedBy { it.startMs }.map { c ->
+                if (c.durationMs > 0 || src != null) c else c.copy(durationMs = probeDuration(c))
             }.toMutableList()
             runOnUiThread {
                 clips = list
@@ -305,12 +317,14 @@ class PlayerActivity : Activity() {
         slot.index = index
         try {
             slot.surface?.let { mp.setSurface(it) }
-            mp.setDataSource(this, clips[index].uri)
+            val uri = clips[index].uri
+            if (uri.scheme == "http") mp.setDataSource(uri.toString()) else mp.setDataSource(this, uri)
             if (muted) mp.setVolume(0f, 0f)
             mp.setOnVideoSizeChangedListener { _, w, h -> slot.vw = w; slot.vh = h; layoutSlot(slot) }
             mp.setOnPreparedListener {
                 if (slot.mp !== mp) return@setOnPreparedListener
                 slot.prepared = true
+                fixDuration(index, mp)
                 if (slot === cur) {
                     if (offsetMs > 0) {
                         mp.setOnSeekCompleteListener { releaseHoldIfReached(mp) }
@@ -323,6 +337,7 @@ class PlayerActivity : Activity() {
             }
             mp.setOnCompletionListener { if (slot === cur) onCurrentCompleted() }
             mp.setOnErrorListener { _, _, _ ->
+                if (slot === cur && remote != null) Toast.makeText(this, "Could not load this clip (no connection?)", Toast.LENGTH_SHORT).show()
                 if (slot === cur) ui.post { advanceTo(slot.index + 1) } else slot.release()
                 true
             }
@@ -331,6 +346,20 @@ class PlayerActivity : Activity() {
             slot.release()
             if (slot === cur) ui.post { advanceTo(index + 1) }
         }
+    }
+
+    /** Remote clips start with an estimated length; use the real one once the player knows it. */
+    private fun fixDuration(index: Int, mp: MediaPlayer) {
+        if (remote == null || index !in clips.indices) return
+        val d = try { mp.duration.toLong() } catch (_: Exception) { return }
+        val c = clips[index]
+        if (d <= 0 || Math.abs(d - c.durationMs) < 300) return
+        clips[index] = c.copy(durationMs = d)
+        com.motioncam.remote.RemoteRepo.setDuration(this, c.id, d)
+        val curIdx = cur.index
+        val pos = curPos().toLong()
+        strip.clips = clips
+        if (curIdx in clips.indices) strip.setCurrent(curIdx, strip.expanded, atMs = pos)
     }
 
     /** Chains the prepared next clip so it starts the instant the current one ends. */
@@ -537,19 +566,23 @@ class PlayerActivity : Activity() {
         if (i !in clips.indices) return
         val c = clips[i]
         val pm = PopupMenu(this, anchor)
-        val fav = Collections.isFavourite(this, c.id)
+        val fav = store.isFavourite(this, c.id)
         pm.menu.add(0, 4, 0, if (fav) "Remove from Favourites" else "Add to Favourites")
         pm.menu.add(0, 5, 1, "Add to collection…")
-        pm.menu.add(0, 1, 2, "Open in another app")
-        pm.menu.add(0, 2, 3, "Share")
-        pm.menu.add(0, 3, 4, "Delete clip")
+        if (remote != null) pm.menu.add(0, 6, 2, "Save to phone")
+        else {
+            pm.menu.add(0, 1, 2, "Open in another app")
+            pm.menu.add(0, 2, 3, "Share")
+            pm.menu.add(0, 3, 4, "Delete clip")
+        }
         pm.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 4 -> {
-                    if (fav) Collections.remove(this, Collections.FAVOURITES, listOf(c.id)) else Collections.add(this, Collections.FAVOURITES, listOf(c.id))
+                    if (fav) store.remove(this, Collections.FAVOURITES, listOf(c.id)) else store.add(this, Collections.FAVOURITES, listOf(c.id))
                     Toast.makeText(this, if (fav) "Removed from Favourites" else "Added to Favourites", Toast.LENGTH_SHORT).show()
                 }
-                5 -> CollectionPicker.show(this, listOf(c.id)) {}
+                5 -> CollectionPicker.show(this, listOf(c.id), store) {}
+                6 -> saveCurrent(c)
                 1 -> startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(c.uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                 2 -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("video/mp4")
                     .putExtra(Intent.EXTRA_STREAM, c.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share clip"))
@@ -561,6 +594,22 @@ class PlayerActivity : Activity() {
             true
         }
         pm.show()
+    }
+
+    /** Remote clip → the phone's own Clips (marked never-upload). Usually instant: it is already cached. */
+    private fun saveCurrent(c: Clip) {
+        Toast.makeText(this, "Saving to this phone…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val r = com.motioncam.remote.RemoteRepo.saveToPhone(this, listOf(c), { _, _, _ -> }, { false })
+            runOnUiThread {
+                val msg = when {
+                    r.saved > 0 -> "Saved to Clips on this phone (it will not be uploaded to backup)"
+                    r.skipped > 0 -> "This clip is already on this phone"
+                    else -> "Could not save: ${r.lastError ?: "unknown error"}"
+                }
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            }
+        }.start()
     }
 
     private fun deleteCurrent(c: Clip) {

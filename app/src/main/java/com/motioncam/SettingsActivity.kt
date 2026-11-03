@@ -135,6 +135,24 @@ class SettingsActivity : Activity() {
         }
         note("Smaller copies are made on the phone before uploading (uses some extra power; original stays on the phone).")
         toggle("Delete the phone copy after it is backed up everywhere (clips in collections are kept)", prefs.cloudDeleteLocal) { prefs.cloudDeleteLocal = it }
+        toggle("Upload thumbnails for other devices", prefs.cloudThumbs) { prefs.cloudThumbs = it; com.motioncam.cloud.CloudSync.kick(this) }
+        note("A small peak-motion picture (about 20 KB) per clip, in a \".thumbnails\" subfolder, so another device viewing " +
+            "this folder under Clips → Remote folders sees the right frame and clip length without downloading videos.")
+
+        title("Remote folders", Prefs.REMOTE_FOLDER_KEYS)
+        note("View clips another phone backed up (Clips → cloud icon). Read-only: nothing in those folders is ever changed.")
+        toggle("Allow FTP / SFTP servers as remote folders", prefs.remoteFtp) { prefs.remoteFtp = it }
+        note("When off, FTP/SFTP folders are hidden and cannot be added. Clips from servers are downloaded fully before " +
+            "they play (cloud folders stream).")
+        val cacheMb = com.motioncam.remote.StreamCache.cacheBytes(this) / 1_000_000
+        box.addView(Ui.chip(this, "Clear downloaded remote clips  ·  $cacheMb MB").apply {
+            setOnClickListener {
+                com.motioncam.remote.StreamCache.clearAll(this@SettingsActivity)
+                Toast.makeText(this@SettingsActivity, "Cleared", Toast.LENGTH_SHORT).show()
+                recreate()
+            }
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
+        note("Played remote clips are kept (up to 1.5 GB) so replaying and scrubbing are instant. Android may also clear them when storage is low.")
 
         title("Reset", null)
         box.addView(Ui.chip(this, "Reset ALL settings to default").apply {

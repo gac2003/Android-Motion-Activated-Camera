@@ -19,15 +19,28 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+import com.motioncam.remote.RemoteRepo
+import com.motioncam.remote.RemoteSource
+import com.motioncam.remote.RemoteSources
 
 /** Gallery of recorded clips with thumbnails, grouped by day. Tap = play in timeline. */
 class ClipsActivity : Activity() {
     companion object {
         /** Open showing only the clips of this collection. */
         const val EXTRA_COLLECTION = "collection"
+        /** Open a remote folder (read-only) instead of the phone's own clips. */
+        const val EXTRA_REMOTE = "remote"
     }
 
     private var collectionId: String? = null
+    private var remote: RemoteSource? = null
+    private var store: CollectionStore = Collections
+    private val ui = android.os.Handler(android.os.Looper.getMainLooper())
+    private var refreshing = false
+    private var lastError: String? = null
+    private val autoRefresh = object : Runnable {
+        override fun run() { refreshRemote(quiet = true); ui.postDelayed(this, 5 * 60_000L) }
+    }
     private var favIds: Set<Long> = emptySet()
     private sealed class Row {
         class Header(val dayStart: Long, val clips: List<Clip>) : Row()
@@ -95,6 +108,10 @@ class ClipsActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         collectionId = intent.getStringExtra(EXTRA_COLLECTION)
+        intent.getStringExtra(EXTRA_REMOTE)?.let { rid ->
+            remote = RemoteSources.get(this, rid) ?: run { finish(); return }
+            store = Collections.forRemote(rid)
+        }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
         val playAll = Ui.chip(this, "▶ Timeline").apply {
             setOnClickListener {
@@ -107,13 +124,19 @@ class ClipsActivity : Activity() {
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            if (collectionId == null && remote != null) addView(iconButton(this@ClipsActivity, IconDrawable.Kind.REFRESH, 44, 10) {
+                refreshRemote(quiet = false)
+            })
+            if (collectionId == null && remote == null) addView(iconButton(this@ClipsActivity, IconDrawable.Kind.CLOUD, 44, 10) {
+                startActivity(Intent(this@ClipsActivity, com.motioncam.remote.RemoteFoldersActivity::class.java))
+            })
             if (collectionId == null) addView(iconButton(this@ClipsActivity, IconDrawable.Kind.FOLDER, 44, 10) {
-                startActivity(Intent(this@ClipsActivity, CollectionsActivity::class.java))
+                startActivity(Intent(this@ClipsActivity, CollectionsActivity::class.java).putExtra(CollectionsActivity.EXTRA_REMOTE, remote?.id))
             })
             addView(calBtn)
             addView(playAll)
         }
-        val title = collectionId?.let { Collections.get(this, it)?.name } ?: "Clips"
+        val title = collectionId?.let { store.get(this, it)?.name } ?: remote?.name ?: "Clips"
         normalBar = topBar(this, title, actions)
         root.addView(normalBar)
         val fit = FitRow(this).apply {
@@ -138,20 +161,25 @@ class ClipsActivity : Activity() {
         }
         val allBtn = selAction("All") { if (selected.size == clips.size) selected.clear() else clips.forEach { selected += it.id }; updateSelection() }
         val addBtn = selAction("Add to…") { addSelectedTo() }
-        val delBtn = if (collectionId != null) selAction("Remove") { removeSelectedFromCollection() }
-        else selAction("Delete") { deleteSelected() }
+        val delBtn = when {
+            collectionId != null -> selAction("Remove") { removeSelectedFromCollection() }
+            remote != null -> selAction("Save to phone") { saveToPhone(selectedClips()) }
+            else -> selAction("Delete") { deleteSelected() }
+        }
         fit.collapsible += listOf(addBtn, delBtn, allBtn)   // "All" is the first to move into ⋮ when space runs out
         lateinit var more: View
         more = iconButton(this, IconDrawable.Kind.MORE, 40, 10) {
             val pm = PopupMenu(this, more)
             val overflow = fit.hidden.mapNotNull { selActions[it] }
             overflow.forEachIndexed { i, a -> pm.menu.add(0, 100 + i, i, a.first) }
-            pm.menu.add(0, 1, 50, "Share")
-            if (collectionId != null) pm.menu.add(0, 2, 51, "Delete from phone")
+            if (remote == null) pm.menu.add(0, 1, 50, "Share")
+            if (collectionId != null && remote == null) pm.menu.add(0, 2, 51, "Delete from phone")
+            if (collectionId != null && remote != null) pm.menu.add(0, 3, 51, "Save to phone")
             pm.setOnMenuItemClickListener {
                 when (it.itemId) {
                     1 -> shareSelected()
                     2 -> deleteSelected()
+                    3 -> saveToPhone(selectedClips())
                     else -> overflow.getOrNull(it.itemId - 100)?.second?.invoke()
                 }
                 true
@@ -168,6 +196,7 @@ class ClipsActivity : Activity() {
             setOnClickListener { requestPermissions(arrayOf(videoPermission()), 7) }
             visibility = View.GONE
         }
+        if (remote != null) summary.setOnClickListener { lastError?.let { AlertDialog.Builder(this).setTitle("Could not refresh").setMessage(it).setPositiveButton("OK", null).show() } }
         root.addView(banner)
         list = ListView(this).apply {
             divider = null
@@ -189,8 +218,15 @@ class ClipsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         timeFmt = Fmt.time(prefs)
-        banner.visibility = if (canSeeAll()) View.GONE else View.VISIBLE
+        banner.visibility = if (canSeeAll() || remote != null) View.GONE else View.VISIBLE
         reload()
+        // remote folder: check for new clips now (if the list is a few minutes old) and every 5 minutes
+        if (remote != null) ui.postDelayed(autoRefresh, if (System.currentTimeMillis() - (remote?.lastRefresh ?: 0) > 2 * 60_000L) 0 else 5 * 60_000L)
+    }
+
+    override fun onPause() {
+        ui.removeCallbacks(autoRefresh)
+        super.onPause()
     }
 
     override fun onDestroy() {
@@ -200,6 +236,14 @@ class ClipsActivity : Activity() {
     }
 
     private fun reload() {
+        val src = remote
+        if (src != null) {
+            Thread {
+                val list = RemoteRepo.cached(this, src)
+                runOnUiThread { showRemote(list) }
+            }.start()
+            return
+        }
         banner.visibility = if (canSeeAll()) View.GONE else View.VISIBLE
         Thread {
             var all = ClipStore.list(this)
@@ -221,6 +265,85 @@ class ClipsActivity : Activity() {
                     all.isEmpty() -> "No clips yet"
                     else -> "${all.size} clips · %.1f GB".format(total / 1e9)
                 }
+            }
+        }.start()
+    }
+
+    // ------------------------------------------------------------------ remote folder
+
+    /** Lists the remote folder again; [quiet] = no toast (automatic refresh). */
+    private fun refreshRemote(quiet: Boolean) {
+        val src = remote ?: return
+        if (refreshing) return
+        refreshing = true
+        if (!quiet) Toast.makeText(this, "Checking for new clips…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val result = try { Result.success(RemoteRepo.refresh(this, src)) } catch (e: Exception) { Result.failure(e) }
+            runOnUiThread {
+                refreshing = false
+                if (isFinishing) return@runOnUiThread
+                result.onSuccess { lastError = null; showRemote(it) }
+                result.onFailure { e ->
+                    lastError = e.message ?: e.javaClass.simpleName
+                    showRemote(clips.takeIf { collectionId == null } ?: RemoteRepo.cached(this, src))
+                    if (!quiet) Toast.makeText(this, "Could not refresh: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun showRemote(list: List<Clip>) {
+        val src = remote ?: return
+        var all = list
+        var missing = 0
+        val cid = collectionId
+        if (cid != null) {
+            val ids = store.get(this, cid)?.clipIds ?: emptySet<Long>()
+            all = list.filter { it.id in ids }
+            if (list.isNotEmpty()) missing = ids.size - all.size
+        }
+        favIds = store.favouriteIds(this)
+        clips = all
+        buildRows()
+        val total = all.sumOf { it.size }
+        val ago = if (src.lastRefresh == 0L) "" else " · checked " + agoText(src.lastRefresh)
+        summary.text = when {
+            all.isEmpty() && lastError == null && (refreshing || src.lastRefresh == 0L) -> "Loading…"
+            all.isEmpty() && cid != null -> "No clips in this collection yet. Hold a clip to select it, then Add to…"
+            all.isEmpty() -> if (lastError != null) "Could not load this folder (tap for details)" else "No MotionCam clips in this folder yet$ago"
+            else -> "${all.size} clips · %.1f GB".format(total / 1e9) + ago +
+                (if (missing > 0) " · $missing no longer in the folder" else "") +
+                (if (lastError != null) " · offline, showing the last list (tap for details)" else "")
+        }
+    }
+
+    private fun agoText(t: Long): String {
+        val m = (System.currentTimeMillis() - t) / 60_000
+        return when { m < 1 -> "just now"; m < 60 -> "$m min ago"; m < 1440 -> "${m / 60} h ago"; else -> "${m / 1440} d ago" }
+    }
+
+    /** Downloads remote clips into the phone's own Clips (never backed up again). */
+    private fun saveToPhone(list: List<Clip>) {
+        if (list.isEmpty()) return
+        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+        val tv = Ui.label(this, "Starting…", 14f).apply { val p = Ui.dp(this@ClipsActivity, 20); setPadding(p, p, p, 0) }
+        val dlg = AlertDialog.Builder(this).setTitle("Saving ${list.size} clip${if (list.size == 1) "" else "s"} to this phone")
+            .setView(tv).setCancelable(false)
+            .setNegativeButton("Cancel") { _, _ -> cancelled.set(true) }.show()
+        Thread {
+            val r = RemoteRepo.saveToPhone(this, list, { done, total, pct ->
+                runOnUiThread { tv.text = if (done >= total) "Finishing…" else "Clip ${done + 1} of $total  ·  $pct%" }
+            }, { cancelled.get() })
+            runOnUiThread {
+                try { dlg.dismiss() } catch (_: Exception) {}
+                val parts = ArrayList<String>()
+                parts += "Saved ${r.saved} clip${if (r.saved == 1) "" else "s"} to Clips on this phone."
+                if (r.skipped > 0) parts += "${r.skipped} already on this phone (skipped)."
+                if (r.failed > 0) parts += "${r.failed} failed" + (r.lastError?.let { ": $it" } ?: ".")
+                if (cancelled.get()) parts += "Stopped."
+                parts += "Saved copies are never uploaded to cloud backup and are not removed by automatic clean-up."
+                AlertDialog.Builder(this).setTitle("Save to phone").setMessage(parts.joinToString("\n\n")).setPositiveButton("OK", null).show()
+                exitSelection()
             }
         }.start()
     }
@@ -256,7 +379,7 @@ class ClipsActivity : Activity() {
 
     private fun play(c: Clip) {
         startActivity(Intent(this, PlayerActivity::class.java).putExtra(PlayerActivity.EXTRA_START_ID, c.id)
-            .putExtra(PlayerActivity.EXTRA_COLLECTION, collectionId))
+            .putExtra(PlayerActivity.EXTRA_COLLECTION, collectionId).putExtra(PlayerActivity.EXTRA_REMOTE, remote?.id))
     }
 
     private fun options(c: Clip) {
@@ -283,7 +406,7 @@ class ClipsActivity : Activity() {
             if (collapsedNow) "Expand" else "Collapse",
             "Collapse all days",
             "Expand all days",
-            "Delete all ${h.clips.size} clips of this day",
+            if (remote != null) "Save all ${h.clips.size} clips of this day to the phone" else "Delete all ${h.clips.size} clips of this day",
         )
         AlertDialog.Builder(this).setTitle(dayLabel(h.dayStart))
             .setItems(items) { _, which ->
@@ -293,7 +416,7 @@ class ClipsActivity : Activity() {
                     2 -> toggleDay(h.dayStart)
                     3 -> { collapsed.addAll(clips.map { dayStart(it.startMs) }); buildRows(); scrollToDay(h.dayStart) }
                     4 -> { collapsed.clear(); buildRows(); scrollToDay(h.dayStart) }
-                    5 -> AlertDialog.Builder(this).setTitle("Delete ${h.clips.size} clips?")
+                    5 -> if (remote != null) saveToPhone(h.clips) else AlertDialog.Builder(this).setTitle("Delete ${h.clips.size} clips?")
                         .setPositiveButton("Delete") { _, _ -> ClipDeleter.delete(this, h.clips) { reload() } }
                         .setNegativeButton("Cancel", null).show()
                 }
@@ -597,14 +720,14 @@ class ClipsActivity : Activity() {
     private fun addSelectedTo() {
         val ids = selectedClips().map { it.id }
         if (ids.isEmpty()) return
-        CollectionPicker.show(this, ids) { exitSelection(); reload() }
+        CollectionPicker.show(this, ids, store) { exitSelection(); reload() }
     }
 
     private fun removeSelectedFromCollection() {
         val cid = collectionId ?: return
         val ids = selectedClips().map { it.id }
         if (ids.isEmpty()) return
-        Collections.remove(this, cid, ids)
+        store.remove(this, cid, ids)
         Toast.makeText(this, "Removed ${ids.size} from this collection (clips kept)", Toast.LENGTH_SHORT).show()
         exitSelection()
         reload()

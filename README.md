@@ -34,6 +34,7 @@ A motion-triggered security camera for Android (built for a Galaxy S20 FE, works
 * Runs as a foreground service so it keeps working with the screen off.
 * **Remote viewing without Wi-Fi/LAN**: built-in web page with live MJPEG + clip download, reachable over USB tethering, `adb forward`, Bluetooth tethering or the phone's own hotspot.
 * Protects the phone (all optional): pauses the camera when hot, stops when the battery is low, can delete old clips.
+* **Remote folders**: watch the clips another phone backs up (Google Drive, Dropbox, FTP/SFTP) in the same gallery and timeline player – read-only.
 
 | Pro controls & focus peaking | Clips gallery | Timeline player | Collections |
 |:---:|:---:|:---:|:---:|
@@ -92,6 +93,23 @@ Settings → **Cloud backup** copies every new clip to **Google Drive**, **Dropb
 * **Reliable**: uploads are queued, resume where they stopped after a connection drop, retry with back-off, wait for a
   working connection (e.g. a Wi-Fi login page) and continue in the background, even after a reboot.
 * **Options**: Wi-Fi only, charging only, upload as original / 720p / 480p, delete the phone copy once backed up.
+* **Thumbnails for other devices**: each clip's peak-motion thumbnail (~20 KB) is uploaded to a `.thumbnails`
+  subfolder, so remote folders show the right frame without downloading videos.
+
+## Remote folders (view another phone's backups)
+Clips → **cloud icon** opens backup folders from other devices **read-only** (nothing in them is ever uploaded,
+renamed or deleted) in the normal gallery and timeline player: day sections, calendar, Favourites/collections
+(kept on the viewing device only), filmstrip and back-to-back playback.
+
+* **Same account** on both phones: ＋ Add → "my own backups" and pick the folder.
+* **Google Drive, another account**: on the recording phone, Cloud backup → Google Drive → **Share folder…** (view
+  only). On the viewing device, ＋ Add → "a folder shared with me" (asks Google for read-only Drive access; Google
+  may show an "unverified app" screen – Advanced → continue).
+* **Dropbox, another account**: on the recording phone, Cloud backup → Dropbox → **Create viewer link**, send it,
+  and paste it on the viewing device (＋ Add → "a viewer link"). Anyone with the link can view; **Revoke link** stops it.
+* **FTP / SFTP**: enter the server login (a read-only account is best). Can be turned off in Settings → Remote folders.
+* Clips stream when played (FTP/SFTP download first) and are cached (up to 1.5 GB) so replaying is instant.
+  **Save to phone** copies clips into this phone's Clips; those copies are never uploaded to cloud backup.
 
 ## Remote viewing
 The web viewer password is shown/changed in Settings (user name: `admin`). The app lists the phone's addresses, e.g. `http://192.168.42.129:8080`.

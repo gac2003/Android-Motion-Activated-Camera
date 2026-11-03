@@ -41,6 +41,7 @@
         <activity android:name=".CollectionsActivity" android:exported="false" />
         <activity android:name=".cloud.CloudActivity" android:exported="false" />
         <activity android:name=".cloud.UploadQueueActivity" android:exported="false" />
+        <activity android:name=".remote.RemoteFoldersActivity" android:exported="false" />
         <service
             android:name=".cloud.CloudJobService"
             android:exported="false"

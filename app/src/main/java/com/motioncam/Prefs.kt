@@ -107,6 +107,10 @@ class Prefs(ctx: Context) {
     var cloudQuality: Int get() = i("cloudQuality", 0); set(v) = put("cloudQuality", v)
     /** Delete the phone copy once a clip is in every enabled destination (clips in collections are kept). */
     var cloudDeleteLocal: Boolean get() = b("cloudDeleteLocal", false); set(v) = put("cloudDeleteLocal", v)
+    /** Upload each clip's peak-motion thumbnail too, for devices viewing the folder as a remote folder. */
+    var cloudThumbs: Boolean get() = b("cloudThumbs", true); set(v) = put("cloudThumbs", v)
+    /** Allow FTP / SFTP servers as remote folders (Clips → Remote folders). */
+    var remoteFtp: Boolean get() = b("remoteFtp", true); set(v) = put("remoteFtp", v)
     /** All uploads paused from the queue screen. */
     var cloudPaused: Boolean get() = b("cloudPaused", false); set(v) = put("cloudPaused", v)
 
@@ -132,10 +136,11 @@ class Prefs(ctx: Context) {
         val STORAGE_KEYS = listOf("maxStorageGb", "keepDays", "autoDeleteLow")
         val PROTECTION_KEYS = listOf("minBattery", "maxTempC")
         val REMOTE_KEYS = listOf("serverOn", "streamHd", "port")
-        val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal")
+        val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal", "cloudThumbs")
+        val REMOTE_FOLDER_KEYS = listOf("remoteFtp")
         val CAMERA_KEYS = listOf("camera", "exposureAuto", "evIndex", "iso", "shutterNs", "focusAuto", "focusPos",
             "wbAuto", "wbKelvin", "zoom", "chipLayout")
         /** Everything except the web password (so you are not locked out of the viewer). */
-        val ALL_KEYS = PREVIEW_KEYS + RECORDING_KEYS + MOTION_KEYS + STORAGE_KEYS + PROTECTION_KEYS + REMOTE_KEYS + CLOUD_KEYS + CAMERA_KEYS
+        val ALL_KEYS = PREVIEW_KEYS + RECORDING_KEYS + MOTION_KEYS + STORAGE_KEYS + PROTECTION_KEYS + REMOTE_KEYS + CLOUD_KEYS + REMOTE_FOLDER_KEYS + CAMERA_KEYS
     }
 }

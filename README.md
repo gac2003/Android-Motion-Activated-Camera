@@ -11,6 +11,8 @@ Cap phone at 70% CPU usage and turn off fast charging to reduce temperatures.
 
 Android APK can be downloaded from the artifacts of the GitHub Actions.
 
+[Privacy policy](PRIVACY.md)
+
 # MotionCam
 
 A motion-triggered security camera for Android (built for a Galaxy S20 FE, works on any Android 11+ phone).

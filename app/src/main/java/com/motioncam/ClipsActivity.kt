@@ -73,7 +73,18 @@ class ClipsActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (!ClipDeleter.onResult(requestCode, resultCode)) @Suppress("DEPRECATION") super.onActivityResult(requestCode, resultCode, data)
     }
-    private val pool = Executors.newFixedThreadPool(2)
+    /** Newest request first, so the tiles on screen are done before ones already scrolled past. */
+    private class LifoQueue : java.util.concurrent.LinkedBlockingDeque<Runnable>() {
+        override fun offer(e: Runnable) = offerFirst(e)
+    }
+    private fun lifoPool(threads: Int, priority: Int) = java.util.concurrent.ThreadPoolExecutor(threads, threads, 30, java.util.concurrent.TimeUnit.SECONDS, LifoQueue()) { r ->
+        Thread(r).apply { this.priority = priority; isDaemon = true }
+    }
+    private val pool = lifoPool(2, Thread.NORM_PRIORITY)          // placeholders / cached thumbnails
+    private val bestPool = lifoPool(3, Thread.MIN_PRIORITY + 1)    // finding the best frame (old clips)
+    private val placeholders = object : LruCache<Long, Bitmap>((Runtime.getRuntime().maxMemory() / 16).toInt()) {
+        override fun sizeOf(key: Long, value: Bitmap) = value.byteCount
+    }
     private val thumbs = object : LruCache<Long, Bitmap>((Runtime.getRuntime().maxMemory() / 8).toInt()) {
         override fun sizeOf(key: Long, value: Bitmap) = value.byteCount
     }
@@ -184,6 +195,7 @@ class ClipsActivity : Activity() {
 
     override fun onDestroy() {
         pool.shutdownNow()
+        bestPool.shutdownNow()
         super.onDestroy()
     }
 
@@ -424,15 +436,32 @@ class ClipsActivity : Activity() {
         dialog.show()
     }
 
+    /**
+     * Best thumbnail (frame with the action) when ready; until then a quick placeholder frame from just after
+     * the pre-record window, so the grid fills immediately.
+     */
     private fun bindThumb(iv: ImageView, c: Clip) {
         iv.tag = c.id
-        val cached = thumbs.get(c.id)
-        if (cached != null) { iv.setImageBitmap(cached); return }
-        iv.setImageDrawable(null)
+        thumbs.get(c.id)?.let { iv.setImageBitmap(it); return }
+        val ph = placeholders.get(c.id)
+        if (ph != null) iv.setImageBitmap(ph) else iv.setImageDrawable(null)
         pool.execute {
-            val bmp = ClipThumbs.load(this, c)   // frame with the action, not the empty background
-            if (bmp != null) thumbs.put(c.id, bmp)
-            runOnUiThread { if (iv.tag == c.id) iv.setImageBitmap(bmp) }
+            if (iv.tag != c.id) return@execute                      // scrolled away: skip
+            if (ClipThumbs.isReady(this, c)) {
+                val b = ClipThumbs.cached(this, c)
+                if (b != null) { thumbs.put(c.id, b); runOnUiThread { if (iv.tag == c.id) iv.setImageBitmap(b) }; return@execute }
+            }
+            if (ph == null) {
+                val q = ClipThumbs.quick(this, c)
+                if (q != null) { placeholders.put(c.id, q); runOnUiThread { if (iv.tag == c.id && thumbs.get(c.id) == null) iv.setImageBitmap(q) } }
+            }
+            bestPool.execute {
+                if (iv.tag != c.id && placeholders.get(c.id) != null) return@execute   // not on screen any more
+                val b = ClipThumbs.load(this, c) ?: return@execute
+                thumbs.put(c.id, b)
+                placeholders.remove(c.id)
+                runOnUiThread { if (iv.tag == c.id) iv.setImageBitmap(b) }
+            }
         }
     }
 

@@ -61,6 +61,23 @@ object ClipThumbs {
         if (had) savePeaks(ctx)
     }
 
+    /** Whether the best thumbnail is already made (cheap check). */
+    fun isReady(ctx: Context, clip: Clip) = cacheFile(ctx, clip.id).exists()
+
+    /**
+     * Quick placeholder while the best frame is being found: one fast key-frame decode just after the
+     * pre-record window (about when the motion started). Not saved.
+     */
+    fun quick(ctx: Context, clip: Clip): Bitmap? {
+        val r = MediaMetadataRetriever()
+        return try {
+            r.setDataSource(ctx, clip.uri)
+            val dur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: clip.durationMs
+            val t = (Prefs(ctx).preRecordMs + 500L).coerceAtMost(maxOf(0, dur / 2))
+            r.getScaledFrameAtTime(t * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, W, H)
+        } catch (e: Exception) { null } finally { try { r.release() } catch (_: Exception) {} }
+    }
+
     /** Cached thumbnail if it exists (fast, for scrolling lists). */
     fun cached(ctx: Context, clip: Clip): Bitmap? {
         val f = cacheFile(ctx, clip.id)
@@ -77,7 +94,9 @@ object ClipThumbs {
             val dur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: clip.durationMs
             val known = synchronized(this) { peaks(ctx)[clip.id] }
             val t = known ?: bestFrame(r, dur).also { synchronized(this) { peaks(ctx)[clip.id] = it }; savePeaks(ctx) }
-            bmp = r.getScaledFrameAtTime(t.coerceIn(0, maxOf(0, dur - 1)) * 1000, MediaMetadataRetriever.OPTION_CLOSEST, W, H)
+            // exact moment for recorded peaks; for estimated ones the chosen key frame itself (half the work)
+            val option = if (known != null) MediaMetadataRetriever.OPTION_CLOSEST else MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+            bmp = r.getScaledFrameAtTime(t.coerceIn(0, maxOf(0, dur - 1)) * 1000, option, W, H)
         } catch (_: Exception) {
         } finally {
             try { r.release() } catch (_: Exception) {}

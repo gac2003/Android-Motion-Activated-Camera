@@ -295,7 +295,7 @@ class MainActivity : Activity() {
         pill.alpha = 0f
         pill.animate().alpha(1f).setDuration(150).start()
         undoPill = pill
-        ui.postDelayed(discardNow, 6000)
+        ui.postDelayed(discardNow, 9000)
     }
 
     private fun confirmKeep(clipId: Long, lengthMs: Long) {

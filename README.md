@@ -28,8 +28,8 @@ New versions install over the old one and keep your settings and clips.
 A motion-triggered security camera for Android (built for a Galaxy S20 FE, works on any Android 11+ phone).
 
 * Records only when something moves; keeps recording until there has been no motion for N seconds (default 30, adjustable 0–600).
-* **No accidental clips when you stop it**: picking the phone up to turn monitoring off usually starts a clip; one shorter
-  than 1 s (adjustable) is discarded, with a few seconds to Undo.
+* **No accidental clips when you stop it** (optional): picking the phone up to turn monitoring off usually starts a clip;
+  one shorter than 1 s (adjustable) can be discarded automatically, with a few seconds to Undo.
 * **Pick the exact lens** (main / ultra-wide / telephoto / front) – not just "front" or "rear".
 * **Pro Video style controls**: EV, ISO, shutter speed, manual focus (with focus peaking), white balance, zoom, resolution/fps.
 * 1080p / 30 fps H.264 by default (720p, 4K, 24/60 fps and HEVC are options).
@@ -65,11 +65,11 @@ With the Android SDK installed (`ANDROID_HOME` set, platform 34): `./gradlew ass
    * **FOCUS** shows green focus peaking while it is open.
    * **ZONES** shows detected motion in red; drag on the image to mask areas (dark = ignored). The slider is sensitivity.
 3. Tap **START MONITORING**, then lock the phone. Stop from the notification or the app.
-   * If a clip shorter than 1 s is recording when you tap **STOP MONITORING** (usually set off by picking the phone
-     up), it is discarded and a small *Short clip discarded · UNDO* pill appears in the top-right corner for 6 seconds.
-     Tap it and confirm to keep the clip. Change or turn this off in Settings → Recording → *Discard very short clips
-     when I stop monitoring* (slider or type any length from 0.5 to 10 s, e.g. 1.2). Clips that end on their own and stops from the notification
-     are never affected.
+   * Optional (off by default): turn on Settings → Recording → *Discard very short clips when I stop monitoring*.
+     Then, if a clip shorter than 1 s is recording when you tap **STOP MONITORING** (usually set off by picking the
+     phone up), it is discarded and a small *Short clip discarded · UNDO* pill appears in the top-right corner for
+     9 seconds. Tap it and confirm to keep the clip. The length is adjustable (slider, or type any length from 0.5
+     to 10 s, e.g. 1.2). Clips that end on their own and stops from the notification are never affected.
 4. Settings → *Exempt from battery optimisation*. Set *Video rotation* explicitly if the phone is on a fixed stand.
 
 Clips are saved to **Movies/MotionCam** (visible in Gallery and over USB file transfer).

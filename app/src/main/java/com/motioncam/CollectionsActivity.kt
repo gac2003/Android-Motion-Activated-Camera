@@ -35,6 +35,7 @@ class CollectionsActivity : Activity() {
             setPadding(p, 0, p, p)
         }
         root.addView(ScrollView(this).apply { addView(box) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        Ui.capWidth(box)
         setContentView(root)
     }
 

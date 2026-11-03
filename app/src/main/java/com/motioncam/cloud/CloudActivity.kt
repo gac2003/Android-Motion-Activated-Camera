@@ -51,6 +51,7 @@ class CloudActivity : Activity() {
             setPadding(p, 0, p, p * 2)
         }
         root.addView(ScrollView(this).apply { addView(box) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        Ui.capWidth(box)
         setContentView(root)
         build()
     }

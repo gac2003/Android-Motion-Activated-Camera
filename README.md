@@ -61,7 +61,7 @@ With the Android SDK installed (`ANDROID_HOME` set, platform 34): `./gradlew ass
 
 Clips are saved to **Movies/MotionCam** (visible in Gallery and over USB file transfer).
 The **Clips** screen shows thumbnails by day; tapping a clip opens the **player**, which plays every following clip
-back to back like one continuous video. Below the video is a Samsung-style filmstrip: the playing clip is expanded
+back to back like one continuous video. Below the video is a filmstrip (like modern phone gallery players): the playing clip is expanded
 into its frames (tap it to collapse/expand), pinch to resize, drag to scrub (stops at the clip's end while expanded).
 Tap the video to pause/play, double-tap left/right to skip 5 s; the ⋮ menu has share / open with / delete.
 
@@ -93,7 +93,7 @@ The web viewer password is shown/changed in Settings (user name: `admin`). The a
 
 | Link | How |
 |---|---|
-| USB tethering | Settings → Connections → Mobile Hotspot and Tethering → *USB tethering*; browse to the tether address on the PC |
+| USB tethering | Settings → *Hotspot & tethering* (Samsung: Connections → Mobile Hotspot and Tethering) → *USB tethering*; browse to the tether address on the PC |
 | USB debugging | `adb forward tcp:8080 tcp:8080` then open `http://localhost:8080` |
 | Bluetooth | Pair, enable *Bluetooth tethering* on the phone; low frame rate |
 | Hotspot | Join the phone's hotspot from the laptop |
@@ -104,6 +104,6 @@ Do not forward the port to the internet; it is a plain-HTTP server with a simple
 * Motion analysis runs 8×/s on a 1280x720 luma stream. The recorder is permanently connected to the camera and
   prepared in advance, so a clip starts roughly 0.25 s (the *motion must last* time) after motion begins.
 * Manual white balance uses the camera's presets (incandescent … shade) rather than free Kelvin values, because raw gains are not portable across phones.
-* Lenses hidden behind Samsung's multi-camera are offered if the phone exposes them to apps; if a lens is missing from the list, Samsung does not expose it to third-party apps.
+* Every lens the phone makes available to apps is listed. Some manufacturers hide extra lenses (ultra-wide, telephoto) from third-party apps; if a lens is missing from the list, the phone doesn't expose it.
 * Android 14 does not allow camera foreground services to auto-start at boot, so monitoring must be started by opening the app.
 * A debug-signed APK is fine for personal use.

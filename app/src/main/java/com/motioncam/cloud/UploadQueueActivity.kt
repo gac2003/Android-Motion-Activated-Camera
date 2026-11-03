@@ -78,42 +78,47 @@ class UploadQueueActivity : Activity() {
         }
         normalBar = topBar(this, "Upload queue", pauseAll)
         root.addView(normalBar)
-        selBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        val fit = com.motioncam.FitRow(this).apply {
             setBackgroundColor(0xFF2A2416.toInt())
             val p = Ui.dp(this@UploadQueueActivity, 8)
             setPadding(p, p, p, p)
             visibility = View.GONE
         }
+        selBar = fit
         selBar.addView(Ui.label(this, "✕", 22f).apply {
             setPadding(Ui.dp(this@UploadQueueActivity, 12), 0, Ui.dp(this@UploadQueueActivity, 14), 0)
             setOnClickListener { exitSelection() }
         })
-        selTitle = Ui.label(this, "", 17f)
+        selTitle = Ui.label(this, "", 17f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
         selBar.addView(selTitle, LinearLayout.LayoutParams(0, -2, 1f))
+        fit.title = selTitle
+        val actions = LinkedHashMap<View, Pair<String, () -> Unit>>()
         fun act(t: String, f: () -> Unit) = Ui.chip(this, t).apply { setOnClickListener { f() } }.also {
             selBar.addView(it, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(this@UploadQueueActivity, 5) })
+            actions[it] = Pair(t, f)
         }
-        act("All") { if (selected.size == items.size) selected.clear() else items.forEach { selected += it.key }; updateSelection() }
-        act("Pause") { CloudSync.setPaused(this, selected.toList(), true); exitSelection() }
-        act("Resume") { CloudSync.setPaused(this, selected.toList(), false); exitSelection() }
+        val allBtn = act("All") { if (selected.size == items.size) selected.clear() else items.forEach { selected += it.key }; updateSelection() }
+        val pauseBtn = act("Pause") { CloudSync.setPaused(this, selected.toList(), true); exitSelection() }
+        val resumeBtn = act("Resume") { CloudSync.setPaused(this, selected.toList(), false); exitSelection() }
+        fit.collapsible += listOf(pauseBtn, resumeBtn, allBtn)
         lateinit var more: View
         more = iconButton(this, IconDrawable.Kind.MORE, 40, 10) {
             val pm = PopupMenu(this, more)
-            pm.menu.add(0, 1, 0, "Move to top")
-            pm.menu.add(0, 2, 1, "Move to bottom")
-            pm.menu.add(0, 3, 2, "Retry now")
-            pm.menu.add(0, 4, 3, "Cancel uploads")
+            val overflow = fit.hidden.mapNotNull { actions[it] }
+            overflow.forEachIndexed { i, a -> pm.menu.add(0, 100 + i, i, a.first) }
+            pm.menu.add(0, 1, 50, "Move to top")
+            pm.menu.add(0, 2, 51, "Move to bottom")
+            pm.menu.add(0, 3, 52, "Retry now")
+            pm.menu.add(0, 4, 53, "Cancel uploads")
             pm.setOnMenuItemClickListener {
                 val keys = selected.toList()
                 when (it.itemId) {
-                    1 -> CloudSync.moveToTop(this, keys)
-                    2 -> CloudSync.moveToBottom(this, keys)
-                    3 -> CloudSync.retry(this, keys)
+                    1 -> { CloudSync.moveToTop(this, keys); exitSelection() }
+                    2 -> { CloudSync.moveToBottom(this, keys); exitSelection() }
+                    3 -> { CloudSync.retry(this, keys); exitSelection() }
                     4 -> confirmCancel(keys)
+                    else -> overflow.getOrNull(it.itemId - 100)?.second?.invoke()
                 }
-                if (it.itemId != 4) exitSelection()
                 true
             }
             pm.show()

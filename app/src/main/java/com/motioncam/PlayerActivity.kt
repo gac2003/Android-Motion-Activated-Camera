@@ -139,7 +139,7 @@ class PlayerActivity : Activity() {
             setPadding(p, p, p, p * 3)
         }
         topBar.addView(iconButton(this, IconDrawable.Kind.BACK) { finish() })
-        stamp = Ui.label(this, "", 15f).apply { setShadowLayer(4f, 0f, 0f, Color.BLACK) }
+        stamp = Ui.label(this, "", 15f).apply { setShadowLayer(4f, 0f, 0f, Color.BLACK); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
         topBar.addView(stamp, LinearLayout.LayoutParams(0, -2, 1f))
         lateinit var menuBtn: View
         menuBtn = iconButton(this, IconDrawable.Kind.MORE) { showMenu(menuBtn) }
@@ -216,7 +216,7 @@ class PlayerActivity : Activity() {
         bar.addView(speedBtn)
         muteBtn = iconButton(this, IconDrawable.Kind.VOLUME, 48, 12) { toggleMute() }
         bar.addView(muteBtn)
-        info = Ui.label(this, "", 12f, Ui.GREY).apply { gravity = Gravity.END }
+        info = Ui.label(this, "", 12f, Ui.GREY).apply { gravity = Gravity.END; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
         bar.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(bar)
         setContentView(root)

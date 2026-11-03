@@ -30,6 +30,7 @@ class SettingsActivity : Activity() {
             setPadding(p, 0, p, p * 2)
         }
         scroll.addView(box)
+        Ui.capWidth(box)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
 
@@ -104,7 +105,7 @@ class SettingsActivity : Activity() {
             "Open one of these in a browser on the device you view from:\n" +
                 (if (addrs.isEmpty()) "(no network link right now)\n" else addrs.joinToString("\n") { "  http://${it.second}:${prefs.port}    [${it.first}]" } + "\n") +
                 "\nNo Wi-Fi needed:\n" +
-                "• USB: Settings → Connections → Mobile Hotspot and Tethering → USB tethering, then open the tether address above on the PC.\n" +
+                "• USB: turn on USB tethering (Settings → Hotspot & tethering; on Samsung: Connections → Mobile Hotspot and Tethering), then open the tether address above on the PC.\n" +
                 "• USB debugging: run  adb forward tcp:${prefs.port} tcp:${prefs.port}  then open http://localhost:${prefs.port}.\n" +
                 "• Bluetooth: pair, enable Bluetooth tethering (low frame rate).\n" +
                 "• Or join the phone's own hotspot from your laptop."

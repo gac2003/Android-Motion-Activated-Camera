@@ -12,6 +12,19 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 object Ui {
+    /** Screen width in dp. */
+    fun widthDp(ctx: Context): Float = ctx.resources.displayMetrics.widthPixels / ctx.resources.displayMetrics.density
+
+    /**
+     * Keeps a settings-style page at a readable width on tablets (>= 700 dp); phones are unaffected.
+     * Call with the content view placed inside a ScrollView.
+     */
+    fun capWidth(content: View) {
+        val ctx = content.context
+        if (widthDp(ctx) < 700f) return
+        content.layoutParams = android.widget.FrameLayout.LayoutParams(dp(ctx, 640), -2, Gravity.CENTER_HORIZONTAL)
+    }
+
     const val BG = 0xFF101114.toInt()
     const val PANEL = 0xCC15171B.toInt()
     const val ACCENT = 0xFFFFC107.toInt()   // "auto" yellow, like Samsung Pro mode
@@ -68,9 +81,56 @@ fun topBar(a: android.app.Activity, title: String, right: View? = null): LinearL
             setPadding(Ui.dp(a, 8), 0, Ui.dp(a, 16), Ui.dp(a, 4))
             setOnClickListener { a.finish() }
         })
-        addView(Ui.label(a, title, 20f), LinearLayout.LayoutParams(0, -2, 1f))
+        addView(Ui.label(a, title, 20f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END },
+            LinearLayout.LayoutParams(0, -2, 1f))
         if (right != null) addView(right)
     }
+
+/**
+ * A horizontal bar whose optional buttons drop out (into an overflow menu) only when they don't fit.
+ * Buttons are dropped in reverse order of [collapsible] (least important last in that list). On screens
+ * where everything fits nothing changes.
+ */
+class FitRow(ctx: Context) : LinearLayout(ctx) {
+    /** Buttons that may be hidden, most important first. */
+    val collapsible = ArrayList<View>()
+    /** Width the flexible title needs at minimum (dp). */
+    var titleMinDp = 56
+    var title: View? = null
+    /** Buttons currently hidden; show them in the overflow menu. */
+    var hidden: List<View> = emptyList(); private set
+
+    init { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+
+    private fun natural(c: View): Int {
+        c.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        val lp = c.layoutParams as? MarginLayoutParams
+        return c.measuredWidth + (lp?.leftMargin ?: 0) + (lp?.rightMargin ?: 0)
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        if (View.MeasureSpec.getMode(widthMeasureSpec) != View.MeasureSpec.UNSPECIFIED) {
+            val avail = View.MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
+            var need = Ui.dp(context, titleMinDp)
+            for (i in 0 until childCount) {
+                val c = getChildAt(i)
+                if (c === title || c in collapsible || c.visibility == View.GONE) continue
+                need += natural(c)
+            }
+            val widths = collapsible.map { natural(it) }
+            need += widths.sum()
+            val hide = HashSet<View>()
+            var i = collapsible.lastIndex
+            while (need > avail && i >= 0) { need -= widths[i]; hide += collapsible[i]; i-- }
+            for (c in collapsible) {
+                val v = if (c in hide) View.GONE else View.VISIBLE
+                if (c.visibility != v) c.visibility = v
+            }
+            hidden = collapsible.filter { it in hide }
+        }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+}
 
 /** A Pro-mode control button: small title, value underneath. Yellow value = automatic. */
 class Chip(ctx: Context, val name: String) {

@@ -105,33 +105,46 @@ class ClipsActivity : Activity() {
         val title = collectionId?.let { Collections.get(this, it)?.name } ?: "Clips"
         normalBar = topBar(this, title, actions)
         root.addView(normalBar)
-        selBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        val fit = FitRow(this).apply {
             setBackgroundColor(0xFF2A2416.toInt())
             val p = Ui.dp(this@ClipsActivity, 8)
             setPadding(p, p, p, p)
             visibility = View.GONE
         }
+        selBar = fit
         selBar.addView(Ui.label(this, "✕", 22f).apply {
             setPadding(Ui.dp(this@ClipsActivity, 12), 0, Ui.dp(this@ClipsActivity, 16), 0)
             setOnClickListener { exitSelection() }
         })
-        selTitle = Ui.label(this, "", 18f)
+        selTitle = Ui.label(this, "", 18f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
         selBar.addView(selTitle, LinearLayout.LayoutParams(0, -2, 1f))
+        fit.title = selTitle
+        // label -> action, for buttons that may move into the ⋮ menu on narrow screens
+        val selActions = LinkedHashMap<View, Pair<String, () -> Unit>>()
         fun selAction(t: String, click: () -> Unit) = Ui.chip(this, t).apply { setOnClickListener { click() } }.also {
             selBar.addView(it, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(this@ClipsActivity, 6) })
+            selActions[it] = Pair(t, click)
         }
-        selAction("All") { if (selected.size == clips.size) selected.clear() else clips.forEach { selected += it.id }; updateSelection() }
-        selAction("Add to…") { addSelectedTo() }
-        if (collectionId != null) selAction("Remove") { removeSelectedFromCollection() }
+        val allBtn = selAction("All") { if (selected.size == clips.size) selected.clear() else clips.forEach { selected += it.id }; updateSelection() }
+        val addBtn = selAction("Add to…") { addSelectedTo() }
+        val delBtn = if (collectionId != null) selAction("Remove") { removeSelectedFromCollection() }
         else selAction("Delete") { deleteSelected() }
+        fit.collapsible += listOf(addBtn, delBtn, allBtn)   // "All" is the first to move into ⋮ when space runs out
         lateinit var more: View
         more = iconButton(this, IconDrawable.Kind.MORE, 40, 10) {
             val pm = PopupMenu(this, more)
-            pm.menu.add(0, 1, 0, "Share")
-            if (collectionId != null) pm.menu.add(0, 2, 1, "Delete from phone")
-            pm.setOnMenuItemClickListener { if (it.itemId == 1) shareSelected() else deleteSelected(); true }
+            val overflow = fit.hidden.mapNotNull { selActions[it] }
+            overflow.forEachIndexed { i, a -> pm.menu.add(0, 100 + i, i, a.first) }
+            pm.menu.add(0, 1, 50, "Share")
+            if (collectionId != null) pm.menu.add(0, 2, 51, "Delete from phone")
+            pm.setOnMenuItemClickListener {
+                when (it.itemId) {
+                    1 -> shareSelected()
+                    2 -> deleteSelected()
+                    else -> overflow.getOrNull(it.itemId - 100)?.second?.invoke()
+                }
+                true
+            }
             pm.show()
         }
         selBar.addView(more)
@@ -498,6 +511,8 @@ class ClipsActivity : Activity() {
             }
             addView(iv, FrameLayout.LayoutParams(-1, w * 9 / 16))
             val tv = Ui.label(ctx, "", 11f, Color.WHITE).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
                 setBackgroundColor(0x99000000.toInt())
                 setPadding(Ui.dp(ctx, 6), Ui.dp(ctx, 2), Ui.dp(ctx, 6), Ui.dp(ctx, 2))
             }

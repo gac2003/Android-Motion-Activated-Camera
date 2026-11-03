@@ -38,6 +38,11 @@ class MainActivity : Activity() {
     private lateinit var statusTv: TextView
     private lateinit var infoTv: TextView
     private lateinit var startBtn: TextView
+    private lateinit var bottomBox: LinearLayout
+    private lateinit var strip: HorizontalScrollView
+    private lateinit var stripRow: LinearLayout
+    /** Landscape on a phone: control strip and a compact Start/Stop share one row (more room for the preview). */
+    private var compact: Boolean? = null
     private lateinit var panel: LinearLayout
     private lateinit var valueTv: TextView
     private lateinit var seek: SeekBar
@@ -137,7 +142,33 @@ class MainActivity : Activity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        arrangeBottom()
         frame.post { updateGeometry() }
+    }
+
+    /** Portrait (and tablets): strip, then a full-width button. Landscape phones: one compact row. */
+    private fun arrangeBottom() {
+        val cfg = resources.configuration
+        val want = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE && cfg.smallestScreenWidthDp < 600
+        if (compact == want) return
+        compact = want
+        (strip.parent as? ViewGroup)?.removeView(strip)
+        (startBtn.parent as? ViewGroup)?.removeView(startBtn)
+        (stripRow.parent as? ViewGroup)?.removeView(stripRow)
+        val d = { v: Int -> Ui.dp(this, v) }
+        if (want) {
+            stripRow.addView(strip, LinearLayout.LayoutParams(0, -2, 1f))
+            stripRow.addView(startBtn, LinearLayout.LayoutParams(-2, -2).apply { setMargins(d(6), 0, d(12), 0) })
+            bottomBox.addView(stripRow)
+            startBtn.setPadding(d(18), d(10), d(18), d(10))
+            startBtn.textSize = 14f
+        } else {
+            bottomBox.addView(strip)
+            bottomBox.addView(startBtn, LinearLayout.LayoutParams(-1, -2).apply { setMargins(d(12), d(8), d(12), 0) })
+            startBtn.setPadding(0, d(12), 0, d(12))
+            startBtn.textSize = 16f
+        }
+        if (::statusTv.isInitialized) render(StatusBus.status)
     }
 
     private fun hasCamera() = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
@@ -307,14 +338,13 @@ class MainActivity : Activity() {
         panel.addView(autoBtn)
         bottom.addView(panel)
 
-        val strip = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        strip = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         chipRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(Ui.dp(this@MainActivity, 8), 0, Ui.dp(this@MainActivity, 8), 0)
         }
         buildChips()
         strip.addView(chipRow)
-        bottom.addView(strip)
 
         startBtn = Ui.label(this, "START MONITORING", 16f).apply {
             gravity = Gravity.CENTER
@@ -322,9 +352,9 @@ class MainActivity : Activity() {
             setOnClickListener { onStartStop() }
         }
         Ui.pill(startBtn, 0xFF2E7D32.toInt())
-        bottom.addView(startBtn, LinearLayout.LayoutParams(-1, -2).apply {
-            setMargins(Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 8), Ui.dp(this@MainActivity, 12), 0)
-        })
+        bottomBox = bottom
+        stripRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        arrangeBottom()
         root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
 
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -397,7 +427,7 @@ class MainActivity : Activity() {
             background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = Ui.dp(ctx, 26).toFloat(); setColor(0xF21B1C20.toInt()) }
             isClickable = true   // taps inside the panel must not count as "outside"
         }
-        val grid = GridLayout(ctx).apply { columnCount = 4; minimumHeight = Ui.dp(ctx, 150) }
+        val grid = GridLayout(ctx).apply { columnCount = if (Ui.widthDp(ctx) < 360f) 3 else 4; minimumHeight = Ui.dp(ctx, 150) }
         panel.addView(grid, LinearLayout.LayoutParams(-1, -2))
         panel.addView(Ui.label(ctx, "· · ·", 14f, Ui.GREY).apply { gravity = Gravity.CENTER; setPadding(0, Ui.dp(ctx, 4), 0, Ui.dp(ctx, 4)) },
             LinearLayout.LayoutParams(-1, -2))
@@ -591,7 +621,7 @@ class MainActivity : Activity() {
 
     private fun render(s: Status) {
         val running = CameraService.instance != null
-        startBtn.text = if (running) "STOP MONITORING" else "START MONITORING"
+        startBtn.text = if (compact == true) (if (running) "STOP" else "START") else if (running) "STOP MONITORING" else "START MONITORING"
         Ui.pill(startBtn, if (running) Ui.RED else 0xFF2E7D32.toInt())
         val now = System.currentTimeMillis()
         statusTv.setTextColor(if (s.mode == Mode.RECORDING) Ui.RED else Color.WHITE)

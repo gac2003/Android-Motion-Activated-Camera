@@ -183,6 +183,7 @@ class ClipsActivity : Activity() {
             if (remote == null) pm.menu.add(0, 1, 50, "Share")
             if (collectionId != null && remote == null) pm.menu.add(0, 2, 51, "Delete from phone")
             if (collectionId != null && remote != null) pm.menu.add(0, 3, 51, "Save to phone")
+            if (CloudDelete.canDelete(remote)) pm.menu.add(0, 7, 60, "Delete from cloud")
             if (canMark()) {
                 pm.menu.add(0, 4, 52, "Protect in cloud")
                 pm.menu.add(0, 5, 53, "Remove cloud protection")
@@ -196,6 +197,7 @@ class ClipsActivity : Activity() {
                     4 -> protect(selectedClips(), true)
                     5 -> protect(selectedClips(), false)
                     6 -> openProtected()
+                    7 -> remote?.let { r -> CloudDelete.confirm(this, r, selectedClips().filter { c -> c.id !in missingIds }) { exitSelection(); reload() } }
                     else -> overflow.getOrNull(it.itemId - 100)?.second?.invoke()
                 }
                 true
@@ -542,7 +544,11 @@ class ClipsActivity : Activity() {
         }
         if (remote != null) opts += Opt("Save all $n to this phone", "Copies into Clips; never uploaded again", IconDrawable.Kind.DOWNLOAD, section = "Phone") {
             saveToPhone(h.clips)
-        } else opts += Opt("Delete all $n clips of this day", "From this phone", danger = true, section = "Phone") {
+        }
+        if (CloudDelete.canDelete(remote)) opts += Opt("Delete all $n from the cloud", "Protected clips are kept", danger = true, section = "Cloud") {
+            remote?.let { r -> CloudDelete.confirm(this, r, h.clips.filter { it.id !in missingIds }) { reload() } }
+        }
+        if (remote == null) opts += Opt("Delete all $n clips of this day", "From this phone", danger = true, section = "Phone") {
             AlertDialog.Builder(this).setTitle("Delete $n clips?")
                 .setPositiveButton("Delete") { _, _ -> ClipDeleter.delete(this, h.clips) { reload() } }
                 .setNegativeButton("Cancel", null).show()

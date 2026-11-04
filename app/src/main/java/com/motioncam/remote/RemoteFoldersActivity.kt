@@ -93,9 +93,9 @@ class RemoteFoldersActivity : Activity() {
         val hidden = all.size - shown.size
         if (hidden > 0) note("$hidden FTP/SFTP folder${if (hidden == 1) " is" else "s are"} hidden (Settings → Remote folders).")
         title("How it works")
-        note("Remote folders never change your clips: this device never uploads, renames or deletes them. The only thing it " +
-            "writes is a small \"protected\" mark when you favourite a clip, add it to a collection or protect it, so the " +
-            "camera phone's clean-up keeps it (Collections → Protected in cloud shows all marks). Clips stream " +
+        note("This device never uploads or renames clips in remote folders, and deletes them only when you choose " +
+            "\"Delete from cloud\" (protected clips are always kept). It also writes small \"protected\" marks and the shared " +
+            "collections (Collections → Protected in cloud shows all marks). Clips stream " +
             "when you play them and are kept in a cache (Settings → Remote folders) so replaying and scrubbing are instant. " +
             "Favourites and collections you make here stay on this device.")
         title("Which account to use")

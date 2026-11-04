@@ -746,6 +746,7 @@ class PlayerActivity : Activity() {
         val isProt = com.motioncam.cloud.MarkSync.isProtected(spaces, c.name)
         if (canMark) pm.menu.add(0, 7, 2, if (isProt) "Remove cloud protection" else "Protect in cloud")
         if (remote != null) pm.menu.add(0, 6, 2, "Save to phone")
+        if (CloudDelete.canDelete(remote)) pm.menu.add(0, 8, 9, "Delete from cloud")
         else {
             pm.menu.add(0, 1, 2, "Open in another app")
             pm.menu.add(0, 2, 3, "Share")
@@ -759,6 +760,7 @@ class PlayerActivity : Activity() {
                 }
                 5 -> CollectionPicker.show(this, listOf(c.id), store) {}
                 6 -> saveCurrent(c)
+                8 -> remote?.let { r -> CloudDelete.confirm(this, r, listOf(c)) { removeFromTimeline(c) } }
                 7 -> if (isProt) com.motioncam.cloud.CloudProtect.confirmRemove(this, remote, listOf(c.name))
                      else com.motioncam.cloud.CloudProtect.protect(this, remote, listOf(c.name))
                 1 -> startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(c.uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
@@ -788,6 +790,19 @@ class PlayerActivity : Activity() {
                 Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
             }
         }.start()
+    }
+
+    /** A clip deleted from the cloud: take it out of the timeline and continue with the next one. */
+    private fun removeFromTimeline(c: Clip) {
+        if (com.motioncam.remote.RemoteRepo.entry(c.id) != null) return   // not deleted (e.g. protected)
+        val i = clips.indexOfFirst { it.id == c.id }
+        a.release(); b.release()
+        if (i >= 0) clips.removeAt(i)
+        if (clips.isEmpty()) { finish(); return }
+        strip.clips = clips
+        val ni = i.coerceIn(0, clips.size - 1)
+        strip.setCurrent(ni, strip.expanded)
+        startAt(ni, 0)
     }
 
     private fun deleteCurrent(c: Clip) {

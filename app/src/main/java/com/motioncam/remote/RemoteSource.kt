@@ -75,6 +75,8 @@ class RemoteReader(private val p: CloudProvider) : java.io.Closeable {
      * properties; others: files in ".keep"), never the clips. Read-only for a Dropbox viewer link.
      */
     fun markStore(folder: String): com.motioncam.cloud.MarkStore = com.motioncam.cloud.MarkStore.forProvider(p, folder)
+    /** Deletes a file — only used for "Delete from cloud" that the user confirmed (refused by a viewer link). */
+    fun delete(folder: String, file: RemoteFile) = p.delete(folder, file)
     /** Shared collections of the folder (read-only for a Dropbox viewer link). */
     fun collectionFiles(folder: String) = com.motioncam.cloud.CollectionFiles(p, folder, writable = p !is DropboxLinkProvider)
     /** Dropbox link only: the shared folder's name. */

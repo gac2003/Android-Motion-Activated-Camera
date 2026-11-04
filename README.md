@@ -120,8 +120,9 @@ when) so they can be selected and **protected again** in one go.
 ## Remote folders (view another phone's backups)
 Clips → **Remote folders** opens backup folders from other devices in the normal gallery and timeline player: day
 sections, calendar, **shared collections**, filmstrip and back-to-back playback.
-Clips in them are never uploaded, renamed or deleted; the only thing written is the small **protected** mark
-(see *Protected in cloud*). Dropbox viewer links are fully read-only.
+Clips are never uploaded or renamed there. **Delete from cloud** (selection, day menu or player ⋮; same confirmation as
+on the phone) deletes clips that are not protected, with their thumbnail, marks and collection entries; protected clips
+are always kept. Dropbox viewer links are fully read-only.
 
 * **Google Drive**: sign in on the viewing device with the **same Google account** the recording phone backs up
   to (＋ Add → Google Drive) and pick the folder. Other Google accounts aren't supported, because MotionCam's

@@ -300,6 +300,50 @@ object RemoteRepo {
         }.start()
     }
 
+    class DeleteResult(var deleted: Int = 0, var protectedKept: Int = 0, var failed: Int = 0, var lastError: String? = null)
+
+    /** Protected clips of a remote folder from the last sync (by hand, or in a shared collection). */
+    fun protectedNames(ctx: Context, src: RemoteSource): Set<String> =
+        com.motioncam.cloud.MarkSync.protectedNames(listOf(com.motioncam.cloud.MarkSync.remoteKey(src.id)))
+
+    /**
+     * "Delete from cloud" (confirmed by the user): deletes clips that are not protected, together with their
+     * uploaded thumbnail, protection marks and shared-collection entries. Protection is re-checked right before.
+     */
+    fun deleteFromCloud(ctx: Context, src: RemoteSource, clips: List<Clip>, progress: (Int, Int) -> Unit): DeleteResult {
+        val res = DeleteResult()
+        val space = com.motioncam.cloud.MarkSync.remoteKey(src.id)
+        val fresh = com.motioncam.cloud.MarkSync.syncNow(ctx, space)
+        val prot = fresh.marks.values.filter { it.protected }.map { it.clip }.toSet()
+        RemoteSources.reader(ctx, src).use { r ->
+            val thumbFolder = try { r.listFolders(src.folderId).firstOrNull { it.name == THUMB_FOLDER } } catch (e: Exception) { null }
+            val marks = r.markStore(src.folderId)
+            val shared = r.collectionFiles(src.folderId)
+            clips.forEachIndexed { i, c ->
+                progress(i, clips.size)
+                val e = entries[c.id] ?: run { res.failed++; return@forEachIndexed }
+                if (e.name in prot) { res.protectedKept++; return@forEachIndexed }
+                try {
+                    r.delete(src.folderId, e.file)
+                    if (e.thumb != null && thumbFolder != null) try { r.delete(thumbFolder.id, e.thumb) } catch (_: Exception) {}
+                    try { marks.forget(e.name) } catch (_: Exception) {}
+                    try { shared.forgetClip(e.name) } catch (_: Exception) {}
+                    // this phone's copies of it
+                    File(File(cacheDir(ctx, src.id), "clips"), e.name).delete()
+                    thumbFile(ctx, e).delete()
+                    entries.remove(c.id)
+                    res.deleted++
+                } catch (ex: Exception) { res.failed++; res.lastError = ex.message }
+            }
+        }
+        progress(clips.size, clips.size)
+        lists.remove(src.id)
+        try { refresh(ctx, src) } catch (_: Exception) {}
+        SharedSync.schedule(ctx, src.id, 0)
+        com.motioncam.live.Live.nudge(ctx, src.kind, src.folderId, "clips")
+        return res
+    }
+
     /** Removes everything this device stored for a source (listing, cache, collections). */
     fun forget(ctx: Context, src: RemoteSource) {
         lists.remove(src.id)

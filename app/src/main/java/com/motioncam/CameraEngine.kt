@@ -875,9 +875,10 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         }
         if (jpegDue) {
             lastJpegRun = now
-            val bmp = YuvTools.render(f, if (prefs.streamHd) 1 else 2, recordRotation(), base = true, peaking = false)
+            val hq = FrameHub.hq > 0
+            val bmp = YuvTools.render(f, if (prefs.streamHd || hq) 1 else 2, recordRotation(), base = true, peaking = false)
             val bos = ByteArrayOutputStream(64 * 1024)
-            bmp.compress(Bitmap.CompressFormat.JPEG, if (prefs.streamHd) 65 else 72, bos)
+            bmp.compress(Bitmap.CompressFormat.JPEG, if (hq) 90 else if (prefs.streamHd) 65 else 72, bos)
             FrameHub.publishJpeg(bos.toByteArray())
         }
     }

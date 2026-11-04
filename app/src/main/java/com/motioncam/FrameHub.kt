@@ -13,6 +13,8 @@ object FrameHub {
 
     /** Number of connected MJPEG viewers. JPEGs are only produced while this is > 0. */
     @Volatile var clients = 0
+    /** A high-quality frame was asked for (live connection): full analysis resolution, high JPEG quality. */
+    @Volatile var hq = 0
 
     private val lock = Object()
     private var jpeg: ByteArray? = null

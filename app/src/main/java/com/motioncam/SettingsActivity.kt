@@ -153,6 +153,16 @@ class SettingsActivity : Activity() {
         note("A small peak-motion picture (about 20 KB) per clip, in a \".thumbnails\" subfolder, so another device viewing " +
             "this folder under Clips → Remote folders sees the right frame and clip length without downloading videos.")
 
+        title("Live connection", null)
+        note("Your phones connected through the internet (works on captive / isolated networks): camera status and alerts, " +
+            "a live view, remote control with an optional PIN, and instant sync between phones. Off by default.")
+        box.addView(Ui.chip(this, "Live connection" + if (prefs.liveOn) "  ·  on" else "  ·  off").apply {
+            setOnClickListener { startActivity(Intent(this@SettingsActivity, com.motioncam.live.LiveActivity::class.java)) }
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
+        if (prefs.liveOn) box.addView(Ui.chip(this, "Alerts & notifications").apply {
+            setOnClickListener { startActivity(Intent(this@SettingsActivity, com.motioncam.live.AlertSettingsActivity::class.java)) }
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
+
         title("Remote folders", Prefs.REMOTE_FOLDER_KEYS)
         note("View clips another phone backed up (Clips → cloud icon). Read-only: nothing in those folders is ever changed.")
         toggle("Allow FTP / SFTP servers as remote folders", prefs.remoteFtp) { prefs.remoteFtp = it }

@@ -70,6 +70,27 @@ class SyncStatusActivity : Activity() {
         })
         line(if (waiting == 0) "All changes sent." else "$waiting change${if (waiting == 1) "" else "s"} waiting to be sent.")
         if (!editable) note("Opened through a viewer link: collections can be seen here but only changed by the account's own phones.")
+        // live connection: what the other phones have not sent yet (so you know where a change is stuck)
+        val src = RemoteSources.get(this, srcId)
+        if (src != null && com.motioncam.live.Live.enabled(this)) {
+            val key = com.motioncam.live.Live.folderKey(src.kind, src.folderId)
+            val me = com.motioncam.cloud.Device.id(this)
+            val others = com.motioncam.live.Live.phones.values.filter { it.id != me && it.sync.has(key) }
+            if (others.isNotEmpty()) {
+                title("Other phones")
+                for (p in others) {
+                    val o = p.sync.getJSONObject(key)
+                    val last = o.optLong("last")
+                    line("${p.name.ifEmpty { "Phone" }}${if (p.online) "" else " (offline)"}: " +
+                        (if (o.optInt("pending") == 0) "all changes sent" else "${o.optInt("pending")} change(s) not sent yet") +
+                        (if (o.optInt("conflicts") > 0) " · ${o.optInt("conflicts")} conflict(s) to decide there" else "") +
+                        (if (last > 0) " · synced " + Fmt.t(prefs, last, seconds = false) else "") +
+                        o.optString("error").takeIf { it.isNotEmpty() }?.let { " · last error: $it" }.orEmpty())
+                }
+                note("Changes from another phone appear here once it is online and has sent them. Phones sync with each other " +
+                    "within seconds while the live connection is on.")
+            }
+        }
 
         if (s.conflicts.isNotEmpty()) {
             title("Needs your decision (${s.conflicts.size})")

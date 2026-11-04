@@ -176,6 +176,7 @@ object MarkSync {
         val me = Device.id(ctx)
         val myName = Device.name(ctx)
         val marks = store.load().toMutableMap()
+        var wrote = false
         val overridden = HashSet<String>()
         if (store.writable) {
             val want = desired(ctx, space).filterKeys { it in existing }
@@ -185,13 +186,13 @@ object MarkSync {
                 val asked = intentAt(ctx, space, name)
                 if (cm != null && cm.overrideAt > 0) {
                     if (cm.overrideAt >= asked) { overridden += name; continue }   // removed after we asked: respect it
-                    store.clearOverride(name)                                         // asked again after the override
+                    store.clearOverride(name); wrote = true                           // asked again after the override
                     cm.overrideAt = 0; cm.overrideBy = null
                 }
                 val mine = cm?.marks?.firstOrNull { it.device == me }
                 val m = Mark(me, myName, why.first, why.second, now)
                 if (!m.sameReasons(mine) || mine?.deviceName != myName) {
-                    store.put(name, me, m)
+                    store.put(name, me, m); wrote = true
                     val c = marks.getOrPut(name) { ClipMarks(name) }
                     c.marks.removeAll { it.device == me }
                     c.marks += m
@@ -200,7 +201,7 @@ object MarkSync {
             for (cm in marks.values) {
                 if (cm.clip in want.keys && cm.clip !in overridden) continue
                 if (cm.marks.any { it.device == me }) {
-                    store.put(cm.clip, me, null)
+                    store.put(cm.clip, me, null); wrote = true
                     cm.marks.removeAll { it.device == me }
                 }
             }
@@ -213,6 +214,7 @@ object MarkSync {
             cm.marks.addAll(live)
             if (live.isEmpty()) overridden += clip
         }
+        if (wrote) nudge(ctx, space, "marks")
         val r = Result(marks.filterValues { it.protected || it.overrideAt > 0 }, existing, overridden, store.writable)
         synchronized(this) { cache[space] = r }
         return r
@@ -263,6 +265,16 @@ object MarkSync {
         return out
     }
 
+    /** Live connection: tell the other phones the protections of this folder changed. */
+    private fun nudge(ctx: Context, space: String, what: String) {
+        try {
+            if (space.startsWith("b:")) {
+                val k = CloudKind.of(space.substring(2)) ?: return
+                CloudConfig(ctx, k).folderId?.let { com.motioncam.live.Live.nudge(ctx, k, it, what) }
+            } else RemoteSources.get(ctx, space.substring(2))?.let { com.motioncam.live.Live.nudge(ctx, it.kind, it.folderId, what) }
+        } catch (_: Exception) {}
+    }
+
     /** Removes the protection of [names] for everyone (any device can). */
     fun override(ctx: Context, space: String, names: Collection<String>): Result {
         val by = Device.name(ctx)
@@ -277,6 +289,7 @@ object MarkSync {
             val src = RemoteSources.get(ctx, space.substring(2)) ?: throw CloudException("Folder removed", CloudException.Kind.NOT_FOUND)
             RemoteSources.reader(ctx, src).use { r -> open(r.markStore(src.folderId)) }
         }
+        nudge(ctx, space, "marks")
         return syncNow(ctx, space)
     }
 

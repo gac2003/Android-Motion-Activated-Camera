@@ -280,7 +280,10 @@ object SharedSync {
                 migrate(ctx, id)
                 var cloud = files.load()
                 detectConflicts(ctx, id, cloud)
-                if (files.writable && push(ctx, id, files)) cloud = files.load()
+                if (files.writable && push(ctx, id, files)) {
+                    cloud = files.load()
+                    com.motioncam.live.Live.nudge(ctx, src.kind, src.folderId, "collections")   // other phones sync now
+                }
                 synchronized(this) {
                     val s = state(ctx, id)
                     s.cols.clear()
@@ -301,6 +304,8 @@ object SharedSync {
         }
         com.motioncam.cloud.MarkSync.schedule(ctx, com.motioncam.cloud.MarkSync.remoteKey(id))
         for (l in listeners) try { l(id) } catch (_: Exception) {}
+        com.motioncam.live.Live.publishDevice(ctx)   // other phones see this phone's unsent changes / conflicts
+        state(ctx, id).conflicts.size.let { n -> if (n > 0) com.motioncam.live.Alerts.syncConflict(ctx, src.name, n) }
     }
 
     /** Holds queued changes that clash with what other phones did, and records a conflict for the user. */

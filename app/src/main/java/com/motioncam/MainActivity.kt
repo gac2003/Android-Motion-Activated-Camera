@@ -124,9 +124,12 @@ class MainActivity : Activity() {
         if (selected != null) configurePanel()
         ui.post(ticker)
         ShortClipBus.listener = { id, len -> ui.post { offerUndo(id, len) } }
+        com.motioncam.live.RemoteSettings.listeners += remoteChanged
+        liveChip?.visibility = if (prefs.liveOn) View.VISIBLE else View.GONE
     }
 
     override fun onPause() {
+        com.motioncam.live.RemoteSettings.listeners -= remoteChanged
         ShortClipBus.listener = null
         finishDiscard()   // leaving the screen: the decision stands
         resumed = false
@@ -264,6 +267,9 @@ class MainActivity : Activity() {
     // ------------------------------------------------------------------ UI construction
 
     private lateinit var rootLayout: FrameLayout
+    private var liveChip: View? = null
+    /** Settings changed from another phone (live connection): show them. */
+    private val remoteChanged: () -> Unit = { ui.post { if (resumed) { refreshChips(); if (selected != null) configurePanel() } } }
     private var topBarView: View? = null
 
     // ------------------------------------------------------------------ short clip from a manual stop: Undo
@@ -379,6 +385,12 @@ class MainActivity : Activity() {
         texts.addView(statusTv)
         texts.addView(infoTv)
         top.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+        liveChip = Ui.chip(this, "Cameras").apply {
+            setOnClickListener { startActivity(Intent(this@MainActivity, com.motioncam.live.LiveActivity::class.java)) }
+            visibility = if (prefs.liveOn) View.VISIBLE else View.GONE
+        }
+        top.addView(liveChip)
+        top.addView(Space(this), Ui.dp(this, 6), 1)
         top.addView(Ui.chip(this, "Clips").apply { setOnClickListener { startActivity(Intent(this@MainActivity, ClipsActivity::class.java)) } })
         top.addView(Space(this), Ui.dp(this, 6), 1)
         top.addView(Ui.chip(this, "Settings").apply { setOnClickListener { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) } })

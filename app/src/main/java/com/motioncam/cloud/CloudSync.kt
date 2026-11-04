@@ -564,6 +564,7 @@ object CloudSync {
         // a clip that should be kept (protected collection / by hand): mark it in the cloud right away
         val space = MarkSync.backupKey(cfg.kind)
         if (isProtected(ctx, cfg, clip.id) || clip.name in MarkSync.manual(ctx, space)) MarkSync.schedule(ctx, space)
+        cfg.folderId?.let { com.motioncam.live.Live.nudge(ctx, cfg.kind, it, "clips") }   // viewing phones refresh now
         afterUpload(ctx, clip)
     }
 
@@ -747,7 +748,10 @@ object CloudSync {
         val existing = listing(cfg, p, folder).keys.filter { isOurClip(it) }.toSet()
         // clips in the shared collections other phones keep in this folder count as protected too
         val r = MarkSync.sync(ctx, MarkSync.backupKey(cfg.kind), MarkStore.forProvider(p, folder), existing, MarkSync.sharedMarks(shared.load()))
-        return r.marks.values.filter { it.protected }.map { it.clip }.toSet()
+        // a clip whose protection was just removed is kept 24 h more, so phones that had it in a collection
+        // have time to save a copy before the clean-up may delete it
+        val grace = System.currentTimeMillis() - 24 * 3_600_000L
+        return r.marks.values.filter { it.protected || it.overrideAt > grace }.map { it.clip }.toSet()
     }
 
     /** Clips pinned by protected collections before cloud marks existed stay protected (now as marks). */

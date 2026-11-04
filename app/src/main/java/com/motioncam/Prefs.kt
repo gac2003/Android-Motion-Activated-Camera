@@ -125,6 +125,34 @@ class Prefs(ctx: Context) {
     /** Filmstrip frame density (pinch), 1 = one frame per second. */
     var stripZoom: Float get() = f("stripZoom", 1f); set(v) = put("stripZoom", v)
 
+    // ---- live connection (Firebase) ----
+    var liveOn: Boolean get() = b("liveOn", false); set(v) = put("liveOn", v)
+    /** Viewer: keep the connection in the background (silent notification) so alerts arrive with the app closed. */
+    var liveStay: Boolean get() = b("liveStay", false); set(v) = put("liveStay", v)
+    /** Camera: the remote-control PIN also protects the live view / frames. */
+    var livePinForView: Boolean get() = b("livePinForView", false); set(v) = put("livePinForView", v)
+    // alerts on viewing phones
+    var alertsOn: Boolean get() = b("alertsOn", true); set(v) = put("alertsOn", v)
+    var alertMotion: Boolean get() = b("alertMotion", true); set(v) = put("alertMotion", v)
+    /** Minutes between motion alerts per camera; motion in between updates the same alert silently. */
+    var alertMotionGapMin: Int get() = i("alertMotionGapMin", 5); set(v) = put("alertMotionGapMin", v)
+    var alertClip: Boolean get() = b("alertClip", false); set(v) = put("alertClip", v)
+    var alertBattery: Boolean get() = b("alertBattery", true); set(v) = put("alertBattery", v)
+    var alertBatteryPct: Int get() = i("alertBatteryPct", 20); set(v) = put("alertBatteryPct", v)
+    var alertCharger: Boolean get() = b("alertCharger", true); set(v) = put("alertCharger", v)
+    var alertHot: Boolean get() = b("alertHot", true); set(v) = put("alertHot", v)
+    var alertOffline: Boolean get() = b("alertOffline", true); set(v) = put("alertOffline", v)
+    var alertOfflineMin: Int get() = i("alertOfflineMin", 3); set(v) = put("alertOfflineMin", v)
+    var alertBackOnline: Boolean get() = b("alertBackOnline", true); set(v) = put("alertBackOnline", v)
+    var alertMonitoring: Boolean get() = b("alertMonitoring", true); set(v) = put("alertMonitoring", v)
+    var alertSync: Boolean get() = b("alertSync", false); set(v) = put("alertSync", v)
+    var quietOn: Boolean get() = b("quietOn", false); set(v) = put("quietOn", v)
+    /** Minutes after midnight. */
+    var quietFrom: Int get() = i("quietFrom", 22 * 60); set(v) = put("quietFrom", v)
+    var quietTo: Int get() = i("quietTo", 7 * 60); set(v) = put("quietTo", v)
+    /** During quiet hours: 0 = alerts arrive silently, 1 = only "camera offline" alerts arrive (silently), 2 = none. */
+    var quietMode: Int get() = i("quietMode", 0); set(v) = put("quietMode", v)
+
     // ---- remote view ----
     var serverOn: Boolean get() = b("serverOn", false); set(v) = put("serverOn", v)
     var streamHd: Boolean get() = b("streamHd", false); set(v) = put("streamHd", v)
@@ -150,9 +178,12 @@ class Prefs(ctx: Context) {
         val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal", "cloudThumbs")
         val REMOTE_FOLDER_KEYS = listOf("remoteFtp", "remoteKeepCopy")
         val PLAYER_KEYS = listOf("skipMs", "stripZoom")
+        val ALERT_KEYS = listOf("alertsOn", "alertMotion", "alertMotionGapMin", "alertClip", "alertBattery", "alertBatteryPct",
+            "alertCharger", "alertHot", "alertOffline", "alertOfflineMin", "alertBackOnline", "alertMonitoring", "alertSync",
+            "quietOn", "quietFrom", "quietTo", "quietMode")
         val CAMERA_KEYS = listOf("camera", "exposureAuto", "evIndex", "iso", "shutterNs", "focusAuto", "focusPos",
             "wbAuto", "wbKelvin", "zoom", "chipLayout")
         /** Everything except the web password (so you are not locked out of the viewer). */
-        val ALL_KEYS = PREVIEW_KEYS + RECORDING_KEYS + MOTION_KEYS + STORAGE_KEYS + PROTECTION_KEYS + REMOTE_KEYS + CLOUD_KEYS + REMOTE_FOLDER_KEYS + PLAYER_KEYS + CAMERA_KEYS
+        val ALL_KEYS = PREVIEW_KEYS + RECORDING_KEYS + MOTION_KEYS + STORAGE_KEYS + PROTECTION_KEYS + REMOTE_KEYS + CLOUD_KEYS + REMOTE_FOLDER_KEYS + PLAYER_KEYS + ALERT_KEYS + CAMERA_KEYS
     }
 }

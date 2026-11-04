@@ -15,11 +15,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- optional "Stay connected" for camera alerts while the app is closed -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <uses-feature android:name="android.hardware.camera" android:required="true" />
 
     <application
+        android:name=".MotionCamApp"
         android:allowBackup="false"
         android:label="MotionCam"
         android:usesCleartextTraffic="true"
@@ -44,6 +47,15 @@
         <activity android:name=".remote.RemoteFoldersActivity" android:exported="false" />
         <activity android:name=".cloud.ProtectedActivity" android:exported="false" />
         <activity android:name=".remote.SyncStatusActivity" android:exported="false" />
+        <activity android:name=".live.LiveActivity" android:exported="false" />
+        <activity android:name=".live.RemoteCameraActivity" android:exported="false" />
+        <activity android:name=".live.ActivityLogActivity" android:exported="false" />
+        <activity android:name=".live.AlertSettingsActivity" android:exported="false" />
+        <receiver android:name=".live.AlertActionReceiver" android:exported="false" />
+        <service
+            android:name=".live.LiveService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <service
             android:name=".cloud.CloudJobService"
             android:exported="false"

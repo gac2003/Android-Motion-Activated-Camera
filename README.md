@@ -36,6 +36,8 @@ A motion-triggered security camera for Android (built for a Galaxy S20 FE, works
 * Runs as a foreground service so it keeps working with the screen off.
 * **Remote viewing without Wi-Fi/LAN**: built-in web page with live MJPEG + clip download, reachable over USB tethering, `adb forward`, Bluetooth tethering or the phone's own hotspot.
 * Protects the phone (all optional): pauses the camera when hot, stops when the battery is low, can delete old clips.
+* **Live connection** (optional): your phones connected through the internet, also on captive / isolated networks – camera
+  status and alerts, live view, remote control and instant sync between phones.
 * **Remote folders**: watch the clips another phone backs up (Google Drive, Dropbox, FTP/SFTP) in the same gallery and timeline player, and protect the ones you want kept.
 
 | Pro controls & focus peaking | Clips gallery | Timeline player | Collections |
@@ -151,6 +153,28 @@ Clips in them are never uploaded, renamed or deleted; the only thing written is 
 * Clips stream when played (FTP/SFTP download first) and are cached (up to 1.5 GB) so replaying is instant.
   **Save to phone** copies clips into this phone's Clips; those copies are never uploaded to cloud backup and are
   never deleted by the phone's automatic clean-up (age limit, size cap, low storage) – only when you delete them.
+
+## Live connection (optional)
+Settings → **Live connection** links your phones through Firebase (Google's realtime database, free tier). Phones only
+make outgoing connections, so it works on captive Wi-Fi and networks that block local devices.
+
+* **Join**: sign in with the same **Google account** on every phone (basic profile only), or use a **network code**
+  (no Google account; everything is encrypted with the code). The phone list shows which phones are connected.
+* **Camera phones** (while monitoring) share their status – monitoring / recording, battery, charging, temperature, last
+  motion, lens and format – and events: motion, clip saved, monitoring stopped (and why), too hot, charger unplugged.
+* **Other phones** get alerts that don't nag: one motion alert per camera per N minutes (more motion updates it
+  silently), battery once below a threshold, "offline" only after N minutes and only for a camera that was monitoring,
+  quiet hours, per-camera mute (also from the alert), a separate Android channel per alert type for sound/vibration.
+  Alerts arrive while MotionCam is open; **Stay connected** (silent notification) keeps them coming when it is closed.
+* **Remote camera**: low-rate live view (a frame every 2 s, only while watched, stops after 3 min), a **high-quality
+  frame** on request, the camera controls (lens, exposure, ISO, shutter, focus, white balance, zoom), recording and
+  motion settings, pause / resume / stop monitoring, and the camera's **Activity** log (7 days).
+* **PIN**: a camera can require a PIN for controls and settings (optionally also for the live view). Requests are
+  signed with it, it is never sent; 5 wrong PINs lock remote control for 10 minutes.
+* **Sync**: a change to shared collections, protections or new clips nudges the other phones, which sync within seconds.
+  Sync status shows which phone still has unsent changes or a conflict to decide.
+* Builds from this repository use the author's Firebase project (its free tier is shared by everyone using it). To use
+  your own, change the values in `live/LiveNet.kt` (`LiveConfig`) and publish the database rules shown there.
 
 ## Remote viewing
 The web viewer password is shown/changed in Settings (user name: `admin`). The app lists the phone's addresses, e.g. `http://192.168.42.129:8080`.

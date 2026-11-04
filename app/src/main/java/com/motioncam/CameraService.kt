@@ -56,9 +56,10 @@ class CameraService : Service() {
         StatusBus.add(statusListener)
         com.motioncam.cloud.CloudSync.kick(this)   // resume any pending cloud uploads
         val e = EngineHost.acquire(this, "service")
-        e.onMonitoringStopped = { why -> main.post { shutdownWithMessage(why) } }
+        e.onMonitoringStopped = { why -> main.post { com.motioncam.live.CameraLink.safetyStop(this, why); shutdownWithMessage(why) } }
         e.setMonitoring(true)
         engine = e
+        com.motioncam.live.CameraLink.start(this)   // live connection (status, alerts, remote control), if turned on
         reloadServer()
         return START_NOT_STICKY
     }
@@ -104,6 +105,8 @@ class CameraService : Service() {
 
     /** [manual] = the user stopped monitoring (button or notification), not a safety stop. */
     private fun shutdown(manual: Boolean = false) {
+        if (manual) com.motioncam.live.CameraLink.event(this, "monitor_off", "Monitoring stopped on the camera phone")
+        com.motioncam.live.CameraLink.stop(this)
         StatusBus.remove(statusListener)
         engine?.let {
             it.onMonitoringStopped = null

@@ -260,7 +260,10 @@ object Live {
         // the camera phone itself: protections / collections affect its clean-up
         for (k in CloudKind.values()) {
             val f = CloudConfig(ctx, k).folderId ?: continue
-            if (folderKey(k, f) == key) com.motioncam.cloud.MarkSync.schedule(ctx, com.motioncam.cloud.MarkSync.backupKey(k))
+            if (folderKey(k, f) != key) continue
+            com.motioncam.cloud.MarkSync.schedule(ctx, com.motioncam.cloud.MarkSync.backupKey(k))
+            // clips deleted from the cloud on another phone: forget them as "backed up" so they can be uploaded again
+            if (what == "clips") Thread { try { com.motioncam.cloud.CloudSync.reconcile(ctx, k) } catch (_: Exception) {} }.start()
         }
     }
 }

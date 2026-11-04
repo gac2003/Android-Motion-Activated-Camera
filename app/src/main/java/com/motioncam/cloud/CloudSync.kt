@@ -151,8 +151,37 @@ object CloudSync {
         return true
     }
 
+    /**
+     * Brings "what is backed up" in line with what is really in the backup folder: clips deleted from the cloud
+     * (e.g. "Delete from cloud" on another phone) are forgotten, so they can be uploaded again. Network; returns how
+     * many were forgotten (0 if the folder could not be read — nothing is changed then).
+     */
+    fun reconcile(ctx: Context, kind: CloudKind): Int {
+        val cfg = CloudConfig(ctx, kind)
+        val folder = cfg.folderId ?: return 0
+        if (!cfg.isConfigured) return 0
+        val files = try { providerFor(ctx, kind).use { p -> p.list(folder) } } catch (e: Exception) { return 0 }
+        val names = files.map { it.name }.toHashSet()
+        synchronized(lock) {
+            load(ctx)
+            listings[kind] = Listing(System.currentTimeMillis(), java.util.concurrent.ConcurrentHashMap(files.associateBy { it.name }))
+            val before = index!!.size
+            index!!.removeAll { it.kind == kind && it.name !in names }
+            val gone = before - index!!.size
+            if (gone > 0) save(ctx)
+            return gone
+        }
+    }
+
+    /** [reconcile] for every set-up destination, in the background. */
+    fun reconcileAsync(ctx: Context) {
+        val app = ctx.applicationContext
+        Thread { for (k in CloudKind.values()) try { reconcile(app, k) } catch (_: Exception) {} }.start()
+    }
+
     /** Queues existing clips newer than [sinceMs] (0 = all), oldest first. Returns how many were added. */
     fun enqueueExisting(ctx: Context, kind: CloudKind, sinceMs: Long): Int {
+        reconcile(ctx, kind)   // clips deleted from the cloud meanwhile are uploaded again
         val clips = ClipStore.list(ctx).filter { it.startMs >= sinceMs }.sortedBy { it.startMs }
         var n = 0
         synchronized(lock) {
@@ -170,6 +199,7 @@ object CloudSync {
     /** Queues these clips for every enabled destination ("Back up all"); already backed up / queued ones are skipped. */
     fun enqueueClips(ctx: Context, clipIds: List<Long>): EnqueueResult {
         val kinds = enabledKinds(ctx)
+        for (k in kinds) reconcile(ctx, k)   // clips deleted from the cloud meanwhile are uploaded again
         var queued = 0; var already = 0; var saved = 0
         synchronized(lock) {
             load(ctx)

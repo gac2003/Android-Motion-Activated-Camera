@@ -574,16 +574,23 @@ class ClipsActivity : Activity() {
         OptionSheet.show(this, dayLabel(h.dayStart), opts, subtitle = "$n clips · ${durText(h.clips.sumOf { it.durationMs })}")
     }
 
-    /** Collapses / expands a day and keeps its header where the user is looking. */
+    /**
+     * Collapses / expands a day. The tapped header stays exactly where it is on screen, so what is above it (the end of
+     * the previous day) stays in view. Only when it was tapped as the pinned copy (its own header scrolled away) does
+     * the day move to the top.
+     */
     private fun toggleDay(day: Long) {
+        val oldPos = rows.indexOfFirst { it is Row.Header && it.dayStart == day }
+        val i = oldPos - list.firstVisiblePosition
+        val top = if (oldPos >= 0 && i in 0 until list.childCount) list.getChildAt(i).top.coerceAtLeast(0) else 0
         if (!collapsed.remove(day)) collapsed += day
         buildRows()
-        scrollToDay(day)
+        scrollToDay(day, top)
     }
 
-    private fun scrollToDay(day: Long) {
+    private fun scrollToDay(day: Long, top: Int = 0) {
         val pos = rows.indexOfFirst { it is Row.Header && it.dayStart == day }
-        if (pos >= 0) list.post { list.setSelectionFromTop(pos, 0); updatePinned() }
+        if (pos >= 0) list.post { list.setSelectionFromTop(pos, top); updatePinned() }
     }
 
     // ------------------------------------------------------------------ day headers (list + sticky copy)

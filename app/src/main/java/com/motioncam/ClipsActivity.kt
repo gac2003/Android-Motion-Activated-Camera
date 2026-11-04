@@ -126,9 +126,6 @@ class ClipsActivity : Activity() {
             fun add(kind: IconDrawable.Kind, label: String, tint: Int = 0xFFFFFFFF.toInt(), click: () -> Unit) =
                 addView(labeledButton(this@ClipsActivity, kind, label, tint, click), LinearLayout.LayoutParams(0, -2, 1f))
             if (remote != null) add(IconDrawable.Kind.REFRESH, "Refresh") { refreshRemote(quiet = false) }
-            if (collectionId == null && remote == null) add(IconDrawable.Kind.CLOUD, "Remote folders") {
-                startActivity(Intent(this@ClipsActivity, com.motioncam.remote.RemoteFoldersActivity::class.java))
-            }
             if (collectionId == null) add(IconDrawable.Kind.FOLDER, "Collections") {
                 startActivity(Intent(this@ClipsActivity, CollectionsActivity::class.java).putExtra(CollectionsActivity.EXTRA_REMOTE, remote?.id))
             }
@@ -140,14 +137,25 @@ class ClipsActivity : Activity() {
                 CollectionActions.backUpAll(this@ClipsActivity, clips)
             }
             add(IconDrawable.Kind.CALENDAR, "Calendar") { showCalendar() }
-            add(IconDrawable.Kind.PLAY, "Timeline", Ui.ACCENT) {
+            add(IconDrawable.Kind.PLAY, "Timeline") {
                 // newest day, from its first clip
                 val h = rows.firstOrNull { it is Row.Header } as Row.Header?
                 h?.clips?.minByOrNull { it.startMs }?.let { play(it) }
             }
         }
         val title = collectionId?.let { store.get(this, it)?.name } ?: remote?.name ?: "Clips"
-        normalBar = topBar(this, title)
+        // Remote folders is a destination of its own: a wide button in the title bar (phone's own clips only)
+        val remoteBtn = if (collectionId == null && remote == null) Ui.chip(this, "Remote folders").apply {
+            val d = Ui.dp(this@ClipsActivity, 20)
+            setCompoundDrawablesRelative(IconDrawable(IconDrawable.Kind.CLOUD).apply { setBounds(0, 0, d, d) }, null, null, null)
+            compoundDrawablePadding = Ui.dp(this@ClipsActivity, 8)
+            gravity = Gravity.CENTER_VERTICAL
+            background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x40FFFFFF), background, null)
+            contentDescription = "Remote folders"
+            setOnClickListener { startActivity(Intent(this@ClipsActivity, com.motioncam.remote.RemoteFoldersActivity::class.java)) }
+            pressFeedback(this)
+        } else null
+        normalBar = topBar(this, title, remoteBtn)
         root.addView(normalBar)
         // selection mode, like Google Photos / Files: the top bar shows what is selected (count, size, length),
         // the actions slide up in a bar at the bottom (icon + label, ⋮ More for the rest)

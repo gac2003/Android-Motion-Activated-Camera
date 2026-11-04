@@ -12,7 +12,7 @@ import android.widget.ImageView
 
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
-    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, VIDEOCAM, NETWORK }
+    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, VIDEOCAM, NETWORK, LIVE }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -98,6 +98,27 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 c.drawRoundRect(RectF(3.5f, 5.5f, 20.5f, 18.5f), 2.5f, 2.5f, stroke)
                 path.moveTo(10f, 9f); path.lineTo(15.5f, 12f); path.lineTo(10f, 15f); path.close()
                 c.drawPath(path, fill)
+            }
+            Kind.LIVE -> {
+                // live connection: a cloud with a camera lens in it, and a signal
+                stroke.strokeWidth = 2f
+                c.save(); c.translate(0f, 1.5f)
+                path.moveTo(7f, 18.5f)
+                path.cubicTo(4.2f, 18.5f, 2.5f, 16.6f, 2.5f, 14.3f)
+                path.cubicTo(2.5f, 12f, 4.3f, 10.2f, 6.6f, 10.2f)
+                path.cubicTo(7.3f, 7.2f, 9.6f, 5.5f, 12.3f, 5.5f)
+                path.cubicTo(15.6f, 5.5f, 18.2f, 8f, 18.4f, 11.2f)
+                path.cubicTo(20.2f, 11.5f, 21.5f, 13f, 21.5f, 14.9f)
+                path.cubicTo(21.5f, 16.9f, 19.9f, 18.5f, 17.9f, 18.5f)
+                path.close()
+                c.drawPath(path, stroke)
+                stroke.strokeWidth = 1.8f
+                c.drawCircle(12f, 13.4f, 3.2f, stroke)
+                c.drawCircle(12f, 13.4f, 1.1f, fill)
+                c.restore()
+                stroke.strokeWidth = 1.8f
+                c.drawArc(RectF(15.9f, 2.4f, 21.1f, 7.6f), -90f, 90f, false, stroke)
+                c.drawArc(RectF(13.5f, 0f, 23.5f, 10f), -90f, 90f, false, stroke)
             }
             Kind.NETWORK -> {
                 // three linked devices (filled nodes, connecting lines): "your phones connected"

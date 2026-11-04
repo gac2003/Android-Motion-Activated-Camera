@@ -125,9 +125,8 @@ class MainActivity : Activity() {
         ui.post(ticker)
         ShortClipBus.listener = { id, len -> ui.post { offerUndo(id, len) } }
         com.motioncam.live.RemoteSettings.listeners += remoteChanged
-        liveChip?.visibility = if (prefs.liveOn) View.VISIBLE else View.GONE
         // unread camera alerts: the Cameras icon turns yellow
-        (liveChip as? ImageView)?.setImageDrawable(IconDrawable(IconDrawable.Kind.NETWORK,
+        (liveChip as? ImageView)?.setImageDrawable(IconDrawable(IconDrawable.Kind.LIVE,
             if (prefs.liveOn && com.motioncam.live.AlertInbox.unread(this) > 0) Ui.ACCENT else 0xFFFFFFFF.toInt()))
     }
 
@@ -413,9 +412,9 @@ class MainActivity : Activity() {
             contentDescription = name
             tooltipText = name
         }
-        liveChip = action(IconDrawable.Kind.NETWORK, "Live connection (your phones)") {
+        liveChip = action(IconDrawable.Kind.LIVE, "Live connection (your phones)") {
             startActivity(Intent(this@MainActivity, com.motioncam.live.LiveActivity::class.java))
-        }.apply { visibility = if (prefs.liveOn) View.VISIBLE else View.GONE }
+        }
         top.addView(liveChip)
         top.addView(action(IconDrawable.Kind.CLIPS, "Clips") { startActivity(Intent(this@MainActivity, ClipsActivity::class.java)) })
         top.addView(action(IconDrawable.Kind.SETTINGS, "Settings") { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) })

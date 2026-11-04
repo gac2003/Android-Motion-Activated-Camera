@@ -38,6 +38,8 @@ class PlayerActivity : Activity() {
         const val EXTRA_COLLECTION = "collection"
         /** Play a remote folder (read-only). */
         const val EXTRA_REMOTE = "remote"
+        /** After a skip: further taps on that side keep skipping, other taps are ignored, for this long. */
+        private const val SKIP_GUARD_MS = 1000L
     }
 
     private var remote: com.motioncam.remote.RemoteSource? = null
@@ -169,14 +171,15 @@ class PlayerActivity : Activity() {
                 if (vScale > 1.01f && !pinching) { vTx -= dx; vTy -= dy; applyZoom() }
                 return true
             }
-            override fun onSingleTapConfirmed(e: MotionEvent): Boolean { togglePlay(); return true }
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                // touch protection: a stray tap just after skipping never pauses / plays
+                if (System.currentTimeMillis() - lastSkipAt < SKIP_GUARD_MS) return true
+                togglePlay()
+                return true
+            }
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                val w = video.width
-                when {
-                    e.x < w / 3f -> skip(-1)
-                    e.x > w * 2f / 3f -> skip(1)
-                    else -> togglePlay()
-                }
+                // left half = back, right half = forward (a double-tap never pauses / plays)
+                skip(if (e.x < video.width / 2f) -1 else 1)
                 return true
             }
         })
@@ -200,8 +203,8 @@ class PlayerActivity : Activity() {
             sd.onTouchEvent(e)
             // after a double-tap skip, each further quick tap on that side skips again (like YouTube)
             if (e.actionMasked == MotionEvent.ACTION_DOWN && vScale <= 1.01f) {
-                val side = when { e.x < video.width / 3f -> -1; e.x > video.width * 2f / 3f -> 1; else -> 0 }
-                if (side != 0 && side == lastSkipDir && System.currentTimeMillis() - lastSkipAt < 700) {
+                val side = if (e.x < video.width / 2f) -1 else 1
+                if (side == lastSkipDir && System.currentTimeMillis() - lastSkipAt < SKIP_GUARD_MS) {
                     tapSkipping = true
                     skip(side)
                     val cancel = MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }

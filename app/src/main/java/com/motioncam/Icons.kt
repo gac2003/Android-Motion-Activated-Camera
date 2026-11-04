@@ -205,5 +205,28 @@ fun iconButton(ctx: Context, kind: IconDrawable.Kind, sizeDp: Int = 44, padDp: I
         setPadding(p, p, p, p)
         minimumWidth = Ui.dp(ctx, sizeDp)
         minimumHeight = Ui.dp(ctx, sizeDp)
-        if (click != null) setOnClickListener { click() }
+        if (click != null) {
+            setOnClickListener { click() }
+            pressFeedback(this)
+        }
     }
+
+/**
+ * Visible response to a press, even when the tap opens another screen right away: the standard round ripple and a
+ * quick shrink of the icon while the finger is down.
+ */
+fun pressFeedback(v: android.view.View) {
+    if (v.background == null) {
+        val tv = android.util.TypedValue()
+        v.context.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true)
+        if (tv.resourceId != 0) v.setBackgroundResource(tv.resourceId)
+    }
+    v.setOnTouchListener { view, e ->
+        when (e.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.86f).scaleY(0.86f).setDuration(80).start()
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL ->
+                view.animate().scaleX(1f).scaleY(1f).setDuration(140).start()
+        }
+        false   // the click still happens normally
+    }
+}

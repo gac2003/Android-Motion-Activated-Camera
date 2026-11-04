@@ -408,16 +408,18 @@ class MainActivity : Activity() {
         texts.addView(infoTv)
         top.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
         // app-bar actions as icons (name on long-press), so the status text keeps the room it needs
-        fun action(kind: IconDrawable.Kind, name: String, click: () -> Unit) = iconButton(this, kind, 44, 10) { click() }.apply {
+        // 48 dp touch targets (Android's recommended size) with a gap between them, so they are hard to mis-press
+        fun action(kind: IconDrawable.Kind, name: String, click: () -> Unit) = iconButton(this, kind, 48, 12) { click() }.apply {
             contentDescription = name
             tooltipText = name
         }
         liveChip = action(IconDrawable.Kind.LIVE, "Live connection (your phones)") {
             startActivity(Intent(this@MainActivity, com.motioncam.live.LiveActivity::class.java))
         }
-        top.addView(liveChip)
-        top.addView(action(IconDrawable.Kind.CLIPS, "Clips") { startActivity(Intent(this@MainActivity, ClipsActivity::class.java)) })
-        top.addView(action(IconDrawable.Kind.SETTINGS, "Settings") { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) })
+        val gap = { LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(this@MainActivity, 10) } }
+        top.addView(liveChip, gap())
+        top.addView(action(IconDrawable.Kind.CLIPS, "Clips") { startActivity(Intent(this@MainActivity, ClipsActivity::class.java)) }, gap())
+        top.addView(action(IconDrawable.Kind.SETTINGS, "Settings") { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }, gap())
         root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
 
         // bottom pro panel

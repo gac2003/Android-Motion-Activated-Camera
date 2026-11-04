@@ -1,6 +1,6 @@
 # MotionCam Privacy Policy
 
-_Last updated: November 3, 2026 (remote folders)_
+_Last updated: November 4, 2026 (protection marks)_
 
 MotionCam is an open-source Android app that turns a phone into a motion-activated security camera.
 It is a personal project with no company, servers, accounts, advertising or analytics behind it.
@@ -43,7 +43,10 @@ any server run by the developer.
 - Your Google sign-in token is stored **encrypted on your phone** (Android Keystore). It is never sent to the
   developer or any third party.
 - **Remote folders (optional):** another device signed in to the same Google account can use the same
-  `drive.file` access to list and stream (read only) the clips and thumbnails MotionCam uploaded, for playback.
+  `drive.file` access to list and stream the clips and thumbnails MotionCam uploaded, for playback.
+- **Protection marks (optional):** to keep chosen clips from automatic clean-up, MotionCam adds hidden "app
+  properties" to those clip files: the phone's name, the collection names involved and a date. Only MotionCam can
+  see them; they are removed together with the clip or when any of your phones removes the protection.
 
 MotionCam's use and transfer of information received from Google APIs adheres to the
 [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy),
@@ -69,8 +72,12 @@ features you turned on; it is not used for advertising, not sold, not shared wit
 
 - With cloud backup on, a small thumbnail picture of each clip is uploaded next to it (in a `.thumbnails`
   subfolder) so your other devices can show it. This can be turned off in Settings.
-- Remote folders you add are read-only. Clips you play are cached on the viewing phone (deleted automatically
-  when the cache is full, or with "Clear downloaded remote clips"). Collections you make for them stay on that phone.
+- Remote folders never upload, change or delete clips. Clips you play are cached on the viewing phone (deleted
+  automatically when the cache is full, or with "Clear downloaded remote clips"). Collections you make for them stay
+  on that phone.
+- **Protection marks:** protecting a clip (by hand or through a collection) stores a small mark in the backup folder
+  (Google Drive: hidden app properties on the clip; Dropbox/FTP/SFTP: tiny files in a `.keep` subfolder) with the
+  phone's name and collection names, so all your phones can see why a clip is kept. Nothing is sent anywhere else.
 
 ## Your control over your data
 

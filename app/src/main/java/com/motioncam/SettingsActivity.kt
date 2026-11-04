@@ -158,6 +158,10 @@ class SettingsActivity : Activity() {
         toggle("Allow FTP / SFTP servers as remote folders", prefs.remoteFtp) { prefs.remoteFtp = it }
         note("When off, FTP/SFTP folders are hidden and cannot be added. Clips from servers are downloaded fully before " +
             "they play (cloud folders stream).")
+        toggle("Keep a copy on this phone when a clip in my collections loses its cloud protection", prefs.remoteKeepCopy) { prefs.remoteKeepCopy = it }
+        note("Clips you favourite or add to a collection in a remote folder are protected from the camera phone's clean-up. " +
+            "Anyone signed in to the account can remove that protection; this saves such clips to this phone the next time " +
+            "the folder is checked, so your collection keeps them.")
         val cacheMb = com.motioncam.remote.StreamCache.cacheBytes(this) / 1_000_000
         box.addView(Ui.chip(this, "Clear downloaded remote clips  ·  $cacheMb MB").apply {
             setOnClickListener {

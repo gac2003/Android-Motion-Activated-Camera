@@ -66,12 +66,40 @@ class CollectionsActivity : Activity() {
 
     private fun render(cols: List<Pair<ClipCollection, List<Clip>>>) {
         box.removeAllViews()
+        protectedRow()?.let { box.addView(it) }
         for ((c, clips) in cols) box.addView(row(c, clips))
         box.addView(Ui.label(this, (if (remote != null) "These collections are kept on this device only; nothing is written to the remote folder. " else "") +
             "Collections only link to clips: a clip can be in several collections, and removing it " +
             "from one never deletes it. To add clips, hold a clip in Clips to select it, then tap Add to…", 12f, Ui.GREY).apply {
             setPadding(Ui.dp(this@CollectionsActivity, 4), Ui.dp(this@CollectionsActivity, 16), 0, 0)
         })
+    }
+
+    /** "Protected in cloud": every clip any device keeps from the clean-up, and why (where cloud backup is set up). */
+    private fun protectedRow(): View? {
+        val space = remote?.let { com.motioncam.cloud.MarkSync.remoteKey(it.id) }
+        if (space == null && com.motioncam.cloud.MarkSync.localSpaces(this).isEmpty()) return null
+        val ctx = this
+        return LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, Ui.dp(ctx, 8), 0, Ui.dp(ctx, 8))
+            isClickable = true
+            setOnClickListener {
+                startActivity(Intent(ctx, com.motioncam.cloud.ProtectedActivity::class.java).apply {
+                    if (space != null) putExtra(com.motioncam.cloud.ProtectedActivity.EXTRA_SPACE, space)
+                })
+            }
+            val coverW = Ui.dp(ctx, 112)
+            addView(Ui.label(ctx, "\uD83D\uDD12", 26f).apply {
+                gravity = Gravity.CENTER
+                background = GradientDrawable().apply { setColor(0xFF22252A.toInt()); cornerRadius = Ui.dp(ctx, 8).toFloat() }
+            }, LinearLayout.LayoutParams(coverW, coverW * 9 / 16))
+            val texts = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(Ui.dp(ctx, 14), 0, 0, 0) }
+            texts.addView(Ui.label(ctx, "Protected in cloud", 16f, Ui.ACCENT))
+            texts.addView(Ui.label(ctx, "Clips any phone on the account keeps from clean-up, and why", 12f, Ui.GREY))
+            addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+        }
     }
 
     private fun row(c: ClipCollection, clips: List<Clip>): View {

@@ -176,11 +176,19 @@ class ClipsActivity : Activity() {
             if (remote == null) pm.menu.add(0, 1, 50, "Share")
             if (collectionId != null && remote == null) pm.menu.add(0, 2, 51, "Delete from phone")
             if (collectionId != null && remote != null) pm.menu.add(0, 3, 51, "Save to phone")
+            if (canMark()) {
+                pm.menu.add(0, 4, 52, "Protect in cloud")
+                pm.menu.add(0, 5, 53, "Remove my protection")
+                pm.menu.add(0, 6, 54, "Protected in cloud…")
+            }
             pm.setOnMenuItemClickListener {
                 when (it.itemId) {
                     1 -> shareSelected()
                     2 -> deleteSelected()
                     3 -> saveToPhone(selectedClips())
+                    4 -> protect(selectedClips(), true)
+                    5 -> protect(selectedClips(), false)
+                    6 -> openProtected()
                     else -> overflow.getOrNull(it.itemId - 100)?.second?.invoke()
                 }
                 true
@@ -232,6 +240,9 @@ class ClipsActivity : Activity() {
         timeFmt = Fmt.time(prefs)
         banner.visibility = if (canSeeAll() || remote != null) View.GONE else View.VISIBLE
         reload()
+        // protection badges: redraw after this device's marks were synced in the background
+        com.motioncam.cloud.MarkSync.onSynced = { _ -> runOnUiThread { adapter.notifyDataSetChanged(); if (remote == null) reload() } }
+        if (remote == null) com.motioncam.cloud.MarkSync.scheduleLocal(this)
         // remote folder: check for new clips now (if the list is a few minutes old) and every 5 minutes
         if (remote != null) {
             ui.postDelayed(autoRefresh, if (System.currentTimeMillis() - (remote?.lastRefresh ?: 0) > 2 * 60_000L) 0 else 5 * 60_000L)
@@ -239,6 +250,7 @@ class ClipsActivity : Activity() {
     }
 
     override fun onPause() {
+        com.motioncam.cloud.MarkSync.onSynced = null
         ui.removeCallbacks(autoRefresh)
         super.onPause()
     }
@@ -277,10 +289,57 @@ class ClipsActivity : Activity() {
                 summary.text = when {
                     all.isEmpty() && collectionId != null -> "No clips in this collection yet. In Clips, hold a clip to select it, then Add to…"
                     all.isEmpty() -> "No clips yet"
-                    else -> "${all.size} clips · %.1f GB".format(total / 1e9)
+                    else -> "${all.size} clips · %.1f GB".format(total / 1e9) + legend()
                 }
             }
         }.start()
+    }
+
+    // ------------------------------------------------------------------ cloud protection (marks)
+
+    /** Mark spaces this gallery shows: the remote folder, or this phone's backup destinations. */
+    private fun markSpaces(): List<String> = remote?.let { listOf(com.motioncam.cloud.MarkSync.remoteKey(it.id)) }
+        ?: com.motioncam.cloud.MarkSync.localSpaces(this)
+
+    /** Protection can be changed here (not for a read-only Dropbox viewer link). */
+    private fun canMark() = markSpaces().isNotEmpty() && remote?.mode != RemoteSources.MODE_LINK
+
+    /**
+     * Badge for a clip: 🔒 protected in the cloud; ⚠ someone removed the protection although it is in a collection
+     * here; ☁✕ (collections on the camera phone) not in the cloud.
+     */
+    private fun badge(c: Clip): String? {
+        val spaces = markSpaces()
+        if (spaces.isEmpty()) return null
+        val res = spaces.mapNotNull { com.motioncam.cloud.MarkSync.cached(it) }
+        if (res.isEmpty()) return null
+        if (res.any { c.name in it.overridden }) return "⚠"
+        if (res.any { r -> r.marks[c.name]?.protected == true }) return "\uD83D\uDD12"
+        if (collectionId != null && remote == null && res.none { c.name in it.existing }) return "☁✕"
+        return null
+    }
+
+    private fun legend(): String =
+        if (collectionId != null && markSpaces().isNotEmpty())
+            "\n\uD83D\uDD12 protected in cloud  ·  ⚠ protection removed by someone  ·  ☁✕ not in the cloud"
+        else ""
+
+    private fun protect(list: List<Clip>, on: Boolean) {
+        if (list.isEmpty()) return
+        val names = list.map { it.name }
+        for (s in markSpaces()) {
+            if (on) com.motioncam.cloud.MarkSync.intent(this, s, names, manual = true)
+            else com.motioncam.cloud.MarkSync.unprotectManual(this, s, names)
+        }
+        Toast.makeText(this, if (on) "Protecting ${names.size} clip${if (names.size == 1) "" else "s"} in the cloud…"
+            else "Removed this phone's protection (clips in collections stay protected)", Toast.LENGTH_LONG).show()
+        exitSelection()
+    }
+
+    private fun openProtected() {
+        val i = Intent(this, com.motioncam.cloud.ProtectedActivity::class.java)
+        remote?.let { i.putExtra(com.motioncam.cloud.ProtectedActivity.EXTRA_SPACE, com.motioncam.cloud.MarkSync.remoteKey(it.id)) }
+        startActivity(i)
     }
 
     // ------------------------------------------------------------------ remote folder
@@ -337,7 +396,7 @@ class ClipsActivity : Activity() {
             all.isEmpty() -> if (lastError != null) "Could not load this folder (tap for details)" else "No MotionCam clips in this folder yet$ago"
             else -> "${all.size} clips · %.1f GB".format(total / 1e9) + ago +
                 (if (missing > 0) " · $missing no longer in the folder" else "") +
-                (if (lastError != null) " · offline, showing the last list (tap for details)" else "")
+                (if (lastError != null) " · offline, showing the last list (tap for details)" else "") + legend()
         }
     }
 
@@ -648,6 +707,8 @@ class ClipsActivity : Activity() {
                 val label = cell.getChildAt(1) as TextView
                 val check = cell.getChildAt(2) as TextView
                 cell.getChildAt(3).visibility = if (c.id in favIds) View.VISIBLE else View.GONE
+                val b = badge(c)
+                (cell.getChildAt(4) as TextView).apply { text = b ?: ""; visibility = if (b == null) View.GONE else View.VISIBLE }
                 bindThumb(iv, c)
                 label.text = "${timeFmt.format(Date(c.startMs))}  ·  ${durText(c.durationMs)}"
                 val sel = c.id in selected
@@ -709,6 +770,13 @@ class ClipsActivity : Activity() {
             addView(star, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
                 setMargins(Ui.dp(ctx, 8), Ui.dp(ctx, 4), 0, 0)
             })
+            // cloud protection badge (bottom-right, next to the time label)
+            val status = Ui.label(ctx, "", 11f, Color.WHITE).apply {
+                setBackgroundColor(0x99000000.toInt())
+                setPadding(Ui.dp(ctx, 5), Ui.dp(ctx, 2), Ui.dp(ctx, 5), Ui.dp(ctx, 2))
+                visibility = View.GONE
+            }
+            addView(status, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END))
         }
     }
 

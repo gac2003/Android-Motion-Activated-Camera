@@ -114,6 +114,8 @@ class Prefs(ctx: Context) {
     var cloudThumbs: Boolean get() = b("cloudThumbs", true); set(v) = put("cloudThumbs", v)
     /** Allow FTP / SFTP servers as remote folders (Clips → Remote folders). */
     var remoteFtp: Boolean get() = b("remoteFtp", true); set(v) = put("remoteFtp", v)
+    /** When someone removes the cloud protection of a clip in this phone's remote collections, save a copy here. */
+    var remoteKeepCopy: Boolean get() = b("remoteKeepCopy", true); set(v) = put("remoteKeepCopy", v)
     /** All uploads paused from the queue screen. */
     var cloudPaused: Boolean get() = b("cloudPaused", false); set(v) = put("cloudPaused", v)
 
@@ -146,7 +148,7 @@ class Prefs(ctx: Context) {
         val PROTECTION_KEYS = listOf("minBattery", "maxTempC")
         val REMOTE_KEYS = listOf("serverOn", "streamHd", "port")
         val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal", "cloudThumbs")
-        val REMOTE_FOLDER_KEYS = listOf("remoteFtp")
+        val REMOTE_FOLDER_KEYS = listOf("remoteFtp", "remoteKeepCopy")
         val PLAYER_KEYS = listOf("skipMs", "stripZoom")
         val CAMERA_KEYS = listOf("camera", "exposureAuto", "evIndex", "iso", "shutterNs", "focusAuto", "focusPos",
             "wbAuto", "wbKelvin", "zoom", "chipLayout")

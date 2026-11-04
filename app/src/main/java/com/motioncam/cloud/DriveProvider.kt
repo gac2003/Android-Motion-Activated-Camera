@@ -49,10 +49,38 @@ class DriveProvider(private val accessToken: () -> String, private val invalidat
     }
 
     override fun list(folder: String): List<RemoteFile> =
-        pages("'$folder' in parents and trashed=false and mimeType!='$folderMime'", "files(id,name,size,createdTime,thumbnailLink)").map {
+        pages("'$folder' in parents and trashed=false and mimeType!='$folderMime'", "files(id,name,size,createdTime,thumbnailLink,appProperties)").map {
             RemoteFile(it.getString("id"), it.getString("name"), it.optString("size", "0").toLongOrNull() ?: 0L,
-                parseTime(it.optString("createdTime")), it.optString("thumbnailLink").ifEmpty { null })
+                parseTime(it.optString("createdTime")), it.optString("thumbnailLink").ifEmpty { null }, props(it.optJSONObject("appProperties")))
         }
+
+    private fun props(o: JSONObject?): Map<String, String> {
+        if (o == null) return emptyMap()
+        val m = HashMap<String, String>()
+        for (k in o.keys()) m[k] = o.optString(k)
+        return m
+    }
+
+    /** MotionCam's hidden properties on a file. */
+    fun appProperties(fileId: String): JSONObject =
+        call("GET", "$api/files/${Http.enc(fileId)}?fields=appProperties&supportsAllDrives=true", what = "Read marks")
+            .optJSONObject("appProperties") ?: JSONObject()
+
+    /** Sets / removes (JSONObject.NULL) hidden properties. Only metadata changes; the file itself is untouched. */
+    fun setAppProperties(fileId: String, props: JSONObject) {
+        val body = JSONObject().put("appProperties", props).toString().toByteArray()
+        repeat(2) { attempt ->
+            val tok = accessToken()
+            // HttpURLConnection has no PATCH: Google APIs accept POST with a method override
+            val r = Http.request("POST", "$api/files/${Http.enc(fileId)}?fields=id&supportsAllDrives=true",
+                mapOf("Authorization" to "Bearer $tok", "Content-Type" to "application/json; charset=UTF-8", "X-HTTP-Method-Override" to "PATCH"),
+                body = body)
+            if (r.code == 401 && attempt == 0) { invalidate(tok); return@repeat }
+            if (!r.ok) Http.fail(r, "Save mark")
+            return
+        }
+        throw CloudException("Save mark: not signed in", CloudException.Kind.AUTH)
+    }
 
     override fun open(file: RemoteFile, offset: Long): java.io.InputStream {
         repeat(2) { attempt ->

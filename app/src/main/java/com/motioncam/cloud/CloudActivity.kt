@@ -116,6 +116,11 @@ class CloudActivity : Activity() {
         val prot = Collections.all(this).filter { it.id in cfg.protectedCollections }.joinToString { it.name }.ifEmpty { "none" }
         box.addView(Ui.label(this, "Never delete clips in these collections: $prot", 14f).apply { setPadding(0, Ui.dp(this@CloudActivity, 12), 0, 0) })
         box.addView(button("Choose protected collections…") { chooseProtected() })
+        note("Clips in these collections, clips protected by hand, and clips other phones on this account keep (their " +
+            "collections in Remote folders) are never deleted. Any phone on the account can remove a protection.")
+        if (cfg.folderId != null) box.addView(button("Protected clips…") {
+            startActivity(Intent(this, ProtectedActivity::class.java).putExtra(ProtectedActivity.EXTRA_SPACE, MarkSync.backupKey(kind)))
+        })
         note("Clean-up only ever deletes MotionCam's own clips in the backup folder, oldest first.")
     }
 
@@ -324,7 +329,11 @@ class CloudActivity : Activity() {
         val checked = BooleanArray(cols.size) { cols[it].id in cfg.protectedCollections }
         AlertDialog.Builder(this).setTitle("Never delete from ${kind.label}")
             .setMultiChoiceItems(cols.map { it.name }.toTypedArray(), checked) { _, i, b -> checked[i] = b }
-            .setPositiveButton("Save") { _, _ -> cfg.protectedCollections = cols.filterIndexed { i, _ -> checked[i] }.map { it.id }.toSet(); build() }
+            .setPositiveButton("Save") { _, _ ->
+                cfg.protectedCollections = cols.filterIndexed { i, _ -> checked[i] }.map { it.id }.toSet()
+                MarkSync.schedule(this, MarkSync.backupKey(kind))   // update the marks in the cloud
+                build()
+            }
             .setNegativeButton("Cancel", null).show()
     }
 

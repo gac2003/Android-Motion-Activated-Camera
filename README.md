@@ -36,7 +36,7 @@ A motion-triggered security camera for Android (built for a Galaxy S20 FE, works
 * Runs as a foreground service so it keeps working with the screen off.
 * **Remote viewing without Wi-Fi/LAN**: built-in web page with live MJPEG + clip download, reachable over USB tethering, `adb forward`, Bluetooth tethering or the phone's own hotspot.
 * Protects the phone (all optional): pauses the camera when hot, stops when the battery is low, can delete old clips.
-* **Remote folders**: watch the clips another phone backs up (Google Drive, Dropbox, FTP/SFTP) in the same gallery and timeline player – read-only.
+* **Remote folders**: watch the clips another phone backs up (Google Drive, Dropbox, FTP/SFTP) in the same gallery and timeline player, and protect the ones you want kept.
 
 | Pro controls & focus peaking | Clips gallery | Timeline player | Collections |
 |:---:|:---:|:---:|:---:|
@@ -97,17 +97,34 @@ Settings → **Cloud backup** copies every new clip to **Google Drive**, **Dropb
   (`Apps/MotionCam`). Only MotionCam's own `MC_….mp4` clips in the backup folder are ever deleted.
 * **Folder**: created automatically ("MotionCam"), or choose / create another one.
 * **When full**: delete the oldest backed-up clips to make room, or pause and notify. Optional size cap and
-  "delete cloud copies after N days". Clips in chosen collections (Favourites by default) are never deleted.
+  "delete cloud copies after N days". **Protected** clips are never deleted (see below).
 * **Reliable**: uploads are queued, resume where they stopped after a connection drop, retry with back-off, wait for a
   working connection (e.g. a Wi-Fi login page) and continue in the background, even after a reboot.
 * **Options**: Wi-Fi only, charging only, upload as original / 720p / 480p, delete the phone copy once backed up.
 * **Thumbnails for other devices**: each clip's peak-motion thumbnail (~20 KB) is uploaded to a `.thumbnails`
   subfolder, so remote folders show the right frame without downloading videos.
 
+### Protected in cloud
+Clips can be **protected** so the camera phone's clean-up never deletes their cloud copy – from **any** phone signed
+in to the account:
+* **Automatically**: clips in the camera phone's protected collections (Cloud backup → *Choose protected
+  collections*, Favourites by default), and clips you favourite or add to a collection while viewing the folder
+  as a remote folder on another phone.
+* **By hand**: select clips (or use the player's ⋮ menu) → *Protect in cloud*.
+* **See and override**: Collections → **Protected in cloud** lists every protected clip with the reason – *protected
+  by hand* or *in "Garage" on Pixel 7* – and which phone set it. Any phone can **Remove protection** from any clip,
+  even one kept by another phone's collection; adding it to a collection again later protects it again.
+* Badges: 🔒 protected · ⚠ in your collection but someone removed the protection · ☁✕ (camera phone collections) not
+  in the cloud. A viewing phone saves a copy of a collection clip whose protection was removed (Settings → Remote
+  folders, on by default), so its collection keeps it.
+* Stored as hidden app properties on the clip in Google Drive, and as tiny files in a `.keep` subfolder on Dropbox,
+  FTP and SFTP. If the cloud is full and only protected clips are left, uploads pause and you are notified.
+
 ## Remote folders (view another phone's backups)
-Clips → **cloud icon** opens backup folders from other devices **read-only** (nothing in them is ever uploaded,
-renamed or deleted) in the normal gallery and timeline player: day sections, calendar, Favourites/collections
-(kept on the viewing device only), filmstrip and back-to-back playback.
+Clips → **Remote folders** opens backup folders from other devices in the normal gallery and timeline player: day
+sections, calendar, Favourites/collections (kept on the viewing device only), filmstrip and back-to-back playback.
+Clips in them are never uploaded, renamed or deleted; the only thing written is the small **protected** mark
+(see *Protected in cloud*). Dropbox viewer links are fully read-only.
 
 * **Google Drive**: sign in on the viewing device with the **same Google account** the recording phone backs up
   to (＋ Add → Google Drive) and pick the folder. Other Google accounts aren't supported, because MotionCam's

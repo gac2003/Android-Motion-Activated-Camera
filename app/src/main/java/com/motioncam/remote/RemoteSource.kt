@@ -70,6 +70,11 @@ class RemoteReader(private val p: CloudProvider) : java.io.Closeable {
     fun list(folder: String): List<RemoteFile> = p.list(folder)
     fun open(file: RemoteFile, offset: Long): InputStream = p.open(file, offset)
     fun serviceThumbnail(file: RemoteFile): ByteArray? = p.serviceThumbnail(file)
+    /**
+     * Protection marks of the folder. This is the one thing a remote folder may change: tiny marks (Drive: hidden
+     * properties; others: files in ".keep"), never the clips. Read-only for a Dropbox viewer link.
+     */
+    fun markStore(folder: String): com.motioncam.cloud.MarkStore = com.motioncam.cloud.MarkStore.forProvider(p, folder)
     /** Dropbox link only: the shared folder's name. */
     fun linkFolderName(): String? = (p as? DropboxLinkProvider)?.folderName()
     override fun close() = p.close()

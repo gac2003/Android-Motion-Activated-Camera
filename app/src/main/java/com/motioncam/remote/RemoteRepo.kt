@@ -84,6 +84,7 @@ object RemoteRepo {
         src.lastRefresh = System.currentTimeMillis()
         src.clipCount = clips.size
         RemoteSources.update(ctx, src)
+        com.motioncam.cloud.MarkSync.schedule(ctx, com.motioncam.cloud.MarkSync.remoteKey(src.id))   // protection marks
         return clips
     }
 
@@ -277,6 +278,24 @@ object RemoteRepo {
         }
         progress(clips.size, clips.size, 100)
         return res
+    }
+
+    private val keeping = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /**
+     * Someone removed the cloud protection of clips that are in this phone's collections for the folder: keep a
+     * copy on this phone (Settings → Remote folders), so the collection still has them if the cloud copy goes.
+     */
+    fun keepOverridden(ctx: Context, sourceId: String, names: Set<String>) {
+        if (!com.motioncam.Prefs(ctx).remoteKeepCopy) return
+        val src = RemoteSources.get(ctx, sourceId) ?: return
+        val onPhone = ClipStore.list(ctx).map { it.name }.toHashSet()
+        val todo = cached(ctx, src).filter { it.name in names && it.name !in onPhone && keeping.add(sourceId + "/" + it.name) }
+        if (todo.isEmpty()) return
+        Thread {
+            try { saveToPhone(ctx, todo, { _, _, _ -> }, { false }) } catch (_: Exception) {}
+            finally { for (c in todo) keeping.remove(sourceId + "/" + c.name) }
+        }.start()
     }
 
     /** Removes everything this device stored for a source (listing, cache, collections). */

@@ -12,7 +12,9 @@ enum class CloudKind(val key: String, val label: String) {
 }
 
 /** A file in the backup folder. [id] is the provider's handle (Drive file id, Dropbox/FTP/SFTP path). */
-class RemoteFile(val id: String, val name: String, val size: Long, val modifiedMs: Long, val thumbUrl: String? = null)
+class RemoteFile(val id: String, val name: String, val size: Long, val modifiedMs: Long, val thumbUrl: String? = null,
+                 /** Google Drive: MotionCam's hidden app properties (protection marks). */
+                 val props: Map<String, String> = emptyMap())
 
 /** A folder. [id] is a Drive folder id or a path for the other providers. */
 class RemoteFolder(val id: String, val name: String)

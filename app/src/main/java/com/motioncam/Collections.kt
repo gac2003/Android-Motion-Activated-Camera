@@ -15,7 +15,7 @@ class ClipCollection(val id: String, var name: String, val clipIds: LinkedHashSe
  * clips; each remote folder has its own store ([Collections.forRemote]) so the two never mix. Remote
  * collections live only on this device and are never written to the shared folder.
  */
-open class CollectionStore(private val fileName: String) {
+open class CollectionStore(private val fileName: String, private val remoteId: String? = null) {
     private var cache: MutableList<ClipCollection>? = null
 
     private fun file(ctx: Context) = File(ctx.filesDir, fileName)
@@ -79,6 +79,7 @@ open class CollectionStore(private val fileName: String) {
     @Synchronized
     fun rename(ctx: Context, id: String, name: String) {
         get(ctx, id)?.let { it.name = name.trim().ifEmpty { it.name }; save(ctx) }
+        resync(ctx)   // marks show collection names
     }
 
     /** Deletes the collection only; the clips themselves are untouched. Favourites cannot be deleted. */
@@ -87,16 +88,26 @@ open class CollectionStore(private val fileName: String) {
         if (id == Collections.FAVOURITES) return
         load(ctx).removeAll { it.id == id }
         save(ctx)
+        resync(ctx)
     }
 
     @Synchronized
     fun add(ctx: Context, id: String, clips: Collection<Long>) {
         get(ctx, id)?.let { it.clipIds.addAll(clips); save(ctx) }
+        // adding to a collection asks for the clips to be kept in the cloud
+        com.motioncam.cloud.MarkSync.onCollectionAdd(ctx, remoteId, id, clips)
     }
 
     @Synchronized
     fun remove(ctx: Context, id: String, clips: Collection<Long>) {
         get(ctx, id)?.let { it.clipIds.removeAll(clips.toSet()); save(ctx) }
+        resync(ctx)
+    }
+
+    /** Collections changed: update this device's protection marks in the background. */
+    protected fun resync(ctx: Context) {
+        if (remoteId != null) com.motioncam.cloud.MarkSync.schedule(ctx, com.motioncam.cloud.MarkSync.remoteKey(remoteId))
+        else com.motioncam.cloud.MarkSync.scheduleLocal(ctx)
     }
 
     @Synchronized
@@ -121,7 +132,7 @@ object Collections : CollectionStore("collections.json") {
 
     /** Collections of a remote folder, kept on this device only. */
     @Synchronized
-    fun forRemote(sourceId: String): CollectionStore = remote.getOrPut(sourceId) { CollectionStore("remote_${sourceId}_collections.json") }
+    fun forRemote(sourceId: String): CollectionStore = remote.getOrPut(sourceId) { CollectionStore("remote_${sourceId}_collections.json", sourceId) }
 
     /** Removes a remote folder's collections (when the folder is removed from this device). */
     @Synchronized

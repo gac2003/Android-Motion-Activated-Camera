@@ -12,7 +12,7 @@ import android.widget.ImageView
 
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
-    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, VIDEOCAM, NETWORK, LIVE }
+    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, VIDEOCAM, NETWORK, LIVE, CLOSE, SHARE, TRASH, ADD_TO, REMOVE, SELECT_ALL }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -98,6 +98,41 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 c.drawRoundRect(RectF(3.5f, 5.5f, 20.5f, 18.5f), 2.5f, 2.5f, stroke)
                 path.moveTo(10f, 9f); path.lineTo(15.5f, 12f); path.lineTo(10f, 15f); path.close()
                 c.drawPath(path, fill)
+            }
+            Kind.CLOSE -> {
+                stroke.strokeWidth = 2.2f
+                c.drawLine(6f, 6f, 18f, 18f, stroke); c.drawLine(18f, 6f, 6f, 18f, stroke)
+            }
+            Kind.SHARE -> {
+                stroke.strokeWidth = 1.8f
+                c.drawLine(6f, 12f, 18f, 5f, stroke); c.drawLine(6f, 12f, 18f, 19f, stroke)
+                c.drawCircle(18f, 5f, 2.6f, fill); c.drawCircle(6f, 12f, 2.6f, fill); c.drawCircle(18f, 19f, 2.6f, fill)
+            }
+            Kind.TRASH -> {
+                stroke.strokeWidth = 2f
+                c.drawLine(4f, 6.5f, 20f, 6.5f, stroke)
+                path.moveTo(9.5f, 6.5f); path.lineTo(9.5f, 4f); path.lineTo(14.5f, 4f); path.lineTo(14.5f, 6.5f)
+                path.moveTo(6f, 6.5f); path.lineTo(7f, 20f); path.lineTo(17f, 20f); path.lineTo(18f, 6.5f)
+                c.drawPath(path, stroke)
+                c.drawLine(10f, 10f, 10f, 16.5f, stroke); c.drawLine(14f, 10f, 14f, 16.5f, stroke)
+            }
+            Kind.ADD_TO -> {
+                stroke.strokeWidth = 2f
+                path.moveTo(3.5f, 18.5f); path.lineTo(3.5f, 6f); path.lineTo(9.5f, 6f); path.lineTo(11.5f, 8.5f)
+                path.lineTo(20.5f, 8.5f); path.lineTo(20.5f, 18.5f); path.close()
+                c.drawPath(path, stroke)
+                c.drawLine(12f, 10.8f, 12f, 16.2f, stroke); c.drawLine(9.3f, 13.5f, 14.7f, 13.5f, stroke)
+            }
+            Kind.REMOVE -> {
+                stroke.strokeWidth = 2f
+                c.drawCircle(12f, 12f, 8f, stroke)
+                c.drawLine(8f, 12f, 16f, 12f, stroke)
+            }
+            Kind.SELECT_ALL -> {
+                stroke.strokeWidth = 2f
+                c.drawRoundRect(RectF(4f, 4f, 20f, 20f), 3f, 3f, stroke)
+                path.moveTo(8f, 12.2f); path.lineTo(11f, 15.2f); path.lineTo(16.5f, 9.2f)
+                c.drawPath(path, stroke)
             }
             Kind.LIVE -> {
                 // live connection: a cloud with a camera lens in it, and a wi-fi signal rising from its top

@@ -63,6 +63,8 @@ class ClipsActivity : Activity() {
     private val collapsed = HashSet<Long>()
     private lateinit var selBar: LinearLayout
     private lateinit var selTitle: TextView
+    private lateinit var selInfo: TextView
+    private lateinit var bottomBar: LinearLayout
 
     // ---- multi-select (Google Drive style) ----
     private var selecting = false
@@ -147,64 +149,71 @@ class ClipsActivity : Activity() {
         val title = collectionId?.let { store.get(this, it)?.name } ?: remote?.name ?: "Clips"
         normalBar = topBar(this, title)
         root.addView(normalBar)
-        val fit = FitRow(this).apply {
+        // selection mode, like Google Photos / Files: the top bar shows what is selected (count, size, length),
+        // the actions slide up in a bar at the bottom (icon + label, ⋮ More for the rest)
+        selBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0xFF2A2416.toInt())
-            val p = Ui.dp(this@ClipsActivity, 8)
-            setPadding(p, p, p, p)
+            val p = Ui.dp(this@ClipsActivity, 4)
+            setPadding(p, p, p * 2, p)
             visibility = View.GONE
         }
-        selBar = fit
-        selBar.addView(Ui.label(this, "✕", 22f).apply {
-            setPadding(Ui.dp(this@ClipsActivity, 12), 0, Ui.dp(this@ClipsActivity, 16), 0)
-            setOnClickListener { exitSelection() }
-        })
+        selBar.addView(iconButton(this, IconDrawable.Kind.CLOSE, 48, 12) { exitSelection() }.apply { contentDescription = "Cancel selection"; tooltipText = "Cancel selection" })
+        val selTexts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(Ui.dp(this@ClipsActivity, 8), 0, 0, 0) }
         selTitle = Ui.label(this, "", 18f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
-        selBar.addView(selTitle, LinearLayout.LayoutParams(0, -2, 1f))
-        fit.title = selTitle
-        // label -> action, for buttons that may move into the ⋮ menu on narrow screens
-        val selActions = LinkedHashMap<View, Pair<String, () -> Unit>>()
-        fun selAction(t: String, click: () -> Unit) = Ui.chip(this, t).apply { setOnClickListener { click() } }.also {
-            selBar.addView(it, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(this@ClipsActivity, 6) })
-            selActions[it] = Pair(t, click)
+        selInfo = Ui.label(this, "", 12f, 0xFFCFC6AE.toInt()).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
+        selTexts.addView(selTitle); selTexts.addView(selInfo)
+        selBar.addView(selTexts, LinearLayout.LayoutParams(0, -2, 1f))
+        selBar.addView(iconButton(this, IconDrawable.Kind.SELECT_ALL, 48, 12) {
+            if (selected.size == clips.size) selected.clear() else clips.forEach { selected += it.id }
+            if (selected.isEmpty()) exitSelection() else updateSelection()
+        }.apply { contentDescription = "Select all"; tooltipText = "Select all / none" })
+
+        bottomBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(Ui.PANEL)
+            elevation = Ui.dp(this@ClipsActivity, 8).toFloat()
+            val p = Ui.dp(this@ClipsActivity, 4)
+            setPadding(p, p, p, p * 2)
+            visibility = View.GONE
+            isClickable = true      // taps on the bar never reach the grid underneath
         }
-        val allBtn = selAction("All") { if (selected.size == clips.size) selected.clear() else clips.forEach { selected += it.id }; updateSelection() }
-        val addBtn = selAction("Add to…") { addSelectedTo() }.apply { if (!canEditShared()) visibility = View.GONE }
-        val delBtn = when {
-            collectionId != null -> selAction("Remove") { removeSelectedFromCollection() }.apply { if (!canEditShared()) visibility = View.GONE }
-            remote != null -> selAction("Save to phone") { saveToPhone(selectedClips()) }
-            else -> selAction("Delete") { deleteSelected() }
+        fun act(kind: IconDrawable.Kind, label: String, danger: Boolean = false, click: () -> Unit) =
+            bottomBar.addView(labeledButton(this, kind, label, if (danger) Ui.RED else 0xFFFFFFFF.toInt(), click).also { pressFeedback(it) },
+                LinearLayout.LayoutParams(0, -2, 1f))
+        if (remote == null) act(IconDrawable.Kind.SHARE, "Share") { shareSelected() }
+        else act(IconDrawable.Kind.DOWNLOAD, "Save") { saveToPhone(selectedClips()) }
+        if (canEditShared()) act(IconDrawable.Kind.ADD_TO, "Add to") { addSelectedTo() }
+        when {
+            collectionId != null && canEditShared() -> act(IconDrawable.Kind.REMOVE, "Remove") { removeSelectedFromCollection() }
+            remote == null -> act(IconDrawable.Kind.TRASH, "Delete", danger = true) { deleteSelected() }
+            CloudDelete.canDelete(remote) -> act(IconDrawable.Kind.TRASH, "Delete", danger = true) { deleteFromCloud() }
         }
-        fit.collapsible += listOf(addBtn, delBtn, allBtn)   // "All" is the first to move into ⋮ when space runs out
         lateinit var more: View
-        more = iconButton(this, IconDrawable.Kind.MORE, 40, 10) {
+        more = labeledButton(this, IconDrawable.Kind.MORE, "More") {
             val pm = PopupMenu(this, more)
-            val overflow = fit.hidden.mapNotNull { selActions[it] }
-            overflow.forEachIndexed { i, a -> pm.menu.add(0, 100 + i, i, a.first) }
-            if (remote == null) pm.menu.add(0, 1, 50, "Share")
             if (collectionId != null && remote == null) pm.menu.add(0, 2, 51, "Delete from phone")
-            if (collectionId != null && remote != null) pm.menu.add(0, 3, 51, "Save to phone")
-            if (CloudDelete.canDelete(remote)) pm.menu.add(0, 7, 60, "Delete from cloud")
+            if (collectionId != null && CloudDelete.canDelete(remote)) pm.menu.add(0, 7, 52, "Delete from cloud")
             if (canMark()) {
-                pm.menu.add(0, 4, 52, "Protect in cloud")
-                pm.menu.add(0, 5, 53, "Remove cloud protection")
-                pm.menu.add(0, 6, 54, "Protected in cloud…")
+                pm.menu.add(0, 4, 53, "Protect in cloud")
+                pm.menu.add(0, 5, 54, "Remove cloud protection")
+                pm.menu.add(0, 6, 55, "Protected in cloud…")
             }
+            if (pm.menu.size() == 0) pm.menu.add(0, 0, 0, "No more actions").isEnabled = false
             pm.setOnMenuItemClickListener {
                 when (it.itemId) {
-                    1 -> shareSelected()
                     2 -> deleteSelected()
-                    3 -> saveToPhone(selectedClips())
                     4 -> protect(selectedClips(), true)
                     5 -> protect(selectedClips(), false)
                     6 -> openProtected()
-                    7 -> remote?.let { r -> CloudDelete.confirm(this, r, selectedClips().filter { c -> c.id !in missingIds }) { exitSelection(); reload() } }
-                    else -> overflow.getOrNull(it.itemId - 100)?.second?.invoke()
+                    7 -> deleteFromCloud()
                 }
                 true
             }
             pm.show()
-        }
-        selBar.addView(more)
+        }.also { pressFeedback(it) }
+        bottomBar.addView(more, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(selBar)
         summary = Ui.label(this, "", 12f, Ui.GREY).apply { setPadding(Ui.dp(this@ClipsActivity, 52), 0, Ui.dp(this@ClipsActivity, 12), Ui.dp(this@ClipsActivity, 4)) }
         root.addView(summary)
@@ -225,6 +234,7 @@ class ClipsActivity : Activity() {
         listBox.addView(list, FrameLayout.LayoutParams(-1, -1))
         pinned = headerView().apply { setBackgroundColor(Ui.BG); visibility = View.GONE; elevation = Ui.dp(this@ClipsActivity, 2).toFloat() }
         listBox.addView(pinned, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+        listBox.addView(bottomBar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         if (remote != null) {
             // pull down at the top of the list to check for new clips
             swipe = androidx.swiperefreshlayout.widget.SwipeRefreshLayout(this).apply {
@@ -848,8 +858,40 @@ class ClipsActivity : Activity() {
         normalBar.visibility = if (selecting) View.GONE else View.VISIBLE
         actionRow.visibility = normalBar.visibility
         selBar.visibility = if (selecting) View.VISIBLE else View.GONE
+        if (switching) animateBars(selecting)
+        val sel = selectedClips().filter { it.id !in missingIds }
         selTitle.text = "${selected.size} selected"
+        val bytes = sel.sumOf { it.size }
+        val dur = sel.sumOf { it.durationMs }
+        selInfo.text = (if (bytes >= 1_000_000_000L) "%.2f GB".format(bytes / 1e9) else "%.0f MB".format(bytes / 1e6)) + "  ·  " + durText(dur)
         adapter.notifyDataSetChanged()
+    }
+
+    /** Selection bars: the top one fades in, the action bar slides up from the bottom (and back down on exit). */
+    private fun animateBars(show: Boolean) {
+        val interp = android.view.animation.DecelerateInterpolator()
+        if (show) {
+            selBar.alpha = 0f
+            selBar.animate().alpha(1f).setDuration(150).start()
+            bottomBar.visibility = View.VISIBLE
+            bottomBar.post {
+                val h = bottomBar.height.toFloat()
+                bottomBar.translationY = h
+                bottomBar.animate().translationY(0f).setDuration(220).setInterpolator(interp).start()
+                // room at the end of the grid so the last row is never hidden behind the bar
+                list.clipToPadding = false
+                list.setPadding(list.paddingLeft, list.paddingTop, list.paddingRight, h.toInt())
+            }
+        } else {
+            bottomBar.animate().translationY(bottomBar.height.toFloat()).setDuration(180)
+                .setInterpolator(android.view.animation.AccelerateInterpolator())
+                .withEndAction { bottomBar.visibility = View.GONE; list.setPadding(list.paddingLeft, list.paddingTop, list.paddingRight, 0) }.start()
+        }
+    }
+
+    private fun deleteFromCloud() {
+        val r = remote ?: return
+        CloudDelete.confirm(this, r, selectedClips().filter { c -> c.id !in missingIds }) { exitSelection(); reload() }
     }
 
     private fun keepListInPlace() {

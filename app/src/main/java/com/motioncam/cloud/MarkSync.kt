@@ -223,6 +223,21 @@ object MarkSync {
         return RemoteSources.reader(ctx, src).use { r -> sync(ctx, space, r.markStore(src.folderId), existing) }
     }
 
+    /**
+     * Protects [names] (again): clips in one of this phone's collections are protected as part of that collection,
+     * the others by hand. Also lifts an earlier "remove protection". Blocking (reads local data); syncs in the background.
+     */
+    fun protect(ctx: Context, space: String, names: Collection<String>) {
+        val d = desired(ctx, space)
+        val inCollection = names.filter { d[it]?.second?.isNotEmpty() == true }
+        if (inCollection.isNotEmpty()) intent(ctx, space, inCollection)
+        val rest = names - inCollection.toSet()
+        if (rest.isNotEmpty()) intent(ctx, space, rest, manual = true)
+    }
+
+    /** Whether [name] is protected in any of [spaces] (last sync). */
+    fun isProtected(spaces: Collection<String>, name: String) = spaces.any { cached(it)?.marks?.get(name)?.protected == true }
+
     /** Removes the protection of [names] for everyone (any device can). */
     fun override(ctx: Context, space: String, names: Collection<String>): Result {
         val by = Device.name(ctx)

@@ -134,18 +134,29 @@ class CollectionsActivity : Activity() {
         texts.addView(Ui.label(ctx, (if (c.isFavourites) "★ " else "") + c.name, 16f, if (c.isFavourites) Ui.ACCENT else android.graphics.Color.WHITE))
         texts.addView(Ui.label(ctx, "${clips.size} clip${if (clips.size == 1) "" else "s"}", 12f, Ui.GREY))
         r.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
-        if (!c.isFavourites) {
+        val canProtect = clips.isNotEmpty() && com.motioncam.cloud.CloudProtect.canChange(ctx, remote)
+        if (!c.isFavourites || canProtect) {
             lateinit var more: View
             more = iconButton(ctx, IconDrawable.Kind.MORE, 44, 10) {
                 val pm = PopupMenu(ctx, more)
-                pm.menu.add(0, 1, 0, "Rename")
-                pm.menu.add(0, 2, 1, "Delete collection")
+                if (!c.isFavourites) {
+                    pm.menu.add(0, 1, 0, "Rename")
+                    pm.menu.add(0, 2, 1, "Delete collection")
+                }
+                if (canProtect) {
+                    pm.menu.add(0, 3, 2, "Protect all ${clips.size} in cloud")
+                    pm.menu.add(0, 4, 3, "Remove cloud protection from all ${clips.size}")
+                }
                 pm.setOnMenuItemClickListener {
-                    if (it.itemId == 1) CollectionPicker.askName(ctx, "Rename collection", c.name) { n -> store.rename(ctx, c.id, n); reload() }
-                    else AlertDialog.Builder(ctx).setTitle("Delete \"${c.name}\"?")
-                        .setMessage("Only the collection is deleted. The ${clips.size} clips stay in Clips.")
-                        .setPositiveButton("Delete") { _, _ -> store.delete(ctx, c.id); reload() }
-                        .setNegativeButton("Cancel", null).show()
+                    when (it.itemId) {
+                        1 -> CollectionPicker.askName(ctx, "Rename collection", c.name) { n -> store.rename(ctx, c.id, n); reload() }
+                        2 -> AlertDialog.Builder(ctx).setTitle("Delete \"${c.name}\"?")
+                            .setMessage("Only the collection is deleted. The ${clips.size} clips stay in Clips.")
+                            .setPositiveButton("Delete") { _, _ -> store.delete(ctx, c.id); reload() }
+                            .setNegativeButton("Cancel", null).show()
+                        3 -> com.motioncam.cloud.CloudProtect.protect(this, remote, clips.map { cl -> cl.name })
+                        4 -> com.motioncam.cloud.CloudProtect.confirmRemove(this, remote, clips.map { cl -> cl.name })
+                    }
                     true
                 }
                 pm.show()

@@ -49,7 +49,7 @@ class ProtectedActivity : Activity() {
     private lateinit var prefs: Prefs
     private var spaces: List<String> = emptyList()
     private var space = ""
-    private var filter = 0                   // 0 all, 1 by hand, 2 by collection
+    private var filter = 0                   // 0 all, 1 by hand, 2 by collection, 3 protection removed
     private var all: List<Row> = emptyList()
     private var rows: List<Row> = emptyList()
     private val selected = LinkedHashSet<String>()
@@ -100,7 +100,7 @@ class ProtectedActivity : Activity() {
             setOnClickListener { if (selected.size == rows.size) selected.clear() else rows.forEach { selected += it.name }; updateSelection() }
         })
         actionBar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-        removeBtn = Ui.chip(this, "Remove protection").apply { setTextColor(Ui.RED); setOnClickListener { confirmRemove() } }
+        removeBtn = Ui.chip(this, "Remove protection").apply { setOnClickListener { if (filter == 3) protectAgain() else confirmRemove() } }
         actionBar.addView(removeBtn)
         root.addView(actionBar)
         setContentView(root)
@@ -123,10 +123,10 @@ class ProtectedActivity : Activity() {
 
     private fun buildFilters() {
         filters.removeAllViews()
-        listOf("All", "By hand", "By collection").forEachIndexed { i, t ->
+        listOf("All", "By hand", "By collection", "Removed").forEachIndexed { i, t ->
             filters.addView(Ui.chip(this, t).apply {
                 Ui.setChipState(this, i == filter)
-                setOnClickListener { filter = i; buildFilters(); applyFilter() }
+                setOnClickListener { if (filter != i) selected.clear(); filter = i; buildFilters(); applyFilter() }
             }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = Ui.dp(this@ProtectedActivity, 6) })
         }
     }
@@ -142,7 +142,9 @@ class ProtectedActivity : Activity() {
                 res.onFailure { e -> summary.text = "Could not read the protections: ${e.message}"; return@runOnUiThread }
                 val r = res.getOrThrow()
                 writable = r.writable
-                all = r.marks.values.filter { it.protected }.map { Row(it.clip, it, clips[it.clip], it.clip in r.existing) }
+                // protected clips, plus clips whose protection someone removed (still in the folder)
+                all = r.marks.values.filter { it.protected || (it.overrideAt > 0 && it.clip in r.existing) }
+                    .map { Row(it.clip, it, clips[it.clip], it.clip in r.existing) }
                     .sortedByDescending { it.clip?.startMs ?: startOf(it.name) }
                 selected.retainAll(all.map { it.name }.toSet())
                 applyFilter()
@@ -159,16 +161,22 @@ class ProtectedActivity : Activity() {
     } catch (e: Exception) { 0 }
 
     private fun applyFilter() {
+        val prot = all.filter { it.marks.protected }
+        val removed = all.filter { !it.marks.protected }.sortedByDescending { it.marks.overrideAt }
         rows = when (filter) {
-            1 -> all.filter { r -> r.marks.marks.any { it.manual } }
-            2 -> all.filter { r -> r.marks.marks.any { it.collections.isNotEmpty() } }
-            else -> all
+            1 -> prot.filter { r -> r.marks.marks.any { it.manual } }
+            2 -> prot.filter { r -> r.marks.marks.any { it.collections.isNotEmpty() } }
+            3 -> removed
+            else -> prot
         }
-        val bytes = all.sumOf { it.clip?.size ?: 0L }
-        val byHand = all.count { r -> r.marks.marks.any { it.manual } }
-        val byCol = all.count { r -> r.marks.marks.any { it.collections.isNotEmpty() } }
-        summary.text = if (all.isEmpty()) "Nothing is protected in ${MarkSync.label(this, space)}. Clips in collections and clips protected by hand appear here."
-        else "${all.size} protected clip${if (all.size == 1) "" else "s"} in ${MarkSync.label(this, space)}" +
+        val bytes = prot.sumOf { it.clip?.size ?: 0L }
+        val byHand = prot.count { r -> r.marks.marks.any { it.manual } }
+        val byCol = prot.count { r -> r.marks.marks.any { it.collections.isNotEmpty() } }
+        summary.text = if (filter == 3) (if (removed.isEmpty()) "No clip had its protection removed." else
+            "${removed.size} clip${if (removed.size == 1) "" else "s"} lost their protection and may be deleted by the clean-up. " +
+                "Select them and tap Protect again to keep them.")
+        else if (prot.isEmpty()) "Nothing is protected in ${MarkSync.label(this, space)}. Clips in collections and clips protected by hand appear here."
+        else "${prot.size} protected clip${if (prot.size == 1) "" else "s"} in ${MarkSync.label(this, space)}" +
             (if (bytes > 0) " · %.2f GB".format(bytes / 1e9) else "") + " · $byHand by hand, $byCol by collection" +
             if (!writable) "\nRead-only (viewer link): protections can only be changed by the account's phones." else ""
         updateSelection()
@@ -176,7 +184,9 @@ class ProtectedActivity : Activity() {
 
     private fun updateSelection() {
         actionBar.visibility = if (writable && rows.isNotEmpty()) View.VISIBLE else View.GONE
-        removeBtn.text = if (selected.isEmpty()) "Remove protection" else "Remove protection (${selected.size})"
+        val verb = if (filter == 3) "Protect again" else "Remove protection"
+        removeBtn.text = if (selected.isEmpty()) verb else "$verb (${selected.size})"
+        removeBtn.setTextColor(if (filter == 3) Ui.ACCENT else Ui.RED)
         removeBtn.alpha = if (selected.isEmpty()) 0.4f else 1f
         adapter.notifyDataSetChanged()
     }
@@ -193,6 +203,21 @@ class ProtectedActivity : Activity() {
                 "\n\nAdding a clip to a collection (or protecting it) again later protects it again.")
             .setPositiveButton("Remove protection") { _, _ -> doRemove(names) }
             .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun protectAgain() {
+        if (selected.isEmpty()) { Toast.makeText(this, "Tap clips to select them first", Toast.LENGTH_SHORT).show(); return }
+        val names = selected.toList()
+        summary.text = "Protecting again…"
+        val sp = space
+        Thread {
+            val msg = try { MarkSync.protect(this, sp, names); MarkSync.syncNow(this, sp); null } catch (e: Exception) { e.message ?: "failed" }
+            runOnUiThread {
+                if (msg != null) Toast.makeText(this, "Could not protect: $msg", Toast.LENGTH_LONG).show()
+                selected.removeAll(names.toSet())
+                load()
+            }
+        }.start()
     }
 
     private fun doRemove(names: List<String>) {
@@ -238,7 +263,9 @@ class ProtectedActivity : Activity() {
             title.text = (if (start > 0) dayFmt.format(Date(start)) + "  " + Fmt.t(prefs, start, seconds = false) else r.name) +
                 (c?.let { "  ·  ${it.durationMs / 1000}s · %.0f MB".format(it.size / 1e6) } ?: "") +
                 if (!r.inFolder) "  ·  not in the folder" else ""
-            why.text = r.marks.marks.sortedByDescending { it.at }.joinToString("\n") { reasonText(it) }
+            why.text = if (!r.marks.protected) "Protection removed by ${r.marks.overrideBy ?: "a phone"}" +
+                (if (r.marks.overrideAt > 0) "  ·  " + dayFmt.format(Date(r.marks.overrideAt)) else "")
+            else r.marks.marks.sortedByDescending { it.at }.joinToString("\n") { reasonText(it) }
             val sel = r.name in selected
             check.text = if (sel) "✓" else ""
             (check.background as GradientDrawable).setColor(if (sel) Ui.ACCENT else 0x00000000)

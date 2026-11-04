@@ -178,7 +178,7 @@ class ClipsActivity : Activity() {
             if (collectionId != null && remote != null) pm.menu.add(0, 3, 51, "Save to phone")
             if (canMark()) {
                 pm.menu.add(0, 4, 52, "Protect in cloud")
-                pm.menu.add(0, 5, 53, "Remove my protection")
+                pm.menu.add(0, 5, 53, "Remove cloud protection")
                 pm.menu.add(0, 6, 54, "Protected in cloud…")
             }
             pm.setOnMenuItemClickListener {
@@ -324,16 +324,12 @@ class ClipsActivity : Activity() {
             "\n\uD83D\uDD12 protected in cloud  ·  ⚠ protection removed by someone  ·  ☁✕ not in the cloud"
         else ""
 
+    /** Protect / remove protection for many clips at once (selection or a whole day). */
     private fun protect(list: List<Clip>, on: Boolean) {
-        if (list.isEmpty()) return
         val names = list.map { it.name }
-        for (s in markSpaces()) {
-            if (on) com.motioncam.cloud.MarkSync.intent(this, s, names, manual = true)
-            else com.motioncam.cloud.MarkSync.unprotectManual(this, s, names)
-        }
-        Toast.makeText(this, if (on) "Protecting ${names.size} clip${if (names.size == 1) "" else "s"} in the cloud…"
-            else "Removed this phone's protection (clips in collections stay protected)", Toast.LENGTH_LONG).show()
-        exitSelection()
+        if (on) com.motioncam.cloud.CloudProtect.protect(this, remote, names) { adapter.notifyDataSetChanged() }
+        else com.motioncam.cloud.CloudProtect.confirmRemove(this, remote, names) { adapter.notifyDataSetChanged() }
+        if (selecting) exitSelection()
     }
 
     private fun openProtected() {
@@ -491,7 +487,7 @@ class ClipsActivity : Activity() {
             "Collapse all days",
             "Expand all days",
             if (remote != null) "Save all ${h.clips.size} clips of this day to the phone" else "Delete all ${h.clips.size} clips of this day",
-        )
+        ) + (if (canMark()) arrayOf("Protect all ${h.clips.size} in cloud", "Remove cloud protection from all ${h.clips.size}") else emptyArray())
         AlertDialog.Builder(this).setTitle(dayLabel(h.dayStart))
             .setItems(items) { _, which ->
                 when (which) {
@@ -503,6 +499,8 @@ class ClipsActivity : Activity() {
                     5 -> if (remote != null) saveToPhone(h.clips) else AlertDialog.Builder(this).setTitle("Delete ${h.clips.size} clips?")
                         .setPositiveButton("Delete") { _, _ -> ClipDeleter.delete(this, h.clips) { reload() } }
                         .setNegativeButton("Cancel", null).show()
+                    6 -> protect(h.clips, true)
+                    7 -> protect(h.clips, false)
                 }
             }.show()
     }

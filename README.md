@@ -110,10 +110,12 @@ in to the account:
 * **Automatically**: clips in the camera phone's protected collections (Cloud backup → *Choose protected
   collections*, Favourites by default), and clips you favourite or add to a collection while viewing the folder
   as a remote folder on another phone.
-* **By hand**: select clips (or use the player's ⋮ menu) → *Protect in cloud*.
+* **By hand**: select clips (or use the player's ⋮ menu) → *Protect in cloud* / *Remove cloud protection*; whole
+  collections (⋮ next to the collection) and whole days (⋮ on the day header) at once.
 * **See and override**: Collections → **Protected in cloud** lists every protected clip with the reason – *protected
   by hand* or *in "Garage" on Pixel 7* – and which phone set it. Any phone can **Remove protection** from any clip,
-  even one kept by another phone's collection; adding it to a collection again later protects it again.
+  even one kept by another phone's collection. The *Removed* filter lists clips whose protection was removed (by whom,
+when) so they can be selected and **protected again** in one go.
 * Badges: 🔒 protected · ⚠ in your collection but someone removed the protection · ☁✕ (camera phone collections) not
   in the cloud. A viewing phone saves a copy of a collection clip whose protection was removed (Settings → Remote
   folders, on by default), so its collection keeps it.

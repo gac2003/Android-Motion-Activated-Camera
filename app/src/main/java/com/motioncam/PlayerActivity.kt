@@ -739,10 +739,10 @@ class PlayerActivity : Activity() {
         val fav = store.isFavourite(this, c.id)
         pm.menu.add(0, 4, 0, if (fav) "Remove from Favourites" else "Add to Favourites")
         pm.menu.add(0, 5, 1, "Add to collection…")
-        val spaces = remote?.let { listOf(com.motioncam.cloud.MarkSync.remoteKey(it.id)) } ?: com.motioncam.cloud.MarkSync.localSpaces(this)
-        val canMark = spaces.isNotEmpty() && remote?.mode != com.motioncam.remote.RemoteSources.MODE_LINK
-        val byHand = spaces.any { c.name in com.motioncam.cloud.MarkSync.manual(this, it) }
-        if (canMark) pm.menu.add(0, 7, 2, if (byHand) "Remove my cloud protection" else "Protect in cloud")
+        val spaces = com.motioncam.cloud.CloudProtect.spaces(this, remote)
+        val canMark = com.motioncam.cloud.CloudProtect.canChange(this, remote)
+        val isProt = com.motioncam.cloud.MarkSync.isProtected(spaces, c.name)
+        if (canMark) pm.menu.add(0, 7, 2, if (isProt) "Remove cloud protection" else "Protect in cloud")
         if (remote != null) pm.menu.add(0, 6, 2, "Save to phone")
         else {
             pm.menu.add(0, 1, 2, "Open in another app")
@@ -757,13 +757,8 @@ class PlayerActivity : Activity() {
                 }
                 5 -> CollectionPicker.show(this, listOf(c.id), store) {}
                 6 -> saveCurrent(c)
-                7 -> {
-                    for (s in spaces) {
-                        if (byHand) com.motioncam.cloud.MarkSync.unprotectManual(this, s, listOf(c.name))
-                        else com.motioncam.cloud.MarkSync.intent(this, s, listOf(c.name), manual = true)
-                    }
-                    Toast.makeText(this, if (byHand) "Removed this phone's protection" else "Protected in the cloud", Toast.LENGTH_SHORT).show()
-                }
+                7 -> if (isProt) com.motioncam.cloud.CloudProtect.confirmRemove(this, remote, listOf(c.name))
+                     else com.motioncam.cloud.CloudProtect.protect(this, remote, listOf(c.name))
                 1 -> startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(c.uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                 2 -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("video/mp4")
                     .putExtra(Intent.EXTRA_STREAM, c.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share clip"))

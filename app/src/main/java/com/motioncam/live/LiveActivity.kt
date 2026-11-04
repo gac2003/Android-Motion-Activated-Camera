@@ -123,6 +123,7 @@ class LiveActivity : Activity() {
         }
         if (prefs.liveCamera) {
             f.row(f.chip("Change PIN") { setPin { render() } })
+            if (CameraLink.shortPin(this)) f.note("Your PIN is shorter than 6 characters: change it for better protection.", Ui.ACCENT)
             f.toggle("PIN also needed for the live view and frames", prefs.livePinForView) { prefs.livePinForView = it }
             f.note("The PIN protects the camera's controls, settings and pausing/stopping monitoring (and, if on, its live view). " +
                 "It is never sent: requests are signed with it. After 5 wrong PINs remote control is locked for 10 minutes.")
@@ -228,15 +229,16 @@ class LiveActivity : Activity() {
 
     /** Asks for the camera PIN (twice); [done] only runs when a valid PIN was saved. */
     private fun setPin(done: () -> Unit) {
-        val input = EditText(this).apply { hint = "PIN (at least 4 digits or letters)"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
+        val input = EditText(this).apply { hint = "PIN (at least 6 characters)"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
         val input2 = EditText(this).apply { hint = "Repeat the PIN"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; val p = Ui.dp(this@LiveActivity, 20); setPadding(p, 0, p, 0); addView(input); addView(input2) }
         AlertDialog.Builder(this).setTitle("Camera PIN").setView(box)
-            .setMessage("Other phones need this PIN to control this camera, change its settings or (if you keep that on) watch it.")
+            .setMessage("Other phones need this PIN to control this camera, change its settings or (if you keep that on) watch it. " +
+                "Use at least 6 characters; letters and digits mixed are much harder to guess.")
             .setPositiveButton("Save") { _, _ ->
                 val p = input.text.toString().trim()
                 when {
-                    p.length < 4 -> Toast.makeText(this, "At least 4 characters", Toast.LENGTH_SHORT).show()
+                    p.length < 6 -> Toast.makeText(this, "At least 6 characters", Toast.LENGTH_SHORT).show()
                     p != input2.text.toString().trim() -> Toast.makeText(this, "The two PINs differ", Toast.LENGTH_SHORT).show()
                     else -> { CameraLink.setPin(this, p); done() }
                 }

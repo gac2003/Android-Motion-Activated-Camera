@@ -134,7 +134,7 @@ class SettingsActivity : Activity() {
                 "• Or join the phone's own hotspot from your laptop."
         )
 
-        title("Live connection", null)
+        title("Live connection", Prefs.LIVE_KEYS + Prefs.ALERT_KEYS)
         note("Your phones connected through the internet (works on captive / isolated networks): camera status and alerts, " +
             "a live view, remote control with an optional PIN, and instant sync between phones. Off by default.")
         box.addView(Ui.chip(this, "Live connection" + if (prefs.liveOn) "  ·  on" else "  ·  off").apply {
@@ -196,7 +196,9 @@ class SettingsActivity : Activity() {
             setTextColor(Ui.RED)
             setOnClickListener {
                 confirmReset("Reset all settings?", "Every setting, camera control, detection zone and button layout goes back to " +
-                    "its default. Recorded clips and the web viewer password are kept.", Prefs.ALL_KEYS)
+                    "its default, including cloud clean-up rules, alerts and the live connection (turned off).\n\nKept: recorded clips, " +
+                    "collections, cloud accounts and backup folders (and whether backup is on), remote folders, live-connection " +
+                    "sign-in and PINs, and the web viewer password.", Prefs.ALL_KEYS)
             }
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
     }
@@ -205,6 +207,7 @@ class SettingsActivity : Activity() {
         android.app.AlertDialog.Builder(this).setTitle(title).setMessage(msg)
             .setPositiveButton("Reset") { _, _ ->
                 prefs.reset(keys)
+                ResetEffects.apply(this, keys)
                 EngineHost.peek()?.applyConfig()
                 EngineHost.peek()?.applyPro()
                 Toast.makeText(this, "Reset to defaults", Toast.LENGTH_SHORT).show()
@@ -233,7 +236,13 @@ class SettingsActivity : Activity() {
         if (keys != null) {
             row.addView(Ui.label(this, "Reset", 12f, Ui.GREY).apply {
                 setPadding(Ui.dp(this@SettingsActivity, 12), Ui.dp(this@SettingsActivity, 4), 0, Ui.dp(this@SettingsActivity, 4))
-                setOnClickListener { confirmReset("Reset \"$s\"?", "Settings in this section go back to their defaults.", keys) }
+                setOnClickListener { confirmReset("Reset \"$s\"?", "Settings in this section go back to their defaults." + when (s) {
+                    "Cloud backup" -> "\n\nAlso each destination's clean-up rules (when full, size cap, delete after N days, protected " +
+                        "collections) and paused uploads resume. Accounts, folders and whether backup is on are kept."
+                    "Live connection" -> "\n\nThe live connection is turned off and this phone becomes viewer-only; alert settings and " +
+                        "muted cameras are reset. Your sign-in / network code and PINs are kept."
+                    else -> ""
+                }, keys) }
             })
         }
         box.addView(row)

@@ -179,7 +179,9 @@ class Prefs(ctx: Context) {
         val STORAGE_KEYS = listOf("maxStorageGb", "keepDays", "autoDeleteLow")
         val PROTECTION_KEYS = listOf("minBattery", "maxTempC")
         val REMOTE_KEYS = listOf("serverOn", "streamHd", "port")
-        val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal", "cloudThumbs")
+        val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal", "cloudThumbs", "cloudPaused")
+        /** Live connection on/off, Stay connected, PIN for the view, camera role (sign-in and PINs are kept). */
+        val LIVE_KEYS = listOf("liveOn", "liveStay", "livePinForView", "liveCamera")
         val REMOTE_FOLDER_KEYS = listOf("remoteFtp", "remoteKeepCopy")
         val PLAYER_KEYS = listOf("skipMs", "stripZoom")
         val ALERT_KEYS = listOf("alertsOn", "alertsInApp", "alertMotion", "alertMotionGapMin", "alertClip", "alertBattery", "alertBatteryPct",
@@ -188,6 +190,6 @@ class Prefs(ctx: Context) {
         val CAMERA_KEYS = listOf("camera", "exposureAuto", "evIndex", "iso", "shutterNs", "focusAuto", "focusPos",
             "wbAuto", "wbKelvin", "zoom", "chipLayout")
         /** Everything except the web password (so you are not locked out of the viewer). */
-        val ALL_KEYS = PREVIEW_KEYS + RECORDING_KEYS + MOTION_KEYS + STORAGE_KEYS + PROTECTION_KEYS + REMOTE_KEYS + CLOUD_KEYS + REMOTE_FOLDER_KEYS + PLAYER_KEYS + ALERT_KEYS + CAMERA_KEYS
+        val ALL_KEYS = PREVIEW_KEYS + RECORDING_KEYS + MOTION_KEYS + STORAGE_KEYS + PROTECTION_KEYS + REMOTE_KEYS + CLOUD_KEYS + REMOTE_FOLDER_KEYS + PLAYER_KEYS + LIVE_KEYS + ALERT_KEYS + CAMERA_KEYS
     }
 }

@@ -83,6 +83,6 @@ class AlertSettingsActivity : Activity() {
                 startActivity(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName).putExtra(Settings.EXTRA_CHANNEL_ID, ch))
             }
         }
-        f.button("Reset alert settings") { p.reset(Prefs.ALERT_KEYS); render() }
+        f.button("Reset alert settings") { p.reset(Prefs.ALERT_KEYS); com.motioncam.ResetEffects.apply(this, Prefs.ALERT_KEYS); render() }
     }
 }

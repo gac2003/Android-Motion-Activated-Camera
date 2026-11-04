@@ -165,8 +165,9 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
 * **Remote camera**: low-rate live view (a frame every 2 s, only while watched, stops after 3 min), a **high-quality
   frame** on request, the camera controls (lens, exposure, ISO, shutter, focus, white balance, zoom), recording and
   motion settings, pause / resume / stop monitoring, and the camera's **Activity** log (7 days).
-* **PIN**: every camera phone has one; it protects controls and settings and, by default, the live view and frames.
-  Requests are signed with it, it is never sent; 5 wrong PINs lock remote control for 10 minutes.
+* **PIN**: every camera phone has one (6+ characters); it protects controls and settings and, by default, the live view
+  and frames. Requests are signed with it (never sent; slow hashing against offline guessing); 5 wrong PINs lock remote
+  control for 10 minutes, doubling each time. Network codes are always made by the app (20 random characters, ~99 bits).
 * **Sync**: a change to shared collections, protections or new clips nudges the other phones, which sync within seconds.
   Sync status shows which phone still has unsent changes or a conflict to decide.
 * Builds from this repository use the author's Firebase project (its free tier is shared by everyone using it). To use

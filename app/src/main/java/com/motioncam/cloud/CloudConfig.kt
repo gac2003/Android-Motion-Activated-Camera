@@ -60,6 +60,9 @@ class CloudConfig(private val ctx: Context, val kind: CloudKind) {
         CloudKind.SFTP -> host.isNotEmpty() && user.isNotEmpty() && (if (useKey) privateKey != null else password != null)
     }
 
+    /** Reset: "when full", size cap, delete-after-days and protected collections back to defaults (account, folder, on/off kept). */
+    fun resetPolicies() { sp.edit().remove("fullPolicy").remove("maxGb").remove("keepDays").remove("protect").apply() }
+
     /** Forget the account / credentials (keeps the folder choice and policies). */
     fun disconnect() {
         account = null

@@ -178,24 +178,44 @@ object CameraLink {
     private fun pin(ctx: Context): String? = SecretStore.get(ctx, "live.pin")?.takeIf { it.isNotEmpty() }
     fun setPin(ctx: Context, pin: String?) { SecretStore.put(ctx, "live.pin", pin?.trim()?.ifEmpty { null }); if (running) publishStatus(ctx) }
     fun hasPin(ctx: Context) = pin(ctx) != null
+    fun shortPin(ctx: Context) = (pin(ctx)?.length ?: 6) < 6
     fun pinMatches(ctx: Context, entered: String) = pin(ctx)?.let { it == entered.trim() } == true
 
     /** Signature a viewer sends with a command: HMAC-SHA256 of the payload with a key made from the PIN and camera. */
+    private val keys = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+
+    /**
+     * Key made from the PIN with deliberately slow hashing (PBKDF2, 150 000 rounds; computed once per camera and PIN),
+     * so someone who records signed requests can't quickly try PINs offline.
+     */
+    private fun pinKey(cam: String, pin: String): ByteArray = keys.getOrPut("$cam|${pin.trim()}") {
+        javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            .generateSecret(javax.crypto.spec.PBEKeySpec(pin.trim().toCharArray(), "motioncam-pin:$cam".toByteArray(), 150_000, 256)).encoded
+    }
+
     fun sign(cam: String, pin: String, payload: String): String {
-        val key = java.security.MessageDigest.getInstance("SHA-256").digest("motioncam-pin:$cam:${pin.trim()}".toByteArray())
+        val key = pinKey(cam, pin)
         val mac = Mac.getInstance("HmacSHA256").apply { init(SecretKeySpec(key, "HmacSHA256")) }
         return mac.doFinal(payload.toByteArray()).joinToString("") { "%02x".format(it) }
     }
 
     private var fails = 0
     private var lockedUntil = 0L
+    private var lockouts = 0
 
     /** Checks the PIN signature; after 5 wrong ones, refuses everything for 10 minutes. */
     private fun pinOk(ctx: Context, payload: String, sig: String?): Boolean? {
         val p = pin(ctx) ?: return true
         if (System.currentTimeMillis() < lockedUntil) return null
-        if (sig != null && sig == sign(me(ctx), p, payload)) { fails = 0; return true }
-        if (++fails >= 5) { lockedUntil = System.currentTimeMillis() + 10 * 60_000L; fails = 0; event(ctx, "pin_locked", "Too many wrong PINs: remote control locked for 10 minutes") }
+        if (sig != null && sig == sign(me(ctx), p, payload)) { fails = 0; lockouts = 0; return true }
+        if (++fails >= 5) {
+            // each lock-out doubles: 10 min, 20, 40… up to a day
+            val min = (10L shl lockouts.coerceAtMost(7)).coerceAtMost(24 * 60L)
+            lockouts++
+            lockedUntil = System.currentTimeMillis() + min * 60_000L
+            fails = 0
+            event(ctx, "pin_locked", "Too many wrong PINs: remote control locked for $min minutes")
+        }
         return false
     }
 

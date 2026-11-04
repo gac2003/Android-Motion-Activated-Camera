@@ -52,6 +52,8 @@ object LiveConfig {
 object LiveNet {
     const val MODE_GOOGLE = "google"
     const val MODE_CODE = "code"
+    /** Network code characters: no 0/O, 1/I/L. */
+    const val CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
     private const val APP_NAME = "motioncam-live"
 
     private fun sp(ctx: Context) = ctx.getSharedPreferences("live", Context.MODE_PRIVATE)
@@ -122,7 +124,9 @@ object LiveNet {
     /** Joins (or creates) a network with a code, without a Google account. Blocking. */
     fun joinWithCode(ctx: Context, code: String): String? {
         val c = normalize(code)
-        if (c.length < 16) return "The code is too short (at least 16 letters/digits)"
+        // only codes made by MotionCam (20 random characters, ~99 bits): a hand-made code could be guessed
+        if (c.length != 20 || c.any { it !in CODE_ALPHABET }) return "That isn't a MotionCam network code. Codes are 20 letters/digits " +
+            "like ABCDE-FGHJK-MNPQR-STUVW, made with \"Create a network code\" on one of your phones."
         val auth = auth(ctx) ?: return "Live connection is not set up in this build"
         return try {
             if (auth.currentUser == null) Tasks.await(auth.signInAnonymously(), 30, TimeUnit.SECONDS)
@@ -142,9 +146,8 @@ object LiveNet {
 
     /** A new random network code: 20 characters, about 100 bits, easy to type (no 0/O, 1/I/L). */
     fun newCode(): String {
-        val alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
         val r = SecureRandom()
-        return (0 until 20).map { alphabet[r.nextInt(alphabet.length)] }.joinToString("").chunked(5).joinToString("-")
+        return (0 until 20).map { CODE_ALPHABET[r.nextInt(CODE_ALPHABET.length)] }.joinToString("").chunked(5).joinToString("-")
     }
 
     private fun normalize(code: String) = code.uppercase().filter { it.isLetterOrDigit() }

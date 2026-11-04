@@ -12,7 +12,7 @@ import android.widget.ImageView
 
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
-    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, VIDEOCAM }
+    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, VIDEOCAM, NETWORK }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -98,6 +98,13 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 c.drawRoundRect(RectF(3.5f, 5.5f, 20.5f, 18.5f), 2.5f, 2.5f, stroke)
                 path.moveTo(10f, 9f); path.lineTo(15.5f, 12f); path.lineTo(10f, 15f); path.close()
                 c.drawPath(path, fill)
+            }
+            Kind.NETWORK -> {
+                // three linked devices (filled nodes, connecting lines): "your phones connected"
+                stroke.strokeWidth = 1.8f
+                val n = arrayOf(floatArrayOf(12f, 5f), floatArrayOf(4.5f, 18.5f), floatArrayOf(19.5f, 18.5f))
+                for (i in 0 until 3) for (j in i + 1 until 3) c.drawLine(n[i][0], n[i][1], n[j][0], n[j][1], stroke)
+                for (p in n) c.drawCircle(p[0], p[1], 2.8f, fill)
             }
             Kind.VIDEOCAM -> {
                 stroke.strokeWidth = 2f

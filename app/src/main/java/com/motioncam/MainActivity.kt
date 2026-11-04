@@ -127,7 +127,7 @@ class MainActivity : Activity() {
         com.motioncam.live.RemoteSettings.listeners += remoteChanged
         liveChip?.visibility = if (prefs.liveOn) View.VISIBLE else View.GONE
         // unread camera alerts: the Cameras icon turns yellow
-        (liveChip as? ImageView)?.setImageDrawable(IconDrawable(IconDrawable.Kind.VIDEOCAM,
+        (liveChip as? ImageView)?.setImageDrawable(IconDrawable(IconDrawable.Kind.NETWORK,
             if (prefs.liveOn && com.motioncam.live.AlertInbox.unread(this) > 0) Ui.ACCENT else 0xFFFFFFFF.toInt()))
     }
 
@@ -413,7 +413,7 @@ class MainActivity : Activity() {
             contentDescription = name
             tooltipText = name
         }
-        liveChip = action(IconDrawable.Kind.VIDEOCAM, "Cameras (live connection)") {
+        liveChip = action(IconDrawable.Kind.NETWORK, "Live connection (your phones)") {
             startActivity(Intent(this@MainActivity, com.motioncam.live.LiveActivity::class.java))
         }.apply { visibility = if (prefs.liveOn) View.VISIBLE else View.GONE }
         top.addView(liveChip)
@@ -1095,40 +1095,33 @@ class MainActivity : Activity() {
         val lenses = Lenses.list(this)
         if (lenses.isEmpty()) { Toast.makeText(this, "No cameras found", Toast.LENGTH_SHORT).show(); return }
         val cur = caps?.lens
-        AlertDialog.Builder(this)
-            .setTitle("Choose camera / lens")
-            .setSingleChoiceItems(lenses.map { it.label }.toTypedArray(), lenses.indexOfFirst { it.key == cur?.key }) { d, which ->
-                prefs.camera = lenses[which].key
+        OptionSheet.show(this, "Camera / lens", lenses.map { l ->
+            Opt(l.label.substringBefore(" ["), l.label.substringAfter(" [", "").removeSuffix("]").ifEmpty { null }, checked = l.key == cur?.key) {
+                prefs.camera = l.key
                 prefs.zoom = 1f
                 engine?.applyConfig()
                 updateGeometry()
                 if (selected != null) configurePanel()
                 refreshChips()
-                d.dismiss()
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        })
     }
 
     private fun showFormatDialog() {
         val opts = listOf(
-            Triple("720p · 30 fps", 720, 30),
-            Triple("1080p · 24 fps", 1080, 24),
-            Triple("1080p · 30 fps (recommended)", 1080, 30),
-            Triple("1080p · 60 fps", 1080, 60),
-            Triple("4K · 30 fps", 2160, 30),
+            Triple("720p · 30 fps", "Smallest files, least heat", 720 to 30),
+            Triple("1080p · 24 fps", "Slightly smaller than 30 fps", 1080 to 24),
+            Triple("1080p · 30 fps", "Recommended", 1080 to 30),
+            Triple("1080p · 60 fps", "Smoother motion, bigger files, warmer phone", 1080 to 60),
+            Triple("4K · 30 fps", "Most detail; about 3× the size of 1080p", 2160 to 30),
         )
-        val cur = opts.indexOfFirst { it.second == prefs.resHeight && it.third == prefs.fps }
-        AlertDialog.Builder(this)
-            .setTitle("Recording format")
-            .setSingleChoiceItems(opts.map { it.first }.toTypedArray(), cur) { d, which ->
-                prefs.resHeight = opts[which].second
-                prefs.fps = opts[which].third
+        OptionSheet.show(this, "Recording format", opts.map { (t, d, v) ->
+            Opt(t, d, checked = v.first == prefs.resHeight && v.second == prefs.fps) {
+                prefs.resHeight = v.first
+                prefs.fps = v.second
                 engine?.applyConfig()
                 refreshChips()
-                d.dismiss()
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        })
     }
 }

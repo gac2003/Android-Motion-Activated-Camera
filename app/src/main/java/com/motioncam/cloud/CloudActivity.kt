@@ -233,23 +233,14 @@ class CloudActivity : Activity() {
             try {
                 val folders = CloudSync.providerFor(this, kind).use { it.listFolders(parent?.id) }
                 runOnUiThread {
-                    val items = ArrayList<String>()
-                    if (parent != null) items += "✓ Use \"${parent.name}\""
-                    items += "＋ New folder here"
-                    if (parent != null) items += "⬆ Up"
-                    folders.forEach { items += "▸ ${it.name}" }
-                    val head = items.size - folders.size
-                    AlertDialog.Builder(this).setTitle(if (parent == null) "Choose a folder" else parent.name)
-                        .setItems(items.toTypedArray()) { _, i ->
-                            val label = items[i]
-                            when {
-                                label.startsWith("✓") -> pick(parent!!)
-                                label.startsWith("＋") -> askName { name -> create(parent, name) }
-                                label.startsWith("⬆") -> browse(trail.lastOrNull(), trail.dropLast(1))
-                                else -> browse(folders[i - head], if (parent != null) trail + parent else trail)
-                            }
-                        }
-                        .setNegativeButton("Cancel", null).show()
+                    val list = ArrayList<com.motioncam.Opt>()
+                    if (parent != null) list += com.motioncam.Opt("Use “${parent.name}”", "Back up into this folder", checked = true) { pick(parent) }
+                    list += com.motioncam.Opt("New folder here", "Create it and back up into it", com.motioncam.IconDrawable.Kind.FOLDER) { askName { name -> create(parent, name) } }
+                    if (parent != null) list += com.motioncam.Opt("Up one level", icon = com.motioncam.IconDrawable.Kind.BACK) { browse(trail.lastOrNull(), trail.dropLast(1)) }
+                    for (fo in folders) list += com.motioncam.Opt(fo.name, icon = com.motioncam.IconDrawable.Kind.FOLDER, section = "Folders" + if (parent != null) " inside" else "") {
+                        browse(fo, if (parent != null) trail + parent else trail)
+                    }
+                    com.motioncam.OptionSheet.show(this, if (parent == null) "Choose a folder" else parent.name, list)
                 }
             } catch (e: Exception) { runOnUiThread { toast("Could not list folders: ${e.message}") } }
         }.start()
@@ -339,15 +330,16 @@ class CloudActivity : Activity() {
 
     private fun uploadExisting() {
         if (!cfg.isConfigured) { toast("Connect ${kind.label} first"); return }
-        val opts = arrayOf("Last 24 hours", "Last 7 days", "Last 30 days", "All clips")
-        val spans = longArrayOf(86_400_000L, 7 * 86_400_000L, 30 * 86_400_000L, 0)
-        AlertDialog.Builder(this).setTitle("Upload existing clips").setItems(opts) { _, i ->
-            if (!cfg.enabled) { cfg.enabled = true }
-            Thread {
-                val n = CloudSync.enqueueExisting(this, kind, if (spans[i] == 0L) 0 else System.currentTimeMillis() - spans[i])
-                runOnUiThread { toast("$n clips queued"); build() }
-            }.start()
-        }.setNegativeButton("Cancel", null).show()
+        val spans = listOf("Last 24 hours" to 86_400_000L, "Last 7 days" to 7 * 86_400_000L, "Last 30 days" to 30 * 86_400_000L, "All clips" to 0L)
+        com.motioncam.OptionSheet.show(this, "Upload existing clips", spans.map { (label, span) ->
+            com.motioncam.Opt(label) {
+                if (!cfg.enabled) { cfg.enabled = true }
+                Thread {
+                    val n = CloudSync.enqueueExisting(this, kind, if (span == 0L) 0 else System.currentTimeMillis() - span)
+                    runOnUiThread { toast("$n clips queued"); build() }
+                }.start()
+            }
+        }, subtitle = "Clips already in the backup folder are skipped.")
     }
 
     // ------------------------------------------------------------------ small UI builders

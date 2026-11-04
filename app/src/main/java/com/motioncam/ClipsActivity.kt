@@ -506,46 +506,48 @@ class ClipsActivity : Activity() {
     }
 
     private fun options(c: Clip) {
-        val items = arrayOf("Play in timeline", "Open in another app", "Share", "Delete")
-        AlertDialog.Builder(this).setTitle("Clip at ${timeFmt.format(Date(c.startMs))}")
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> play(c)
-                    1 -> startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(c.uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-                    2 -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("video/mp4")
-                        .putExtra(Intent.EXTRA_STREAM, c.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share clip"))
-                    3 -> AlertDialog.Builder(this).setTitle("Delete this clip?")
-                        .setPositiveButton("Delete") { _, _ -> ClipDeleter.delete(this, listOf(c)) { reload() } }
-                        .setNegativeButton("Cancel", null).show()
-                }
-            }.show()
+        OptionSheet.show(this, "Clip at ${timeFmt.format(Date(c.startMs))}", listOf(
+            Opt("Play in timeline", icon = IconDrawable.Kind.PLAY) { play(c) },
+            Opt("Open in another app") {
+                startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(c.uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            },
+            Opt("Share") {
+                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("video/mp4")
+                    .putExtra(Intent.EXTRA_STREAM, c.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share clip"))
+            },
+            Opt("Delete", danger = true) {
+                AlertDialog.Builder(this).setTitle("Delete this clip?")
+                    .setPositiveButton("Delete") { _, _ -> ClipDeleter.delete(this, listOf(c)) { reload() } }
+                    .setNegativeButton("Cancel", null).show()
+            },
+        ))
     }
 
     private fun dayOptions(h: Row.Header) {
         val collapsedNow = h.dayStart in collapsed
-        val items = arrayOf(
-            "Play day in timeline",
-            "Select all ${h.clips.size} clips",
-            if (collapsedNow) "Expand" else "Collapse",
-            "Collapse all days",
-            "Expand all days",
-            if (remote != null) "Save all ${h.clips.size} clips of this day to the phone" else "Delete all ${h.clips.size} clips of this day",
-        ) + (if (canMark()) arrayOf("Protect all ${h.clips.size} in cloud", "Remove cloud protection from all ${h.clips.size}") else emptyArray())
-        AlertDialog.Builder(this).setTitle(dayLabel(h.dayStart))
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> h.clips.minByOrNull { it.startMs }?.let { play(it) }
-                    1 -> { selecting = true; selected.addAll(h.clips.map { it.id }); if (collapsedNow) toggleDay(h.dayStart) else updateSelection() }
-                    2 -> toggleDay(h.dayStart)
-                    3 -> { collapsed.addAll(clips.map { dayStart(it.startMs) }); buildRows(); scrollToDay(h.dayStart) }
-                    4 -> { collapsed.clear(); buildRows(); scrollToDay(h.dayStart) }
-                    5 -> if (remote != null) saveToPhone(h.clips) else AlertDialog.Builder(this).setTitle("Delete ${h.clips.size} clips?")
-                        .setPositiveButton("Delete") { _, _ -> ClipDeleter.delete(this, h.clips) { reload() } }
-                        .setNegativeButton("Cancel", null).show()
-                    6 -> protect(h.clips, true)
-                    7 -> protect(h.clips, false)
-                }
-            }.show()
+        val n = h.clips.size
+        val opts = ArrayList<Opt>()
+        opts += Opt("Play day in timeline", "From the first clip of the day", IconDrawable.Kind.PLAY, section = "This day") {
+            h.clips.minByOrNull { it.startMs }?.let { play(it) }
+        }
+        opts += Opt("Select all $n clips", "Then share, add to a collection…", section = "This day") {
+            selecting = true; selected.addAll(h.clips.map { it.id }); if (collapsedNow) toggleDay(h.dayStart) else updateSelection()
+        }
+        opts += Opt(if (collapsedNow) "Expand" else "Collapse", section = "View") { toggleDay(h.dayStart) }
+        opts += Opt("Collapse all days", section = "View") { collapsed.addAll(clips.map { dayStart(it.startMs) }); buildRows(); scrollToDay(h.dayStart) }
+        opts += Opt("Expand all days", section = "View") { collapsed.clear(); buildRows(); scrollToDay(h.dayStart) }
+        if (canMark()) {
+            opts += Opt("Protect all $n in cloud", "Kept from the camera phone's clean-up", IconDrawable.Kind.CLOUD, section = "Cloud") { protect(h.clips, true) }
+            opts += Opt("Remove cloud protection from all $n", "They may be deleted by the clean-up", section = "Cloud") { protect(h.clips, false) }
+        }
+        if (remote != null) opts += Opt("Save all $n to this phone", "Copies into Clips; never uploaded again", IconDrawable.Kind.DOWNLOAD, section = "Phone") {
+            saveToPhone(h.clips)
+        } else opts += Opt("Delete all $n clips of this day", "From this phone", danger = true, section = "Phone") {
+            AlertDialog.Builder(this).setTitle("Delete $n clips?")
+                .setPositiveButton("Delete") { _, _ -> ClipDeleter.delete(this, h.clips) { reload() } }
+                .setNegativeButton("Cancel", null).show()
+        }
+        OptionSheet.show(this, dayLabel(h.dayStart), opts, subtitle = "$n clips · ${durText(h.clips.sumOf { it.durationMs })}")
     }
 
     /** Collapses / expands a day and keeps its header where the user is looking. */

@@ -248,16 +248,15 @@ class LiveActivity : Activity() {
 
     /** First step when turning the live connection on: viewer only, or also a camera (which needs a PIN). */
     private fun chooseRole(then: () -> Unit) {
-        AlertDialog.Builder(this).setTitle("How will this phone take part?")
-            .setItems(arrayOf(
-                "Viewer only — see your cameras and get their alerts. This phone is never watched or controlled.",
-                "Camera and viewer — while it is monitoring, your other phones can see and control it (protected by a PIN).")) { _, i ->
-                if (i == 0) { prefs.liveCamera = false; then() }
-                else if (CameraLink.hasPin(this)) { prefs.liveCamera = true; then() }
-                else setPin { prefs.liveCamera = true; then() }
-            }
-            .setOnCancelListener { render() }
-            .show()
+        val d = com.motioncam.OptionSheet.show(this, "How will this phone take part?", listOf(
+            com.motioncam.Opt("Viewer only", "See your cameras and get their alerts. This phone is never watched or controlled.",
+                com.motioncam.IconDrawable.Kind.CLIPS) { prefs.liveCamera = false; then() },
+            com.motioncam.Opt("Camera and viewer", "While it is monitoring, your other phones can see and control it — protected by a PIN.",
+                com.motioncam.IconDrawable.Kind.VIDEOCAM) {
+                if (CameraLink.hasPin(this)) { prefs.liveCamera = true; then() } else setPin { prefs.liveCamera = true; then() }
+            },
+        ), subtitle = "You can change this later.")
+        d.setOnDismissListener { render() }
     }
 
     private fun enable() {

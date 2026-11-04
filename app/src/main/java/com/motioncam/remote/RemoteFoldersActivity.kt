@@ -167,16 +167,15 @@ class RemoteFoldersActivity : Activity() {
 
     private fun addSource() {
         val opts = ArrayList<Pair<String, () -> Unit>>()
-        opts += "Google Drive (same Google account as the recording phone)" to { googleSignIn() }
-        opts += "Dropbox: my own backups (same Dropbox account)" to { dropboxAccount { t, w -> dropboxOwn(t, w) } }
-        opts += "Dropbox: a viewer link" to { dropboxAccount { t, w -> dropboxLink(t, w) } }
+        val list = ArrayList<com.motioncam.Opt>()
+        list += com.motioncam.Opt("Google Drive", "Sign in with the Google account the recording phone backs up to", IconDrawable.Kind.CLOUD) { googleSignIn() }
+        list += com.motioncam.Opt("Dropbox — my own backups", "Same Dropbox account as the recording phone", IconDrawable.Kind.CLOUD) { dropboxAccount { t, w -> dropboxOwn(t, w) } }
+        list += com.motioncam.Opt("Dropbox — viewer link", "A link made on the recording phone (any Dropbox account)", IconDrawable.Kind.CLOUD) { dropboxAccount { t, w -> dropboxLink(t, w) } }
         if (prefs.remoteFtp) {
-            opts += "FTP / FTPS server" to { serverForm(CloudKind.FTP) }
-            opts += "SFTP server" to { serverForm(CloudKind.SFTP) }
+            list += com.motioncam.Opt("FTP / FTPS server", "Your own server; clips download before playing", IconDrawable.Kind.FOLDER) { serverForm(CloudKind.FTP) }
+            list += com.motioncam.Opt("SFTP server", "Your own server over SSH", IconDrawable.Kind.FOLDER) { serverForm(CloudKind.SFTP) }
         }
-        AlertDialog.Builder(this).setTitle("Add a remote folder")
-            .setItems(opts.map { it.first }.toTypedArray()) { _, i -> opts[i].second() }
-            .setNegativeButton("Cancel", null).show()
+        com.motioncam.OptionSheet.show(this, "Add a remote folder", list)
     }
 
     // ---- Google Drive
@@ -212,11 +211,10 @@ class RemoteFoldersActivity : Activity() {
         val cfg = CloudConfig(this, CloudKind.DROPBOX)
         val existing = cfg.refreshToken
         if (existing != null) {
-            AlertDialog.Builder(this).setTitle("Dropbox account")
-                .setItems(arrayOf("Use ${cfg.account ?: "the account connected for backup"}", "Sign in with another account")) { _, i ->
-                    if (i == 0) then(existing, cfg.account ?: "Dropbox") else dropboxSignIn(then)
-                }
-                .setNegativeButton("Cancel", null).show()
+            com.motioncam.OptionSheet.show(this, "Dropbox account", listOf(
+                com.motioncam.Opt(cfg.account ?: "The account connected for backup", "Already connected on this phone") { then(existing, cfg.account ?: "Dropbox") },
+                com.motioncam.Opt("Another Dropbox account", "Opens the Dropbox sign-in page") { dropboxSignIn(then) },
+            ))
         } else dropboxSignIn(then)
     }
 
@@ -345,20 +343,21 @@ class RemoteFoldersActivity : Activity() {
                             else "No folders found.").setPositiveButton("OK", null).show()
                         return@runOnUiThread
                     }
-                    AlertDialog.Builder(this).setTitle(title)
-                        .setItems(items.toTypedArray()) { _, i ->
-                            val label = items[i]
-                            when {
-                                label.startsWith("✓") -> confirmAdd(RemoteSource(draft.id, "", draft.kind, draft.mode, parent!!.id, parent.name,
-                                    draft.account, draft.host, draft.port, draft.user, draft.tls, draft.useKey, draft.hostKey).also {
-                                    it.password = draft.password; it.privateKey = draft.privateKey; it.passphrase = draft.passphrase
-                                    it.refreshToken = draft.refreshToken
-                                }, parent.name, clipCount)
-                                label.startsWith("⬆") -> browse(draft, trail.lastOrNull(), trail.dropLast(1))
-                                else -> browse(draft, folders[i - head], if (parent != null) trail + parent else trail)
-                            }
+                    val list = ArrayList<com.motioncam.Opt>()
+                    if (parent != null) {
+                        list += com.motioncam.Opt("Use “${parent.name}”", "$clipCount MotionCam clip${if (clipCount == 1) "" else "s"} in it", checked = true) {
+                            confirmAdd(RemoteSource(draft.id, "", draft.kind, draft.mode, parent.id, parent.name,
+                                draft.account, draft.host, draft.port, draft.user, draft.tls, draft.useKey, draft.hostKey).also {
+                                it.password = draft.password; it.privateKey = draft.privateKey; it.passphrase = draft.passphrase
+                                it.refreshToken = draft.refreshToken
+                            }, parent.name, clipCount)
                         }
-                        .setNegativeButton("Cancel", null).show()
+                        list += com.motioncam.Opt("Up one level", icon = IconDrawable.Kind.BACK) { browse(draft, trail.lastOrNull(), trail.dropLast(1)) }
+                    }
+                    for (fo in folders) list += com.motioncam.Opt(fo.name, icon = IconDrawable.Kind.FOLDER, section = if (parent != null) "Folders inside" else null) {
+                        browse(draft, fo, if (parent != null) trail + parent else trail)
+                    }
+                    com.motioncam.OptionSheet.show(this, title, list)
                 }
             } catch (e: Exception) { runOnUiThread { toast("Could not list folders: ${e.message}") } }
         }.start()

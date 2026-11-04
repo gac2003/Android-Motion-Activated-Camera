@@ -262,7 +262,11 @@ class RemoteCameraActivity : Activity() {
         f.row(f.chip("Lens: $lensLabel") {
             val list = (0 until (lenses?.length() ?: 0)).map { lenses!!.getJSONObject(it) }
             if (list.isEmpty()) return@chip
-            AlertDialog.Builder(this).setTitle("Lens").setItems(list.map { it.optString("label") }.toTypedArray()) { _, i -> set("camera", list[i].optString("key")) }.show()
+            com.motioncam.OptionSheet.show(this, "Lens", list.map { l ->
+                val label = l.optString("label")
+                com.motioncam.Opt(label.substringBefore(" ["), label.substringAfter(" [", "").removeSuffix("]").ifEmpty { null },
+                    checked = l.optString("key") == st.optString("camera")) { set("camera", l.optString("key")) }
+            })
         })
         val evStep = c.optDouble("evStep", 0.5)
         f.toggle("Exposure: automatic", st.optBoolean("exposureAuto", true), enabled) { set("exposureAuto", it) }

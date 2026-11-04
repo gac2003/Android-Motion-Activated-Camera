@@ -179,16 +179,14 @@ class UploadQueueActivity : Activity() {
     private fun onTap(pos: Int) {
         val it = items.getOrNull(pos) ?: return
         if (selecting) { if (!selected.remove(it.key)) selected += it.key; updateSelection(); return }
-        val opts = ArrayList<Pair<String, () -> Unit>>()
-        if (it.paused) opts += "Resume" to { CloudSync.setPaused(this, listOf(it.key), false) }
-        else opts += "Pause" to { CloudSync.setPaused(this, listOf(it.key), true) }
-        opts += "Move to top" to { CloudSync.moveToTop(this, listOf(it.key)) }
-        opts += "Move to bottom" to { CloudSync.moveToBottom(this, listOf(it.key)) }
-        if (!it.running) opts += "Retry now" to { CloudSync.retry(this, listOf(it.key)) }
-        opts += "Cancel upload" to { confirmCancel(listOf(it.key)) }
-        AlertDialog.Builder(this).setTitle(title(it)).setMessage(it.state)
-            .setItems(opts.map { o -> o.first }.toTypedArray()) { _, i -> opts[i].second(); refresh() }
-            .setNegativeButton("Close", null).show()
+        val opts = ArrayList<com.motioncam.Opt>()
+        if (it.paused) opts += com.motioncam.Opt("Resume", "Upload it again when its turn comes") { CloudSync.setPaused(this, listOf(it.key), false); refresh() }
+        else opts += com.motioncam.Opt("Pause", "Keep it in the queue without uploading") { CloudSync.setPaused(this, listOf(it.key), true); refresh() }
+        opts += com.motioncam.Opt("Move to top", "Upload it next") { CloudSync.moveToTop(this, listOf(it.key)); refresh() }
+        opts += com.motioncam.Opt("Move to bottom", "Upload it last") { CloudSync.moveToBottom(this, listOf(it.key)); refresh() }
+        if (!it.running) opts += com.motioncam.Opt("Retry now", "Ignore the wait after an error") { CloudSync.retry(this, listOf(it.key)); refresh() }
+        opts += com.motioncam.Opt("Cancel upload", "The clip stays on the phone", danger = true) { confirmCancel(listOf(it.key)); refresh() }
+        com.motioncam.OptionSheet.show(this, title(it), opts, subtitle = it.state)
     }
 
     private fun confirmCancel(keys: List<String>) {

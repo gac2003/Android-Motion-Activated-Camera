@@ -10,24 +10,27 @@ import android.widget.Toast
 object CollectionPicker {
     fun show(a: Activity, clipIds: List<Long>, store: CollectionStore = Collections, done: () -> Unit) {
         val cols = store.all(a)
-        val names = cols.map { c ->
+        val opts = ArrayList<Opt>()
+        for (c in cols) {
             val inAll = c.clipIds.containsAll(clipIds)
-            (if (c.isFavourites) "★ " else "") + c.name + "  (${c.clipIds.size})" + if (inAll) "  ✓" else ""
-        } + "＋ New collection…"
-        AlertDialog.Builder(a).setTitle(if (clipIds.size == 1) "Add clip to" else "Add ${clipIds.size} clips to")
-            .setItems(names.toTypedArray()) { _, which ->
-                if (which < cols.size) {
-                    store.add(a, cols[which].id, clipIds)
-                    Toast.makeText(a, "Added to ${cols[which].name}", Toast.LENGTH_SHORT).show()
-                    done()
-                } else askName(a, "New collection", "") { name ->
-                    val c = store.create(a, name)
-                    store.add(a, c.id, clipIds)
-                    Toast.makeText(a, "Added to ${c.name}", Toast.LENGTH_SHORT).show()
-                    done()
-                }
+            val n = c.clipIds.size
+            opts += Opt((if (c.isFavourites) "★ " else "") + c.name,
+                "$n clip${if (n == 1) "" else "s"}" + if (inAll) " · already in it" else "",
+                icon = if (c.isFavourites) null else IconDrawable.Kind.FOLDER, checked = inAll) {
+                store.add(a, c.id, clipIds)
+                Toast.makeText(a, "Added to ${c.name}", Toast.LENGTH_SHORT).show()
+                done()
             }
-            .setNegativeButton("Cancel", null).show()
+        }
+        opts += Opt("New collection…", "Create one and add the clips", section = "New") {
+            askName(a, "New collection", "") { name ->
+                val c = store.create(a, name)
+                store.add(a, c.id, clipIds)
+                Toast.makeText(a, "Added to ${c.name}", Toast.LENGTH_SHORT).show()
+                done()
+            }
+        }
+        OptionSheet.show(a, if (clipIds.size == 1) "Add clip to" else "Add ${clipIds.size} clips to", opts)
     }
 
     fun askName(a: Activity, title: String, initial: String, ok: (String) -> Unit) {

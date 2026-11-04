@@ -94,18 +94,26 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 c.drawCircle(12f, 12f, 2.4f, stroke)
             }
             Kind.CLIPS -> {
-                // a folder of videos: folder outline (softly rounded corners) with a play mark inside its body
+                // a folder of videos: folder outline (softly rounded corners) holding a film strip
                 stroke.strokeWidth = 2f
                 stroke.pathEffect = android.graphics.CornerPathEffect(1.6f)
-                path.moveTo(3f, 19f); path.lineTo(3f, 5f); path.lineTo(9.3f, 5f); path.lineTo(11.3f, 7.6f)
-                path.lineTo(21f, 7.6f); path.lineTo(21f, 19f); path.close()
+                path.moveTo(3f, 20f); path.lineTo(3f, 4f); path.lineTo(9.3f, 4f); path.lineTo(11.3f, 6.6f)
+                path.lineTo(21f, 6.6f); path.lineTo(21f, 20f); path.close()
                 c.drawPath(path, stroke)
                 stroke.pathEffect = null
+                // the strip with sprocket holes down both sides and two frames, punched out (even-odd fill)
                 path.reset()
-                fill.pathEffect = android.graphics.CornerPathEffect(1f)
-                path.moveTo(10f, 10.4f); path.lineTo(15.6f, 13.3f); path.lineTo(10f, 16.2f); path.close()
+                path.fillType = Path.FillType.EVEN_ODD
+                path.addRoundRect(RectF(7.6f, 8.4f, 16.4f, 18.6f), 1.1f, 1.1f, Path.Direction.CW)
+                for (i in 0 until 3) {
+                    val y = 9.4f + i * 2.95f
+                    path.addRoundRect(RectF(8.5f, y, 10f, y + 1.5f), 0.35f, 0.35f, Path.Direction.CW)
+                    path.addRoundRect(RectF(14f, y, 15.5f, y + 1.5f), 0.35f, 0.35f, Path.Direction.CW)
+                }
+                path.addRoundRect(RectF(10.9f, 9.4f, 13.1f, 13.1f), 0.35f, 0.35f, Path.Direction.CW)
+                path.addRoundRect(RectF(10.9f, 13.9f, 13.1f, 17.6f), 0.35f, 0.35f, Path.Direction.CW)
                 c.drawPath(path, fill)
-                fill.pathEffect = null
+                path.fillType = Path.FillType.WINDING
             }
             Kind.SCREEN -> {
                 stroke.strokeWidth = 2f

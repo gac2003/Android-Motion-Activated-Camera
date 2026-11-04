@@ -51,7 +51,8 @@ object CameraLink {
 
     fun start(ctx: Context) {
         val c = ctx.applicationContext
-        if (running || !Live.enabled(c)) return
+        // only a phone that agreed to be a camera on the network (and has a PIN) is visible / controllable
+        if (running || !Live.enabled(c) || !Prefs(c).liveCamera || !hasPin(c)) return
         running = true
         app = c
         Live.cameraActive = true

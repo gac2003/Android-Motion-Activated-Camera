@@ -80,6 +80,7 @@ object Live {
 
     private fun deviceInfo(ctx: Context): JSONObject = JSONObject()
         .put("name", Device.name(ctx)).put("camera", cameraActive).put("viewer", viewerActive)
+        .put("canCamera", Prefs(ctx).liveCamera)
         .put("app", try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName } catch (_: Exception) { "" })
         .put("sync", syncHealth(ctx))
 

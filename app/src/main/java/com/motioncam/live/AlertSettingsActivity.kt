@@ -37,6 +37,10 @@ class AlertSettingsActivity : Activity() {
         f.box.removeAllViews()
         f.toggle("Show camera alerts on this phone", p.alertsOn) { p.alertsOn = it; render() }
         if (!p.alertsOn) return
+        f.choice("Where alerts appear", listOf("Phone notifications (also when MotionCam is closed, with Stay connected)",
+            "Inside MotionCam only (a banner on the open screen + the Alerts list; nothing in the notification shade)"),
+            if (p.alertsInApp) 1 else 0) { p.alertsInApp = it == 1 }
+        f.button("Alerts list (${AlertInbox.unread(this)} unread)") { startActivity(android.content.Intent(this, AlertsInboxActivity::class.java)) }
         f.note("Alerts come from the camera phones in your live connection. Each camera's alerts are grouped, and every alert " +
             "has Mute 1 h / 8 h buttons. Mute a camera for longer in Live connection → ⋮.")
 

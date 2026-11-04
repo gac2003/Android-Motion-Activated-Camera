@@ -82,6 +82,12 @@ object Alerts {
     private fun nid(cam: String, kind: String) = (cam + kind).hashCode() and 0x7fffffff
 
     private fun post(ctx: Context, cam: String, kind: String, channel: String, title: String, text: String, silent: Boolean, update: Boolean = false) {
+        AlertInbox.add(ctx, cam, kind, title, text, update)
+        if (Prefs(ctx).alertsInApp) {
+            // "inside MotionCam only": a banner on the open screen (not for silent updates), nothing in the phone's notifications
+            if (!update) AlertInbox.banner(cam, title, text)
+            return
+        }
         try {
             channels(ctx)
             val open = PendingIntent.getActivity(ctx, nid(cam, "open"),

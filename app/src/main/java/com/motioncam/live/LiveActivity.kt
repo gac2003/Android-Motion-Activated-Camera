@@ -55,11 +55,16 @@ class LiveActivity : Activity() {
             "(captive Wi-Fi, isolated networks). Camera phones share their status, alerts and a live view; other phones can " +
             "control them. Clips and collections still come from the cloud folder.")
         f.toggle("Live connection on this phone", prefs.liveOn) { on ->
-            prefs.liveOn = on
-            if (!on) LiveService.stop(this) else if (prefs.liveStay) LiveService.start(this)
-            Live.refresh(this); render()
+            if (on) chooseRole { enable() } else {
+                prefs.liveOn = false
+                LiveService.stop(this)
+                Live.refresh(this)
+            }
+            render()
         }
         if (!prefs.liveOn) return
+        f.line(if (prefs.liveCamera) "This phone: camera and viewer" else "This phone: viewer only (it can't be watched or controlled)",
+            13f, Ui.GREY)
 
         f.title("Your phones' network")
         val mode = LiveNet.mode(this)
@@ -106,15 +111,24 @@ class LiveActivity : Activity() {
             "the connection so alerts arrive any time; it uses a little battery. For reliable alerts, also exempt MotionCam " +
             "from battery optimisation.")
 
-        f.title("When this phone is a camera")
-        val hasPin = CameraLink.hasPin(this)
-        f.line(if (hasPin) "Remote control PIN: set" else "Remote control PIN: none (any phone in the network can control this camera)")
-        f.row(f.chip(if (hasPin) "Change PIN" else "Set PIN") { setPin() }, *(if (hasPin) arrayOf(f.chip("Remove PIN") {
-            CameraLink.setPin(this, null); render()
-        }) else emptyArray()))
-        f.toggle("PIN also needed for the live view and frames", prefs.livePinForView, enabled = hasPin) { prefs.livePinForView = it }
-        f.note("The PIN protects camera controls, settings and pausing/stopping monitoring. It is never sent: requests are signed " +
-            "with it. After 5 wrong PINs remote control is locked for 10 minutes.")
+        f.title("This phone as a camera")
+        f.toggle("Let other phones see and control this phone while it is monitoring", prefs.liveCamera) { on ->
+            if (on) {
+                if (CameraLink.hasPin(this)) { prefs.liveCamera = true; render() }
+                else setPin { prefs.liveCamera = true; render() }      // a camera phone always has a PIN
+            } else {
+                prefs.liveCamera = false
+                CameraLink.stop(this)
+                Live.refresh(this); render()
+            }
+            if (!on || CameraLink.hasPin(this)) render()
+        }
+        if (prefs.liveCamera) {
+            f.row(f.chip("Change PIN") { setPin { render() } })
+            f.toggle("PIN also needed for the live view and frames", prefs.livePinForView) { prefs.livePinForView = it }
+            f.note("The PIN protects the camera's controls, settings and pausing/stopping monitoring (and, if on, its live view). " +
+                "It is never sent: requests are signed with it. After 5 wrong PINs remote control is locked for 10 minutes.")
+        } else f.note("Viewer only: this phone sees the cameras and gets their alerts, but is never shown or controllable as a camera.")
     }
 
     private fun phoneRow(p: Live.Phone, isMe: Boolean): View {
@@ -214,13 +228,42 @@ class LiveActivity : Activity() {
         Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
     }
 
-    private fun setPin() {
-        val input = EditText(this).apply { hint = "At least 4 digits or letters"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
-        AlertDialog.Builder(this).setTitle("Remote control PIN").setView(input)
-            .setMessage("Other phones need this PIN to control this camera or change its settings.")
+    /** Asks for the camera PIN (twice); [done] only runs when a valid PIN was saved. */
+    private fun setPin(done: () -> Unit) {
+        val input = EditText(this).apply { hint = "PIN (at least 4 digits or letters)"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
+        val input2 = EditText(this).apply { hint = "Repeat the PIN"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; val p = Ui.dp(this@LiveActivity, 20); setPadding(p, 0, p, 0); addView(input); addView(input2) }
+        AlertDialog.Builder(this).setTitle("Camera PIN").setView(box)
+            .setMessage("Other phones need this PIN to control this camera, change its settings or (if you keep that on) watch it.")
             .setPositiveButton("Save") { _, _ ->
                 val p = input.text.toString().trim()
-                if (p.length < 4) Toast.makeText(this, "At least 4 characters", Toast.LENGTH_SHORT).show() else { CameraLink.setPin(this, p); render() }
-            }.setNegativeButton("Cancel", null).show()
+                when {
+                    p.length < 4 -> Toast.makeText(this, "At least 4 characters", Toast.LENGTH_SHORT).show()
+                    p != input2.text.toString().trim() -> Toast.makeText(this, "The two PINs differ", Toast.LENGTH_SHORT).show()
+                    else -> { CameraLink.setPin(this, p); done() }
+                }
+                render()
+            }.setNegativeButton("Cancel") { _, _ -> render() }.show()
+    }
+
+    /** First step when turning the live connection on: viewer only, or also a camera (which needs a PIN). */
+    private fun chooseRole(then: () -> Unit) {
+        AlertDialog.Builder(this).setTitle("How will this phone take part?")
+            .setItems(arrayOf(
+                "Viewer only — see your cameras and get their alerts. This phone is never watched or controlled.",
+                "Camera and viewer — while it is monitoring, your other phones can see and control it (protected by a PIN).")) { _, i ->
+                if (i == 0) { prefs.liveCamera = false; then() }
+                else if (CameraLink.hasPin(this)) { prefs.liveCamera = true; then() }
+                else setPin { prefs.liveCamera = true; then() }
+            }
+            .setOnCancelListener { render() }
+            .show()
+    }
+
+    private fun enable() {
+        prefs.liveOn = true
+        if (prefs.liveStay) LiveService.start(this)
+        Live.refresh(this)
+        render()
     }
 }

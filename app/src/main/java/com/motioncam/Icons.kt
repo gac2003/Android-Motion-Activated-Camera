@@ -12,7 +12,7 @@ import android.widget.ImageView
 
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
-    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD }
+    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, VIDEOCAM }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -77,6 +77,33 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 path.cubicTo(21.5f, 16.9f, 19.9f, 18.5f, 17.9f, 18.5f)
                 path.close()
                 c.drawPath(path, stroke)
+            }
+            Kind.SETTINGS -> {
+                // gear: 8 teeth, outer ring, hub
+                stroke.strokeWidth = 3f
+                val cap = stroke.strokeCap
+                stroke.strokeCap = Paint.Cap.BUTT
+                for (i in 0 until 8) {
+                    val a = Math.toRadians(i * 45.0)
+                    c.drawLine(12f + 6f * Math.cos(a).toFloat(), 12f + 6f * Math.sin(a).toFloat(),
+                        12f + 9f * Math.cos(a).toFloat(), 12f + 9f * Math.sin(a).toFloat(), stroke)
+                }
+                stroke.strokeCap = cap
+                stroke.strokeWidth = 2f
+                c.drawCircle(12f, 12f, 6.4f, stroke)
+                c.drawCircle(12f, 12f, 2.4f, stroke)
+            }
+            Kind.CLIPS -> {
+                stroke.strokeWidth = 2f
+                c.drawRoundRect(RectF(3.5f, 5.5f, 20.5f, 18.5f), 2.5f, 2.5f, stroke)
+                path.moveTo(10f, 9f); path.lineTo(15.5f, 12f); path.lineTo(10f, 15f); path.close()
+                c.drawPath(path, fill)
+            }
+            Kind.VIDEOCAM -> {
+                stroke.strokeWidth = 2f
+                c.drawRoundRect(RectF(2.5f, 7f, 15f, 17f), 2f, 2f, stroke)
+                path.moveTo(16f, 10.5f); path.lineTo(21.5f, 7.5f); path.lineTo(21.5f, 16.5f); path.lineTo(16f, 13.5f); path.close()
+                c.drawPath(path, fill)
             }
             Kind.DOWNLOAD -> {
                 stroke.strokeWidth = 2.2f

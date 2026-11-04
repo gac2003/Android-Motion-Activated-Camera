@@ -160,17 +160,20 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
 
 * **Join**: sign in with the same **Google account** on every phone (basic profile only), or use a **network code**
   (no Google account; everything is encrypted with the code). The phone list shows which phones are connected.
+* **Viewer only or camera**: when turning it on, choose whether the phone only watches (it is never shown or
+  controllable as a camera) or may also be a camera – which always requires a **PIN**.
 * **Camera phones** (while monitoring) share their status – monitoring / recording, battery, charging, temperature, last
   motion, lens and format – and events: motion, clip saved, monitoring stopped (and why), too hot, charger unplugged.
 * **Other phones** get alerts that don't nag: one motion alert per camera per N minutes (more motion updates it
   silently), battery once below a threshold, "offline" only after N minutes and only for a camera that was monitoring,
   quiet hours, per-camera mute (also from the alert), a separate Android channel per alert type for sound/vibration.
   Alerts arrive while MotionCam is open; **Stay connected** (silent notification) keeps them coming when it is closed.
+  Or choose **inside MotionCam only**: a banner on the open screen and the Alerts list, nothing in the notification shade.
 * **Remote camera**: low-rate live view (a frame every 2 s, only while watched, stops after 3 min), a **high-quality
   frame** on request, the camera controls (lens, exposure, ISO, shutter, focus, white balance, zoom), recording and
   motion settings, pause / resume / stop monitoring, and the camera's **Activity** log (7 days).
-* **PIN**: a camera can require a PIN for controls and settings (optionally also for the live view). Requests are
-  signed with it, it is never sent; 5 wrong PINs lock remote control for 10 minutes.
+* **PIN**: every camera phone has one; it protects controls and settings and, by default, the live view and frames.
+  Requests are signed with it, it is never sent; 5 wrong PINs lock remote control for 10 minutes.
 * **Sync**: a change to shared collections, protections or new clips nudges the other phones, which sync within seconds.
   Sync status shows which phone still has unsent changes or a conflict to decide.
 * Builds from this repository use the author's Firebase project (its free tier is shared by everyone using it). To use

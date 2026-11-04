@@ -51,6 +51,7 @@
         <activity android:name=".live.RemoteCameraActivity" android:exported="false" />
         <activity android:name=".live.ActivityLogActivity" android:exported="false" />
         <activity android:name=".live.AlertSettingsActivity" android:exported="false" />
+        <activity android:name=".live.AlertsInboxActivity" android:exported="false" />
         <receiver android:name=".live.AlertActionReceiver" android:exported="false" />
         <service
             android:name=".live.LiveService"

@@ -130,7 +130,11 @@ class Prefs(ctx: Context) {
     /** Viewer: keep the connection in the background (silent notification) so alerts arrive with the app closed. */
     var liveStay: Boolean get() = b("liveStay", false); set(v) = put("liveStay", v)
     /** Camera: the remote-control PIN also protects the live view / frames. */
-    var livePinForView: Boolean get() = b("livePinForView", false); set(v) = put("livePinForView", v)
+    var livePinForView: Boolean get() = b("livePinForView", true); set(v) = put("livePinForView", v)
+    /** This phone may act as a camera on the network (seen and controlled while monitoring). Needs a PIN. Off = viewer only. */
+    var liveCamera: Boolean get() = b("liveCamera", false); set(v) = put("liveCamera", v)
+    /** Where camera alerts appear: false = phone notifications, true = only inside MotionCam (banner + Alerts list). */
+    var alertsInApp: Boolean get() = b("alertsInApp", false); set(v) = put("alertsInApp", v)
     // alerts on viewing phones
     var alertsOn: Boolean get() = b("alertsOn", true); set(v) = put("alertsOn", v)
     var alertMotion: Boolean get() = b("alertMotion", true); set(v) = put("alertMotion", v)
@@ -178,7 +182,7 @@ class Prefs(ctx: Context) {
         val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal", "cloudThumbs")
         val REMOTE_FOLDER_KEYS = listOf("remoteFtp", "remoteKeepCopy")
         val PLAYER_KEYS = listOf("skipMs", "stripZoom")
-        val ALERT_KEYS = listOf("alertsOn", "alertMotion", "alertMotionGapMin", "alertClip", "alertBattery", "alertBatteryPct",
+        val ALERT_KEYS = listOf("alertsOn", "alertsInApp", "alertMotion", "alertMotionGapMin", "alertClip", "alertBattery", "alertBatteryPct",
             "alertCharger", "alertHot", "alertOffline", "alertOfflineMin", "alertBackOnline", "alertMonitoring", "alertSync",
             "quietOn", "quietFrom", "quietTo", "quietMode")
         val CAMERA_KEYS = listOf("camera", "exposureAuto", "evIndex", "iso", "shutterNs", "focusAuto", "focusPos",

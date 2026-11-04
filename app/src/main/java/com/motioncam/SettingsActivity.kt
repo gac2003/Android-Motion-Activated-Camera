@@ -18,6 +18,15 @@ class SettingsActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var box: LinearLayout
 
+    /** Live connection state the page was built with (it is changed on its own screen). */
+    private var builtLiveOn: Boolean? = null
+
+    override fun onResume() {
+        super.onResume()
+        if (builtLiveOn != null && builtLiveOn != prefs.liveOn) recreate()   // show the new on/off state
+        builtLiveOn = prefs.liveOn
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
@@ -125,6 +134,16 @@ class SettingsActivity : Activity() {
                 "• Or join the phone's own hotspot from your laptop."
         )
 
+        title("Live connection", null)
+        note("Your phones connected through the internet (works on captive / isolated networks): camera status and alerts, " +
+            "a live view, remote control with an optional PIN, and instant sync between phones. Off by default.")
+        box.addView(Ui.chip(this, "Live connection" + if (prefs.liveOn) "  ·  on" else "  ·  off").apply {
+            setOnClickListener { startActivity(Intent(this@SettingsActivity, com.motioncam.live.LiveActivity::class.java)) }
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
+        if (prefs.liveOn) box.addView(Ui.chip(this, "Alerts & notifications").apply {
+            setOnClickListener { startActivity(Intent(this@SettingsActivity, com.motioncam.live.AlertSettingsActivity::class.java)) }
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
+
         title("Cloud backup", Prefs.CLOUD_KEYS)
         note("Copies every new clip to the cloud or your own server, so footage survives if the phone is damaged or stolen. " +
             "Uploads wait and resume automatically if the internet drops.")
@@ -152,16 +171,6 @@ class SettingsActivity : Activity() {
         toggle("Upload thumbnails for other devices", prefs.cloudThumbs) { prefs.cloudThumbs = it; com.motioncam.cloud.CloudSync.kick(this) }
         note("A small peak-motion picture (about 20 KB) per clip, in a \".thumbnails\" subfolder, so another device viewing " +
             "this folder under Clips → Remote folders sees the right frame and clip length without downloading videos.")
-
-        title("Live connection", null)
-        note("Your phones connected through the internet (works on captive / isolated networks): camera status and alerts, " +
-            "a live view, remote control with an optional PIN, and instant sync between phones. Off by default.")
-        box.addView(Ui.chip(this, "Live connection" + if (prefs.liveOn) "  ·  on" else "  ·  off").apply {
-            setOnClickListener { startActivity(Intent(this@SettingsActivity, com.motioncam.live.LiveActivity::class.java)) }
-        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
-        if (prefs.liveOn) box.addView(Ui.chip(this, "Alerts & notifications").apply {
-            setOnClickListener { startActivity(Intent(this@SettingsActivity, com.motioncam.live.AlertSettingsActivity::class.java)) }
-        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
 
         title("Remote folders", Prefs.REMOTE_FOLDER_KEYS)
         note("View clips another phone backed up (Clips → cloud icon). Read-only: nothing in those folders is ever changed.")

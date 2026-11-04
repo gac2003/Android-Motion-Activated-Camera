@@ -126,6 +126,9 @@ class MainActivity : Activity() {
         ShortClipBus.listener = { id, len -> ui.post { offerUndo(id, len) } }
         com.motioncam.live.RemoteSettings.listeners += remoteChanged
         liveChip?.visibility = if (prefs.liveOn) View.VISIBLE else View.GONE
+        // unread camera alerts: the Cameras icon turns yellow
+        (liveChip as? ImageView)?.setImageDrawable(IconDrawable(IconDrawable.Kind.VIDEOCAM,
+            if (prefs.liveOn && com.motioncam.live.AlertInbox.unread(this) > 0) Ui.ACCENT else 0xFFFFFFFF.toInt()))
     }
 
     override fun onPause() {
@@ -320,6 +323,26 @@ class MainActivity : Activity() {
             .show()
     }
 
+    /** A small corner pop-up below the top bar (like the "short clip discarded" one), gone after [ms]. */
+    private fun showPill(text: String, ms: Long) {
+        if (undoPill != null) return   // the Undo pill has priority
+        val pill = Ui.label(this, text, 13f).apply {
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = Ui.dp(this@MainActivity, 18).toFloat(); setColor(0xE6202328.toInt()); setStroke(Ui.dp(this@MainActivity, 1), Ui.RED)
+            }
+            val p = Ui.dp(this@MainActivity, 12)
+            setPadding(p, p / 2 + 2, p, p / 2 + 2)
+            elevation = Ui.dp(this@MainActivity, 4).toFloat()
+        }
+        rootLayout.addView(pill, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
+            topMargin = (topBarView?.bottom ?: 0) + Ui.dp(this@MainActivity, 8)
+            rightMargin = Ui.dp(this@MainActivity, 8)
+        })
+        pill.alpha = 0f
+        pill.animate().alpha(1f).setDuration(150).start()
+        pill.postDelayed({ pill.animate().alpha(0f).setDuration(200).withEndAction { rootLayout.removeView(pill) }.start() }, ms)
+    }
+
     private fun hidePill() {
         undoPill?.let { p -> p.animate().alpha(0f).setDuration(150).withEndAction { rootLayout.removeView(p) }.start() }
         undoPill = null
@@ -385,15 +408,17 @@ class MainActivity : Activity() {
         texts.addView(statusTv)
         texts.addView(infoTv)
         top.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
-        liveChip = Ui.chip(this, "Cameras").apply {
-            setOnClickListener { startActivity(Intent(this@MainActivity, com.motioncam.live.LiveActivity::class.java)) }
-            visibility = if (prefs.liveOn) View.VISIBLE else View.GONE
+        // app-bar actions as icons (name on long-press), so the status text keeps the room it needs
+        fun action(kind: IconDrawable.Kind, name: String, click: () -> Unit) = iconButton(this, kind, 44, 10) { click() }.apply {
+            contentDescription = name
+            tooltipText = name
         }
+        liveChip = action(IconDrawable.Kind.VIDEOCAM, "Cameras (live connection)") {
+            startActivity(Intent(this@MainActivity, com.motioncam.live.LiveActivity::class.java))
+        }.apply { visibility = if (prefs.liveOn) View.VISIBLE else View.GONE }
         top.addView(liveChip)
-        top.addView(Space(this), Ui.dp(this, 6), 1)
-        top.addView(Ui.chip(this, "Clips").apply { setOnClickListener { startActivity(Intent(this@MainActivity, ClipsActivity::class.java)) } })
-        top.addView(Space(this), Ui.dp(this, 6), 1)
-        top.addView(Ui.chip(this, "Settings").apply { setOnClickListener { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) } })
+        top.addView(action(IconDrawable.Kind.CLIPS, "Clips") { startActivity(Intent(this@MainActivity, ClipsActivity::class.java)) })
+        top.addView(action(IconDrawable.Kind.SETTINGS, "Settings") { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) })
         root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
 
         // bottom pro panel
@@ -700,7 +725,12 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------------------ status
 
+    private var lastMode: Mode? = null
+
     private fun render(s: Status) {
+        // motion just started: a short, non-blocking pop-up in the corner (the time also stays in the info line)
+        if (lastMode != null && lastMode != Mode.RECORDING && s.mode == Mode.RECORDING) showPill("● Motion detected — recording", 3000)
+        lastMode = s.mode
         val running = CameraService.instance != null
         startBtn.text = if (compact == true) (if (running) "STOP" else "START") else if (running) "STOP MONITORING" else "START MONITORING"
         Ui.pill(startBtn, if (running) Ui.RED else 0xFF2E7D32.toInt())
@@ -711,7 +741,7 @@ class MainActivity : Activity() {
                 val sec = (now - s.recordingSinceWall) / 1000
                 "● REC %02d:%02d".format(sec / 60, sec % 60)
             }
-            s.mode == Mode.WATCHING -> if (s.lastMotionWall > 0) "Watching · motion ${ago(now - s.lastMotionWall)} ago" else "Watching for motion"
+            s.mode == Mode.WATCHING -> "Watching for motion"
             s.mode == Mode.PREVIEW -> "Preview · not monitoring"
             s.mode == Mode.OFF -> if (running) "Starting…" else "Not monitoring"
             else -> s.message.ifEmpty { s.mode.name }
@@ -720,6 +750,7 @@ class MainActivity : Activity() {
         caps?.let { sb.append(it.lens.label.substringBefore(" [").removePrefix("Rear ").replace(" · multi-cam", "").replaceFirstChar { ch -> ch.uppercase() }).append(" · ") }
         sb.append("${if (prefs.resHeight >= 2160) "4K" else "${prefs.resHeight}p"} ${prefs.fps}fps")
         if (s.tempC > 0f) sb.append(" · ${"%.0f".format(s.tempC)}°C")
+        if (s.lastMotionWall > 0 && s.monitoring) sb.append(" · motion ${ago(now - s.lastMotionWall)} ago")
         if (running && prefs.serverOn) {
             if (now - addrCacheAt > 10_000) { addrCacheAt = now; addrCache = WebServer.localAddresses() }
             if (addrCache.isNotEmpty()) sb.append("\nRemote: ").append(addrCache.joinToString("  ") { "http://${it.second}:${prefs.port}" })

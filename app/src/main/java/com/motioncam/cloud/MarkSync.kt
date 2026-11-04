@@ -142,10 +142,10 @@ object MarkSync {
                 saveLocal(ctx)
             }
         } else {
+            // remote folders: shared collections protect clips by themselves (read from the folder); only entries not
+            // sent yet keep this phone's own mark meanwhile, so a clip is never unprotected in between
             val id = space.substring(2)
-            val src = RemoteSources.get(ctx, id) ?: return emptyMap()
-            RemoteRepo.cached(ctx, src)
-            for (c in Collections.forRemote(id).all(ctx)) for (cid in c.clipIds) RemoteRepo.entry(cid)?.name?.let { add(it, false, c.name) }
+            for ((clip, cols) in com.motioncam.remote.SharedSync.pendingClips(ctx, id)) for (c in cols) add(clip, false, c)
         }
         return out
     }
@@ -170,7 +170,9 @@ object MarkSync {
      * Brings this device's marks in [space] up to date and returns everyone's marks (network; blocking).
      * [existing] = clip names in the folder (only clips that exist are marked).
      */
-    fun sync(ctx: Context, space: String, store: MarkStore, existing: Set<String>): Result {
+    fun sync(ctx: Context, space: String, store: MarkStore, existing: Set<String>,
+             /** "In a shared collection" reasons (not stored as marks: the collection entries themselves count). */
+             shared: Map<String, List<Mark>> = emptyMap()): Result {
         val me = Device.id(ctx)
         val myName = Device.name(ctx)
         val marks = store.load().toMutableMap()
@@ -203,6 +205,14 @@ object MarkSync {
                 }
             }
         }
+        // shared collections: an entry protects the clip unless the protection was removed after it was added
+        for ((clip, ms) in shared) {
+            if (clip !in existing) continue
+            val cm = marks.getOrPut(clip) { ClipMarks(clip) }
+            val live = ms.filter { cm.overrideAt == 0L || it.at > cm.overrideAt }
+            cm.marks.addAll(live)
+            if (live.isEmpty()) overridden += clip
+        }
         val r = Result(marks.filterValues { it.protected || it.overrideAt > 0 }, existing, overridden, store.writable)
         synchronized(this) { cache[space] = r }
         return r
@@ -215,12 +225,14 @@ object MarkSync {
             val cfg = CloudConfig(ctx, kind)
             val folder = cfg.folderId ?: return Result(emptyMap(), emptySet(), emptySet(), true)
             return CloudSync.providerFor(ctx, kind).use { p ->
-                sync(ctx, space, MarkStore.forProvider(p, folder), p.list(folder).filter { isOurClip(it.name) }.map { it.name }.toSet())
+                sync(ctx, space, MarkStore.forProvider(p, folder), p.list(folder).filter { isOurClip(it.name) }.map { it.name }.toSet(),
+                    sharedMarks(CollectionFiles(p, folder, true).load()))
             }
         }
         val src = RemoteSources.get(ctx, space.substring(2)) ?: throw CloudException("Folder removed", CloudException.Kind.NOT_FOUND)
         val existing = RemoteRepo.cached(ctx, src).map { it.name }.toSet()
-        return RemoteSources.reader(ctx, src).use { r -> sync(ctx, space, r.markStore(src.folderId), existing) }
+        val shared = com.motioncam.remote.SharedSync.sharedMarks(com.motioncam.remote.SharedSync.view(ctx, src.id))
+        return RemoteSources.reader(ctx, src).use { r -> sync(ctx, space, r.markStore(src.folderId), existing, shared) }
     }
 
     /**
@@ -237,6 +249,19 @@ object MarkSync {
 
     /** Whether [name] is protected in any of [spaces] (last sync). */
     fun isProtected(spaces: Collection<String>, name: String) = spaces.any { cached(it)?.marks?.get(name)?.protected == true }
+
+    /** Protection reasons from the shared collections in the cloud (newest entry per collection and clip). */
+    fun sharedMarks(cols: Map<String, CollectionFiles.Col>): Map<String, List<Mark>> {
+        val out = HashMap<String, MutableList<Mark>>()
+        for (c in cols.values) {
+            if (c.deletedAt > 0) continue
+            for ((clip, es) in c.entries.groupBy { it.clip }) {
+                val e = es.maxByOrNull { it.at }!!
+                out.getOrPut(clip) { ArrayList() } += Mark("shared:${c.id}", e.deviceName, false, listOf(c.name), e.at)
+            }
+        }
+        return out
+    }
 
     /** Removes the protection of [names] for everyone (any device can). */
     fun override(ctx: Context, space: String, names: Collection<String>): Result {
@@ -274,7 +299,7 @@ object MarkSync {
     fun schedule(ctx: Context, space: String) {
         val app = ctx.applicationContext
         synchronized(pending) { if (!pending.add(space)) return }
-        handler.postDelayed({
+        try { handler.postDelayed({
             synchronized(pending) { pending.remove(space) }
             if (!online(app)) return@postDelayed
             try {
@@ -282,7 +307,7 @@ object MarkSync {
                 onSynced?.invoke(space)
                 if (space.startsWith("r:") && r.overridden.isNotEmpty()) RemoteRepo.keepOverridden(app, space.substring(2), r.overridden)
             } catch (_: Exception) {}
-        }, 2500)
+        }, 2500) } catch (_: Throwable) { synchronized(pending) { pending.remove(space) } }
     }
 
     /** All of this phone's backup destinations. */

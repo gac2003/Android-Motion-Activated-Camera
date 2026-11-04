@@ -123,6 +123,8 @@ class RemoteFoldersActivity : Activity() {
         texts.addView(Ui.label(ctx, s.name, 16f))
         texts.addView(Ui.label(ctx, s.describe, 12f, Ui.GREY).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
         texts.addView(Ui.label(ctx, checkedText(s), 12f, Ui.GREY).also { checkedLabels[it] = s })
+        val conflicts = SharedSync.state(ctx, s.id).conflicts.size
+        if (conflicts > 0) texts.addView(Ui.label(ctx, "⚠ $conflicts collection sync conflict${if (conflicts == 1) "" else "s"} — open Collections › Sync status", 12f, Ui.ACCENT))
         r.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
         lateinit var more: View
         more = iconButton(ctx, IconDrawable.Kind.MORE, 44, 10) {

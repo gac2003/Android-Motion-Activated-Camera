@@ -20,7 +20,7 @@ import java.util.concurrent.Executors
 /** List of collections (Favourites + user-made). Each opens the normal clip gallery filtered to it. */
 class CollectionsActivity : Activity() {
     companion object {
-        /** Collections of a remote folder (kept on this device only). */
+        /** Shared collections of a remote folder. */
         const val EXTRA_REMOTE = "remote"
     }
 
@@ -39,7 +39,7 @@ class CollectionsActivity : Activity() {
         val add = Ui.chip(this, "＋ New").apply {
             setOnClickListener { CollectionPicker.askName(this@CollectionsActivity, "New collection", "") { store.create(this@CollectionsActivity, it); reload() } }
         }
-        root.addView(topBar(this, remote?.let { "Collections · ${it.name}" } ?: "Collections", add))
+        root.addView(topBar(this, remote?.let { "Collections · ${it.name}" } ?: "Collections", if (canEdit()) add else null))
         box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@CollectionsActivity, 12)
@@ -50,7 +50,18 @@ class CollectionsActivity : Activity() {
         setContentView(root)
     }
 
-    override fun onResume() { super.onResume(); reload() }
+    /** Shared collections can't be changed through a read-only Dropbox viewer link. */
+    private fun canEdit() = remote?.mode != com.motioncam.remote.RemoteSources.MODE_LINK
+
+    private val synced: (String) -> Unit = { id -> if (id == remote?.id) runOnUiThread { reload() } }
+
+    override fun onResume() {
+        super.onResume()
+        reload()
+        remote?.let { com.motioncam.remote.SharedSync.listeners += synced; com.motioncam.remote.SharedSync.schedule(this, it.id, 0) }
+    }
+
+    override fun onPause() { com.motioncam.remote.SharedSync.listeners -= synced; super.onPause() }
 
     override fun onDestroy() { pool.shutdownNow(); super.onDestroy() }
 
@@ -60,15 +71,42 @@ class CollectionsActivity : Activity() {
             val existing = if (src != null) com.motioncam.remote.RemoteRepo.cached(this, src) else ClipStore.list(this)
             val byId = existing.associateBy { it.id }
             val cols = store.all(this).map { c -> Pair(c, c.clipIds.mapNotNull { byId[it] }.sortedByDescending { it.startMs }) }
+            missing = store.all(this).associate { c -> c.id to c.clipIds.count { it !in byId } }
             runOnUiThread { render(cols) }
         }.start()
     }
 
+    private var missing: Map<String, Int> = emptyMap()
+
+    /** Remote folders: shared-collections sync state; tap = Sync status (conflicts, waiting changes, tools). */
+    private fun syncRow(): View? {
+        val src = remote ?: return null
+        val s = com.motioncam.remote.SharedSync.state(this, src.id)
+        val waiting = s.outbox.count { !it.held }
+        val parts = ArrayList<String>()
+        parts += "Shared with every phone on this account"
+        parts += when {
+            s.lastSync == 0L && s.lastError != null -> "not synced: ${s.lastError}"
+            s.lastSync == 0L -> "syncing…"
+            else -> "synced " + Fmt.t(Prefs(this), s.lastSync, seconds = false) + if (s.lastError != null) " (offline now)" else ""
+        }
+        if (waiting > 0) parts += "$waiting change${if (waiting == 1) "" else "s"} waiting"
+        val tv = Ui.label(this, parts.joinToString("  ·  ") + (if (s.conflicts.isNotEmpty()) "\n⚠ ${s.conflicts.size} sync conflict${if (s.conflicts.size == 1) "" else "s"} need" +
+            "${if (s.conflicts.size == 1) "s" else ""} your decision — tap" else "  ·  Sync status ›"), 12f, if (s.conflicts.isNotEmpty()) Ui.ACCENT else Ui.GREY)
+        tv.setPadding(Ui.dp(this, 4), Ui.dp(this, 6), Ui.dp(this, 4), Ui.dp(this, 6))
+        tv.setOnClickListener {
+            startActivity(Intent(this, com.motioncam.remote.SyncStatusActivity::class.java).putExtra(com.motioncam.remote.SyncStatusActivity.EXTRA_SOURCE, src.id))
+        }
+        return tv
+    }
+
     private fun render(cols: List<Pair<ClipCollection, List<Clip>>>) {
         box.removeAllViews()
+        syncRow()?.let { box.addView(it) }
         protectedRow()?.let { box.addView(it) }
         for ((c, clips) in cols) box.addView(row(c, clips))
-        box.addView(Ui.label(this, (if (remote != null) "These collections are kept on this device only; nothing is written to the remote folder. " else "") +
+        box.addView(Ui.label(this, (if (remote != null) "These collections are shared: every phone signed in to this account sees and can change " +
+            "them (they are stored in the folder). Clips in them are protected from the camera phone's clean-up. " else "") +
             "Collections only link to clips: a clip can be in several collections, and removing it " +
             "from one never deletes it. To add clips, hold a clip in Clips to select it, then tap Add to…", 12f, Ui.GREY).apply {
             setPadding(Ui.dp(this@CollectionsActivity, 4), Ui.dp(this@CollectionsActivity, 16), 0, 0)
@@ -132,16 +170,22 @@ class CollectionsActivity : Activity() {
         }
         val texts = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(Ui.dp(ctx, 14), 0, 0, 0) }
         texts.addView(Ui.label(ctx, (if (c.isFavourites) "★ " else "") + c.name, 16f, if (c.isFavourites) Ui.ACCENT else android.graphics.Color.WHITE))
-        texts.addView(Ui.label(ctx, "${clips.size} clip${if (clips.size == 1) "" else "s"}", 12f, Ui.GREY))
+        val miss = missing[c.id] ?: 0
+        texts.addView(Ui.label(ctx, "${clips.size} clip${if (clips.size == 1) "" else "s"}" +
+            (if (remote != null && miss > 0) "  ·  ☁✕ $miss missing from the cloud" else ""), 12f, if (miss > 0 && remote != null) Ui.ACCENT else Ui.GREY))
         r.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
         val canProtect = clips.isNotEmpty() && com.motioncam.cloud.CloudProtect.canChange(ctx, remote)
-        if (!c.isFavourites || canProtect) {
+        if ((!c.isFavourites && canEdit()) || canProtect || clips.isNotEmpty()) {
             lateinit var more: View
             more = iconButton(ctx, IconDrawable.Kind.MORE, 44, 10) {
                 val pm = PopupMenu(ctx, more)
-                if (!c.isFavourites) {
+                if (!c.isFavourites && canEdit()) {
                     pm.menu.add(0, 1, 0, "Rename")
                     pm.menu.add(0, 2, 1, "Delete collection")
+                }
+                if (clips.isNotEmpty()) {
+                    if (remote != null) pm.menu.add(0, 5, 4, "Save all ${clips.size} to this phone")
+                    else pm.menu.add(0, 6, 4, "Back up all ${clips.size} to the cloud")
                 }
                 if (canProtect) {
                     pm.menu.add(0, 3, 2, "Protect all ${clips.size} in cloud")
@@ -156,6 +200,8 @@ class CollectionsActivity : Activity() {
                             .setNegativeButton("Cancel", null).show()
                         3 -> com.motioncam.cloud.CloudProtect.protect(this, remote, clips.map { cl -> cl.name })
                         4 -> com.motioncam.cloud.CloudProtect.confirmRemove(this, remote, clips.map { cl -> cl.name })
+                        5 -> CollectionActions.saveToPhone(this, clips)
+                        6 -> CollectionActions.backUpAll(this, clips)
                     }
                     true
                 }

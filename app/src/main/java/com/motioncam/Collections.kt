@@ -63,13 +63,13 @@ open class CollectionStore(private val fileName: String, private val remoteId: S
 
     /** Favourites first, then by creation time. */
     @Synchronized
-    fun all(ctx: Context): List<ClipCollection> = load(ctx).sortedWith(compareBy({ !it.isFavourites }, { it.created }))
+    open fun all(ctx: Context): List<ClipCollection> = load(ctx).sortedWith(compareBy({ !it.isFavourites }, { it.created }))
 
     @Synchronized
-    fun get(ctx: Context, id: String): ClipCollection? = load(ctx).firstOrNull { it.id == id }
+    open fun get(ctx: Context, id: String): ClipCollection? = load(ctx).firstOrNull { it.id == id }
 
     @Synchronized
-    fun create(ctx: Context, name: String): ClipCollection {
+    open fun create(ctx: Context, name: String): ClipCollection {
         val c = ClipCollection("c" + System.currentTimeMillis(), name.trim().ifEmpty { "Untitled" }, LinkedHashSet(), System.currentTimeMillis())
         load(ctx) += c
         save(ctx)
@@ -77,14 +77,14 @@ open class CollectionStore(private val fileName: String, private val remoteId: S
     }
 
     @Synchronized
-    fun rename(ctx: Context, id: String, name: String) {
+    open fun rename(ctx: Context, id: String, name: String) {
         get(ctx, id)?.let { it.name = name.trim().ifEmpty { it.name }; save(ctx) }
         resync(ctx)   // marks show collection names
     }
 
     /** Deletes the collection only; the clips themselves are untouched. Favourites cannot be deleted. */
     @Synchronized
-    fun delete(ctx: Context, id: String) {
+    open fun delete(ctx: Context, id: String) {
         if (id == Collections.FAVOURITES) return
         load(ctx).removeAll { it.id == id }
         save(ctx)
@@ -92,14 +92,14 @@ open class CollectionStore(private val fileName: String, private val remoteId: S
     }
 
     @Synchronized
-    fun add(ctx: Context, id: String, clips: Collection<Long>) {
+    open fun add(ctx: Context, id: String, clips: Collection<Long>) {
         get(ctx, id)?.let { it.clipIds.addAll(clips); save(ctx) }
         // adding to a collection asks for the clips to be kept in the cloud
         com.motioncam.cloud.MarkSync.onCollectionAdd(ctx, remoteId, id, clips)
     }
 
     @Synchronized
-    fun remove(ctx: Context, id: String, clips: Collection<Long>) {
+    open fun remove(ctx: Context, id: String, clips: Collection<Long>) {
         get(ctx, id)?.let { it.clipIds.removeAll(clips.toSet()); save(ctx) }
         resync(ctx)
     }
@@ -118,7 +118,7 @@ open class CollectionStore(private val fileName: String, private val remoteId: S
 
     /** Drops references to clips that no longer exist (deleted from the phone). */
     @Synchronized
-    fun prune(ctx: Context, existing: Set<Long>) {
+    open fun prune(ctx: Context, existing: Set<Long>) {
         var changed = false
         for (c in load(ctx)) if (c.clipIds.retainAll(existing)) changed = true
         if (changed) save(ctx)
@@ -132,13 +132,14 @@ object Collections : CollectionStore("collections.json") {
 
     /** Collections of a remote folder, kept on this device only. */
     @Synchronized
-    fun forRemote(sourceId: String): CollectionStore = remote.getOrPut(sourceId) { CollectionStore("remote_${sourceId}_collections.json", sourceId) }
+    fun forRemote(sourceId: String): CollectionStore = remote.getOrPut(sourceId) { com.motioncam.remote.SharedCollectionStore(sourceId) }
 
     /** Removes a remote folder's collections (when the folder is removed from this device). */
     @Synchronized
     fun dropRemote(ctx: Context, sourceId: String) {
         remote.remove(sourceId)
         File(ctx.filesDir, "remote_${sourceId}_collections.json").delete()
+        com.motioncam.remote.SharedSync.forget(ctx, sourceId)
     }
 
     /** The store for a remote source id, or the phone's own when null. */

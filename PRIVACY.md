@@ -73,8 +73,9 @@ features you turned on; it is not used for advertising, not sold, not shared wit
 - With cloud backup on, a small thumbnail picture of each clip is uploaded next to it (in a `.thumbnails`
   subfolder) so your other devices can show it. This can be turned off in Settings.
 - Remote folders never upload, change or delete clips. Clips you play are cached on the viewing phone (deleted
-  automatically when the cache is full, or with "Clear downloaded remote clips"). Collections you make for them stay
-  on that phone.
+  automatically when the cache is full, or with "Clear downloaded remote clips").
+- **Shared collections:** collections of a remote folder are stored in that folder (a hidden `.collections` subfolder of
+  tiny files holding collection names, clip names, a phone name and a date), so all phones on the account share them.
 - **Protection marks:** protecting a clip (by hand or through a collection) stores a small mark in the backup folder
   (Google Drive: hidden app properties on the clip; Dropbox/FTP/SFTP: tiny files in a `.keep` subfolder) with the
   phone's name and collection names, so all your phones can see why a clip is kept. Nothing is sent anywhere else.

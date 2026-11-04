@@ -12,7 +12,7 @@ import android.widget.ImageView
 
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
-    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH }
+    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -77,6 +77,13 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 path.cubicTo(21.5f, 16.9f, 19.9f, 18.5f, 17.9f, 18.5f)
                 path.close()
                 c.drawPath(path, stroke)
+            }
+            Kind.DOWNLOAD -> {
+                stroke.strokeWidth = 2.2f
+                c.drawLine(12f, 3.5f, 12f, 15f, stroke)
+                path.moveTo(7f, 10.5f); path.lineTo(12f, 15.5f); path.lineTo(17f, 10.5f)
+                c.drawPath(path, stroke)
+                c.drawLine(4.5f, 20f, 19.5f, 20f, stroke)
             }
             Kind.REFRESH -> {
                 // open circle (gap at the upper right) ending in a solid arrowhead, like the usual refresh icon

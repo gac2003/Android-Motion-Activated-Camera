@@ -41,7 +41,8 @@ object Device {
     /** The name set in the phone's settings ("Galaxy S20 FE"), else the model. */
     fun name(ctx: Context): String = try {
         android.provider.Settings.Global.getString(ctx.contentResolver, "device_name")
-    } catch (e: Exception) { null }?.takeIf { it.isNotBlank() } ?: android.os.Build.MODEL ?: "Phone"
+    } catch (e: Throwable) { null }?.takeIf { it.isNotBlank() }
+        ?: try { android.os.Build.MODEL } catch (e: Throwable) { null }?.takeIf { it.isNotBlank() } ?: "Phone"
 }
 
 /** Where a folder's marks live. All calls block (network). */

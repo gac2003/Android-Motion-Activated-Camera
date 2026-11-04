@@ -737,8 +737,10 @@ class PlayerActivity : Activity() {
         val c = clips[i]
         val pm = PopupMenu(this, anchor)
         val fav = store.isFavourite(this, c.id)
-        pm.menu.add(0, 4, 0, if (fav) "Remove from Favourites" else "Add to Favourites")
-        pm.menu.add(0, 5, 1, "Add to collection…")
+        if (remote?.mode != com.motioncam.remote.RemoteSources.MODE_LINK) {   // viewer links can't change shared collections
+            pm.menu.add(0, 4, 0, if (fav) "Remove from Favourites" else "Add to Favourites")
+            pm.menu.add(0, 5, 1, "Add to collection…")
+        }
         val spaces = com.motioncam.cloud.CloudProtect.spaces(this, remote)
         val canMark = com.motioncam.cloud.CloudProtect.canChange(this, remote)
         val isProt = com.motioncam.cloud.MarkSync.isProtected(spaces, c.name)

@@ -165,6 +165,27 @@ object CloudSync {
         return n
     }
 
+    class EnqueueResult(val queued: Int, val already: Int, val savedCopies: Int)
+
+    /** Queues these clips for every enabled destination ("Back up all"); already backed up / queued ones are skipped. */
+    fun enqueueClips(ctx: Context, clipIds: List<Long>): EnqueueResult {
+        val kinds = enabledKinds(ctx)
+        var queued = 0; var already = 0; var saved = 0
+        synchronized(lock) {
+            load(ctx)
+            var seq = (jobs!!.maxOfOrNull { it.seq } ?: System.currentTimeMillis()) + 1
+            for (id in clipIds) {
+                if (ClipStore.isSavedCopy(ctx, id)) { saved++; continue }
+                var any = false
+                for (k in kinds) if (addJobLocked(ctx, id, k)) { jobs!!.last().seq = seq++; any = true }
+                if (any) queued++ else already++
+            }
+            save(ctx)
+        }
+        kick(ctx)
+        return EnqueueResult(queued, already, saved)
+    }
+
     /** Clears failures / waits and tries again now. */
     fun retryNow(ctx: Context, kind: CloudKind? = null) {
         synchronized(lock) {
@@ -721,10 +742,11 @@ object CloudSync {
      * whose protection someone removed. Brings this phone's own marks up to date first. If the marks cannot be
      * read, this throws, so nothing is deleted.
      */
-    private fun protectedNames(ctx: Context, cfg: CloudConfig, p: CloudProvider, folder: String): Set<String> {
+    private fun protectedNames(ctx: Context, cfg: CloudConfig, p: CloudProvider, folder: String, shared: CollectionFiles): Set<String> {
         migratePinned(ctx, cfg)
         val existing = listing(cfg, p, folder).keys.filter { isOurClip(it) }.toSet()
-        val r = MarkSync.sync(ctx, MarkSync.backupKey(cfg.kind), MarkStore.forProvider(p, folder), existing)
+        // clips in the shared collections other phones keep in this folder count as protected too
+        val r = MarkSync.sync(ctx, MarkSync.backupKey(cfg.kind), MarkStore.forProvider(p, folder), existing, MarkSync.sharedMarks(shared.load()))
         return r.marks.values.filter { it.protected }.map { it.clip }.toSet()
     }
 
@@ -756,7 +778,8 @@ object CloudSync {
             if (free != null) mustFree = maxOf(mustFree, need + 64_000_000L - free)
             if (mustFree <= 0) return@synchronized
             if (cfg.fullPolicy == CloudConfig.PAUSE) throw CloudException("Not enough space", CloudException.Kind.QUOTA)
-            val keep = protectedNames(ctx, cfg, p, folder)
+            val shared = CollectionFiles(p, folder, true)
+            val keep = protectedNames(ctx, cfg, p, folder, shared)
             val marks = MarkStore.forProvider(p, folder)
             val candidates = listing(cfg, p, folder).values.toList()
                 .filter { isOurClip(it.name) && it.name !in keep }.sortedBy { it.name }
@@ -768,6 +791,7 @@ object CloudSync {
                 forget(ctx, cfg.kind, f.name)
                 deleteThumb(cfg, p, folder, f.name)
                 try { marks.forget(f.name) } catch (_: Exception) {}
+                try { shared.forgetClip(f.name) } catch (_: Exception) {}   // no collection entries pointing at nothing
             }
             synchronized(lock) { freeSpace.remove(cfg.kind) }
             if (freed < mustFree) throw CloudException("Full: only protected clips are left", CloudException.Kind.QUOTA)
@@ -792,7 +816,8 @@ object CloudSync {
         cfg.lastRetentionAt = now
         try {
             val folder = cfg.folderId ?: return
-            val keep = protectedNames(ctx, cfg, p, folder)
+            val shared = CollectionFiles(p, folder, true)
+            val keep = protectedNames(ctx, cfg, p, folder, shared)
             val marks = MarkStore.forProvider(p, folder)
             val cutoff = now - cfg.keepDays * 86_400_000L
             val fmt = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
@@ -803,6 +828,7 @@ object CloudSync {
                     if (t in 1 until cutoff) {
                         p.delete(folder, f); forget(ctx, cfg.kind, f.name); deleteThumb(cfg, p, folder, f.name)
                         try { marks.forget(f.name) } catch (_: Exception) {}
+                        try { shared.forgetClip(f.name) } catch (_: Exception) {}
                     }
                 }
             }

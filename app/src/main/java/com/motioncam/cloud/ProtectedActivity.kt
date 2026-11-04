@@ -194,7 +194,8 @@ class ProtectedActivity : Activity() {
     private fun confirmRemove() {
         if (selected.isEmpty()) { Toast.makeText(this, "Tap clips to select them first", Toast.LENGTH_SHORT).show(); return }
         val names = selected.toList()
-        val fromOthers = all.filter { it.name in names }.flatMap { it.marks.marks }.filter { it.device != Device.id(this) }.map { it.deviceName }.distinct()
+        val fromOthers = all.filter { it.name in names }.flatMap { it.marks.marks }.filter { it.device != Device.id(this) }
+            .map { if (it.device.startsWith("shared:")) "shared “${it.collections.firstOrNull() ?: ""}”" else it.deviceName }.distinct()
         AlertDialog.Builder(this).setTitle("Remove protection from ${names.size} clip${if (names.size == 1) "" else "s"}?")
             .setMessage("They become subject to the camera phone's normal clean-up again (age limit, \"when full\") and may be deleted from " +
                 "${MarkSync.label(this, space)}." +
@@ -236,6 +237,9 @@ class ProtectedActivity : Activity() {
     // ------------------------------------------------------------------ rows
 
     private fun reasonText(m: Mark): String {
+        val day0 = if (m.at > 0) "  ·  " + dayFmt.format(Date(m.at)) else ""
+        if (m.device.startsWith("shared:"))   // an entry in a shared (remote folder) collection
+            return "In shared " + m.collections.joinToString { "“$it”" } + " · added by " + m.deviceName.ifEmpty { "a phone" } + day0
         val who = if (m.device == Device.id(this)) "this phone" else m.deviceName
         val parts = ArrayList<String>()
         if (m.manual) parts += "Protected by hand on $who"

@@ -130,6 +130,13 @@ class ClipsActivity : Activity() {
             if (collectionId == null) add(IconDrawable.Kind.FOLDER, "Collections") {
                 startActivity(Intent(this@ClipsActivity, CollectionsActivity::class.java).putExtra(CollectionsActivity.EXTRA_REMOTE, remote?.id))
             }
+            // a collection: get all of it here (remote) or into the cloud (phone)
+            if (collectionId != null && remote != null) add(IconDrawable.Kind.DOWNLOAD, "Save all") {
+                CollectionActions.saveToPhone(this@ClipsActivity, clips.filter { it.id !in missingIds })
+            }
+            if (collectionId != null && remote == null) add(IconDrawable.Kind.CLOUD, "Back up all") {
+                CollectionActions.backUpAll(this@ClipsActivity, clips)
+            }
             add(IconDrawable.Kind.CALENDAR, "Calendar") { showCalendar() }
             add(IconDrawable.Kind.PLAY, "Timeline", Ui.ACCENT) {
                 // newest day, from its first clip
@@ -161,9 +168,9 @@ class ClipsActivity : Activity() {
             selActions[it] = Pair(t, click)
         }
         val allBtn = selAction("All") { if (selected.size == clips.size) selected.clear() else clips.forEach { selected += it.id }; updateSelection() }
-        val addBtn = selAction("Add to…") { addSelectedTo() }
+        val addBtn = selAction("Add to…") { addSelectedTo() }.apply { if (!canEditShared()) visibility = View.GONE }
         val delBtn = when {
-            collectionId != null -> selAction("Remove") { removeSelectedFromCollection() }
+            collectionId != null -> selAction("Remove") { removeSelectedFromCollection() }.apply { if (!canEditShared()) visibility = View.GONE }
             remote != null -> selAction("Save to phone") { saveToPhone(selectedClips()) }
             else -> selAction("Delete") { deleteSelected() }
         }
@@ -203,7 +210,7 @@ class ClipsActivity : Activity() {
         banner = Ui.label(this, "Clips from earlier installs are hidden. Tap to show them.", 13f, Ui.ACCENT).apply {
             setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8))
             setBackgroundColor(0xFF2A2416.toInt())
-            setOnClickListener { requestPermissions(arrayOf(videoPermission()), 7) }
+            setOnClickListener { if (remote != null) removeMissing() else requestPermissions(arrayOf(videoPermission()), 7) }
             visibility = View.GONE
         }
         if (remote != null) summary.setOnClickListener { lastError?.let { AlertDialog.Builder(this).setTitle("Could not refresh").setMessage(it).setPositiveButton("OK", null).show() } }
@@ -242,6 +249,7 @@ class ClipsActivity : Activity() {
         reload()
         // protection badges: redraw after this device's marks were synced in the background
         com.motioncam.cloud.MarkSync.onSynced = { _ -> runOnUiThread { adapter.notifyDataSetChanged(); if (remote == null) reload() } }
+        remote?.let { com.motioncam.remote.SharedSync.listeners += sharedSynced }
         if (remote == null) com.motioncam.cloud.MarkSync.scheduleLocal(this)
         // remote folder: check for new clips now (if the list is a few minutes old) and every 5 minutes
         if (remote != null) {
@@ -249,7 +257,11 @@ class ClipsActivity : Activity() {
         }
     }
 
+    /** Shared collections changed (another phone, or our changes were sent): show the new state. */
+    private val sharedSynced: (String) -> Unit = { id -> if (id == remote?.id && collectionId != null) runOnUiThread { reload() } }
+
     override fun onPause() {
+        com.motioncam.remote.SharedSync.listeners -= sharedSynced
         com.motioncam.cloud.MarkSync.onSynced = null
         ui.removeCallbacks(autoRefresh)
         super.onPause()
@@ -308,7 +320,44 @@ class ClipsActivity : Activity() {
      * Badge for a clip: 🔒 protected in the cloud; ⚠ someone removed the protection although it is in a collection
      * here; ☁✕ (collections on the camera phone) not in the cloud.
      */
+    private fun startOfName(n: String): Long = try {
+        SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).parse(n.substring(3, 18))!!.time
+    } catch (e: Exception) { 0 }
+
+    /** Shared collections can be changed (not through a read-only Dropbox viewer link). */
+    private fun canEditShared() = remote?.mode != RemoteSources.MODE_LINK
+
+    /** A missing clip was tapped: explain, offer to remove it (or play this phone's saved copy). */
+    private fun missingOptions(c: Clip) {
+        val since = remote?.let { com.motioncam.remote.SharedSync.missingSince(this, it.id, c.name) }
+        val local = ClipStore.list(this).firstOrNull { it.name == c.name }
+        val b = AlertDialog.Builder(this).setTitle("Missing from the cloud")
+            .setMessage("This clip (${Fmt.dateTime(prefs).format(Date(c.startMs))}) is in the collection but no longer in the folder" +
+                (since?.let { " (noticed " + SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(it)) + ")" } ?: "") +
+                ". It was deleted from the cloud, or the folder changed.\n\nIt is removed from collections automatically after " +
+                "${com.motioncam.remote.SharedSync.MISSING_DAYS} days." + if (local != null) "\n\nA copy is saved on this phone." else "")
+        if (canEditShared()) b.setPositiveButton("Remove from collections") { _, _ ->
+            remote?.let { com.motioncam.remote.SharedSync.removeEverywhere(this, it.id, listOf(c.name)) }
+            reload()
+        }
+        if (local != null) b.setNeutralButton("Play saved copy") { _, _ ->
+            startActivity(Intent(this, PlayerActivity::class.java).putExtra(PlayerActivity.EXTRA_START_ID, local.id))
+        }
+        b.setNegativeButton("Close", null).show()
+    }
+
+    private fun removeMissing() {
+        val src = remote ?: return
+        val names = clips.filter { it.id in missingIds }.map { it.name }
+        if (names.isEmpty()) return
+        AlertDialog.Builder(this).setTitle("Remove ${names.size} missing clip${if (names.size == 1) "" else "s"}?")
+            .setMessage("They are no longer in the cloud. This removes them from all shared collections (on every phone).")
+            .setPositiveButton("Remove") { _, _ -> com.motioncam.remote.SharedSync.removeEverywhere(this, src.id, names); reload() }
+            .setNegativeButton("Cancel", null).show()
+    }
+
     private fun badge(c: Clip): String? {
+        if (c.id in missingIds) return "☁✕ Missing"
         val spaces = markSpaces()
         if (spaces.isEmpty()) return null
         val res = spaces.mapNotNull { com.motioncam.cloud.MarkSync.cached(it) }
@@ -363,16 +412,32 @@ class ClipsActivity : Activity() {
         }.start()
     }
 
+    /** Clips of a shared collection that are no longer in the cloud (shown as "missing" tiles). */
+    private var missingIds: Set<Long> = emptySet()
+
     private fun showRemote(list: List<Clip>) {
         val src = remote ?: return
         var all = list
         missing = 0
+        missingIds = emptySet()
         val cid = collectionId
         if (cid != null) {
-            val ids = store.get(this, cid)?.clipIds ?: emptySet<Long>()
-            all = list.filter { it.id in ids }
-            if (list.isNotEmpty()) missing = ids.size - all.size
+            val names = (store as? com.motioncam.remote.SharedCollectionStore)?.clipNames(this, cid) ?: emptyList()
+            val byName = list.associateBy { it.name }
+            all = names.mapNotNull { byName[it] }
+            if (list.isNotEmpty() || src.lastRefresh > 0) {
+                // entries pointing at clips that are gone: keep them visible (and removable) instead of hiding them
+                val gone = names.filter { it !in byName }.map { n ->
+                    Clip(com.motioncam.remote.RemoteRepo.idFor(src.id, n), android.net.Uri.EMPTY, n, 0, startOfName(n), 0)
+                }
+                missingIds = gone.map { it.id }.toSet()
+                missing = gone.size
+                all = (all + gone).sortedByDescending { it.startMs }
+            }
         }
+        banner.visibility = if (missing > 0 && canEditShared()) View.VISIBLE else View.GONE
+        banner.text = "☁✕ $missing clip${if (missing == 1) " is" else "s are"} missing from the cloud (deleted from the folder). " +
+            "They are removed from collections automatically after ${com.motioncam.remote.SharedSync.MISSING_DAYS} days. Tap to remove now."
         favIds = store.favouriteIds(this)
         clips = all
         buildRows()
@@ -390,8 +455,8 @@ class ClipsActivity : Activity() {
             all.isEmpty() && lastError == null && (refreshing || src.lastRefresh == 0L) -> "Loading…"
             all.isEmpty() && cid != null -> "No clips in this collection yet. Hold a clip to select it, then Add to…"
             all.isEmpty() -> if (lastError != null) "Could not load this folder (tap for details)" else "No MotionCam clips in this folder yet$ago"
-            else -> "${all.size} clips · %.1f GB".format(total / 1e9) + ago +
-                (if (missing > 0) " · $missing no longer in the folder" else "") +
+            else -> "${all.size - missing} clips · %.1f GB".format(total / 1e9) + ago +
+                (if (missing > 0) " · $missing missing from the cloud" else "") +
                 (if (lastError != null) " · offline, showing the last list (tap for details)" else "") + legend()
         }
     }
@@ -403,30 +468,8 @@ class ClipsActivity : Activity() {
     }
 
     /** Downloads remote clips into the phone's own Clips (never backed up again). */
-    private fun saveToPhone(list: List<Clip>) {
-        if (list.isEmpty()) return
-        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
-        val tv = Ui.label(this, "Starting…", 14f).apply { val p = Ui.dp(this@ClipsActivity, 20); setPadding(p, p, p, 0) }
-        val dlg = AlertDialog.Builder(this).setTitle("Saving ${list.size} clip${if (list.size == 1) "" else "s"} to this phone")
-            .setView(tv).setCancelable(false)
-            .setNegativeButton("Cancel") { _, _ -> cancelled.set(true) }.show()
-        Thread {
-            val r = RemoteRepo.saveToPhone(this, list, { done, total, pct ->
-                runOnUiThread { tv.text = if (done >= total) "Finishing…" else "Clip ${done + 1} of $total  ·  $pct%" }
-            }, { cancelled.get() })
-            runOnUiThread {
-                try { dlg.dismiss() } catch (_: Exception) {}
-                val parts = ArrayList<String>()
-                parts += "Saved ${r.saved} clip${if (r.saved == 1) "" else "s"} to Clips on this phone."
-                if (r.skipped > 0) parts += "${r.skipped} already on this phone (skipped)."
-                if (r.failed > 0) parts += "${r.failed} failed" + (r.lastError?.let { ": $it" } ?: ".")
-                if (cancelled.get()) parts += "Stopped."
-                parts += "Saved copies are never uploaded to cloud backup and are not removed by automatic clean-up."
-                AlertDialog.Builder(this).setTitle("Save to phone").setMessage(parts.joinToString("\n\n")).setPositiveButton("OK", null).show()
-                exitSelection()
-            }
-        }.start()
-    }
+    private fun saveToPhone(list: List<Clip>) =
+        CollectionActions.saveToPhone(this, list.filter { it.id !in missingIds }) { if (selecting) exitSelection() }
 
     private fun dayStart(ms: Long): Long = Calendar.getInstance().apply {
         timeInMillis = ms
@@ -716,8 +759,10 @@ class ClipsActivity : Activity() {
                 cell.foreground = if (sel) selFrame else null
                 iv.alpha = if (selecting && !sel) 0.75f else 1f
                 cell.setOnClickListener {
-                    if (selecting) { if (!selected.remove(c.id)) selected += c.id; updateSelection() } else play(c)
+                    if (selecting) { if (!selected.remove(c.id)) selected += c.id; updateSelection() }
+                    else if (c.id in missingIds) missingOptions(c) else play(c)
                 }
+                iv.alpha = if (c.id in missingIds) 0.35f else iv.alpha
                 cell.setOnLongClickListener {
                     // hold = select; keep holding and drag across other clips to select a range
                     if (!selecting) { selecting = true; selected.clear() }

@@ -84,7 +84,9 @@ object RemoteRepo {
         src.lastRefresh = System.currentTimeMillis()
         src.clipCount = clips.size
         RemoteSources.update(ctx, src)
-        com.motioncam.cloud.MarkSync.schedule(ctx, com.motioncam.cloud.MarkSync.remoteKey(src.id))   // protection marks
+        // shared collections: track clips missing from the folder, then sync collections (which then syncs marks)
+        SharedSync.noteListing(ctx, src.id, clips.map { it.name }.toSet())
+        SharedSync.schedule(ctx, src.id, 300)
         return clips
     }
 

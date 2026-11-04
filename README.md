@@ -124,7 +124,7 @@ when) so they can be selected and **protected again** in one go.
 
 ## Remote folders (view another phone's backups)
 Clips → **Remote folders** opens backup folders from other devices in the normal gallery and timeline player: day
-sections, calendar, Favourites/collections (kept on the viewing device only), filmstrip and back-to-back playback.
+sections, calendar, **shared collections**, filmstrip and back-to-back playback.
 Clips in them are never uploaded, renamed or deleted; the only thing written is the small **protected** mark
 (see *Protected in cloud*). Dropbox viewer links are fully read-only.
 
@@ -135,6 +135,19 @@ Clips in them are never uploaded, renamed or deleted; the only thing written is 
 * **Dropbox, another account**: on the recording phone, Cloud backup → Dropbox → **Create viewer link**, send it,
   and paste it on the viewing device (＋ Add → "a viewer link"). Anyone with the link can view; **Revoke link** stops it.
 * **FTP / SFTP**: enter the server login (a read-only account is best). Can be turned off in Settings → Remote folders.
+* **Shared collections**: a remote folder's Favourites and collections are the same on every phone signed in to the
+  account (stored in a hidden `.collections` folder); any phone can create, rename, delete and fill them. Changes
+  show at once, are queued when offline and sync automatically. Clips in them are protected from clean-up.
+  * Phones never overwrite each other (one tiny file per entry). When intents clash – renamed on two phones, deleted
+    on one while added to on another, the same name created twice, a change that keeps failing – the change is held
+    and **Collections → Sync status** asks you (keep mine / theirs, restore, merge, retry…). It also lists waiting
+    changes and has last-resort tools: discard unsent changes, re-download, re-upload this phone's copy (merge only).
+  * Clips deleted from the cloud stay in the collection as **Missing** tiles (remove them any time); they are removed
+    automatically only after 7 days and several listings without them. The camera phone's clean-up removes the
+    entries of clips it deletes.
+  * **Save all** (remote collection) downloads every clip to the phone; **Back up all** (phone collection) uploads.
+  * Collections of the phone's own clips stay local. Older per-phone remote collections are moved to the shared ones
+    (same names merged).
 * Clips stream when played (FTP/SFTP download first) and are cached (up to 1.5 GB) so replaying is instant.
   **Save to phone** copies clips into this phone's Clips; those copies are never uploaded to cloud backup and are
   never deleted by the phone's automatic clean-up (age limit, size cap, low storage) – only when you delete them.

@@ -270,7 +270,7 @@ class LiveActivity : Activity() {
     private fun chooseRole(then: () -> Unit) {
         val d = com.motioncam.OptionSheet.show(this, "How will this phone take part?", listOf(
             com.motioncam.Opt("Viewer only", "See your cameras and get their alerts. This phone is never watched or controlled.",
-                com.motioncam.IconDrawable.Kind.CLIPS) { prefs.liveCamera = false; then() },
+                com.motioncam.IconDrawable.Kind.SCREEN) { prefs.liveCamera = false; then() },
             com.motioncam.Opt("Camera and viewer", "While it is monitoring, your other phones can see and control it — protected by a PIN.",
                 com.motioncam.IconDrawable.Kind.VIDEOCAM) { withCameraPin { prefs.liveCamera = true; then() } },
         ), subtitle = "You can change this later.")

@@ -12,7 +12,7 @@ import android.widget.ImageView
 
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
-    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, VIDEOCAM, NETWORK, LIVE, CLOSE, SHARE, TRASH, ADD_TO, REMOVE, SELECT_ALL }
+    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, SCREEN, VIDEOCAM, NETWORK, LIVE, CLOSE, SHARE, TRASH, ADD_TO, REMOVE, SELECT_ALL }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -94,6 +94,20 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 c.drawCircle(12f, 12f, 2.4f, stroke)
             }
             Kind.CLIPS -> {
+                // a folder of videos: folder outline (softly rounded corners) with a play mark inside its body
+                stroke.strokeWidth = 2f
+                stroke.pathEffect = android.graphics.CornerPathEffect(1.6f)
+                path.moveTo(3f, 19f); path.lineTo(3f, 5f); path.lineTo(9.3f, 5f); path.lineTo(11.3f, 7.6f)
+                path.lineTo(21f, 7.6f); path.lineTo(21f, 19f); path.close()
+                c.drawPath(path, stroke)
+                stroke.pathEffect = null
+                path.reset()
+                fill.pathEffect = android.graphics.CornerPathEffect(1f)
+                path.moveTo(10f, 10.4f); path.lineTo(15.6f, 13.3f); path.lineTo(10f, 16.2f); path.close()
+                c.drawPath(path, fill)
+                fill.pathEffect = null
+            }
+            Kind.SCREEN -> {
                 stroke.strokeWidth = 2f
                 c.drawRoundRect(RectF(3.5f, 5.5f, 20.5f, 18.5f), 2.5f, 2.5f, stroke)
                 path.moveTo(10f, 9f); path.lineTo(15.5f, 12f); path.lineTo(10f, 15f); path.close()

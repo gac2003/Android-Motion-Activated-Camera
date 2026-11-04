@@ -178,6 +178,7 @@ object CameraLink {
     private fun pin(ctx: Context): String? = SecretStore.get(ctx, "live.pin")?.takeIf { it.isNotEmpty() }
     fun setPin(ctx: Context, pin: String?) { SecretStore.put(ctx, "live.pin", pin?.trim()?.ifEmpty { null }); if (running) publishStatus(ctx) }
     fun hasPin(ctx: Context) = pin(ctx) != null
+    fun pinMatches(ctx: Context, entered: String) = pin(ctx)?.let { it == entered.trim() } == true
 
     /** Signature a viewer sends with a command: HMAC-SHA256 of the payload with a key made from the PIN and camera. */
     fun sign(cam: String, pin: String, payload: String): String {

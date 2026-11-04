@@ -100,9 +100,10 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 c.drawPath(path, fill)
             }
             Kind.LIVE -> {
-                // live connection: a cloud with a camera lens in it, and a signal
-                stroke.strokeWidth = 2f
-                c.save(); c.translate(0f, 1.5f)
+                // live connection: a cloud with a camera lens in it, and a wi-fi signal rising from its top
+                val sc = 0.82f
+                c.save(); c.translate(2.16f, 6.33f); c.scale(sc, sc)
+                stroke.strokeWidth = 2f / sc
                 path.moveTo(7f, 18.5f)
                 path.cubicTo(4.2f, 18.5f, 2.5f, 16.6f, 2.5f, 14.3f)
                 path.cubicTo(2.5f, 12f, 4.3f, 10.2f, 6.6f, 10.2f)
@@ -112,13 +113,13 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 path.cubicTo(21.5f, 16.9f, 19.9f, 18.5f, 17.9f, 18.5f)
                 path.close()
                 c.drawPath(path, stroke)
-                stroke.strokeWidth = 1.8f
-                c.drawCircle(12f, 13.4f, 3.2f, stroke)
-                c.drawCircle(12f, 13.4f, 1.1f, fill)
                 c.restore()
-                stroke.strokeWidth = 1.8f
-                c.drawArc(RectF(15.9f, 2.4f, 21.1f, 7.6f), -90f, 90f, false, stroke)
-                c.drawArc(RectF(13.5f, 0f, 23.5f, 10f), -90f, 90f, false, stroke)
+                stroke.strokeWidth = 1.7f
+                c.drawCircle(12f, 17.3f, 2.9f, stroke)                 // lens
+                c.drawCircle(12f, 17.3f, 1f, fill)
+                stroke.strokeWidth = 1.6f
+                for (r in floatArrayOf(2.2f, 4.6f, 7f)) c.drawArc(RectF(12f - r, 9f - r, 12f + r, 9f + r), 225f, 90f, false, stroke)
+                c.drawCircle(12f, 9f, 1.1f, fill)
             }
             Kind.NETWORK -> {
                 // three linked devices (filled nodes, connecting lines): "your phones connected"

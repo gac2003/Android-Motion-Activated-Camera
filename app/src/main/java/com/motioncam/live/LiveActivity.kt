@@ -113,15 +113,13 @@ class LiveActivity : Activity() {
 
         f.title("This phone as a camera")
         f.toggle("Let other phones see and control this phone while it is monitoring", prefs.liveCamera) { on ->
-            if (on) {
-                if (CameraLink.hasPin(this)) { prefs.liveCamera = true; render() }
-                else setPin { prefs.liveCamera = true; render() }      // a camera phone always has a PIN
-            } else {
+            if (on) withCameraPin { prefs.liveCamera = true; render() }   // the PIN is always asked to turn this on
+            else {
                 prefs.liveCamera = false
                 CameraLink.stop(this)
                 Live.refresh(this); render()
             }
-            if (!on || CameraLink.hasPin(this)) render()
+            render()
         }
         if (prefs.liveCamera) {
             f.row(f.chip("Change PIN") { setPin { render() } })
@@ -246,15 +244,33 @@ class LiveActivity : Activity() {
             }.setNegativeButton("Cancel") { _, _ -> render() }.show()
     }
 
+    /**
+     * Turning the camera role on always needs the PIN: set one (entered twice) if there is none, otherwise enter it
+     * (with "Set a new PIN" for a forgotten one). Cancel / wrong PIN: the camera role stays off.
+     */
+    private fun withCameraPin(then: () -> Unit) {
+        if (!CameraLink.hasPin(this)) { setPin(then); return }
+        val input = EditText(this).apply { hint = "PIN"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
+        val box = LinearLayout(this).apply { val p = Ui.dp(this@LiveActivity, 20); setPadding(p, 0, p, 0); addView(input, LinearLayout.LayoutParams(-1, -2)) }
+        AlertDialog.Builder(this).setTitle("Enter this camera's PIN").setView(box)
+            .setMessage("Needed to let other phones see and control this phone.")
+            .setPositiveButton("OK") { _, _ ->
+                if (CameraLink.pinMatches(this, input.text.toString())) then()
+                else { Toast.makeText(this, "Wrong PIN", Toast.LENGTH_SHORT).show(); render() }
+            }
+            .setNeutralButton("Set a new PIN") { _, _ -> setPin(then) }
+            .setNegativeButton("Cancel") { _, _ -> render() }
+            .setOnCancelListener { render() }
+            .show()
+    }
+
     /** First step when turning the live connection on: viewer only, or also a camera (which needs a PIN). */
     private fun chooseRole(then: () -> Unit) {
         val d = com.motioncam.OptionSheet.show(this, "How will this phone take part?", listOf(
             com.motioncam.Opt("Viewer only", "See your cameras and get their alerts. This phone is never watched or controlled.",
                 com.motioncam.IconDrawable.Kind.CLIPS) { prefs.liveCamera = false; then() },
             com.motioncam.Opt("Camera and viewer", "While it is monitoring, your other phones can see and control it — protected by a PIN.",
-                com.motioncam.IconDrawable.Kind.VIDEOCAM) {
-                if (CameraLink.hasPin(this)) { prefs.liveCamera = true; then() } else setPin { prefs.liveCamera = true; then() }
-            },
+                com.motioncam.IconDrawable.Kind.VIDEOCAM) { withCameraPin { prefs.liveCamera = true; then() } },
         ), subtitle = "You can change this later.")
         d.setOnDismissListener { render() }
     }

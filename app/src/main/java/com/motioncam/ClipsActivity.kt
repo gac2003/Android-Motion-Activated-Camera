@@ -796,7 +796,9 @@ class ClipsActivity : Activity() {
             val tv = Ui.label(ctx, "", 11f, Color.WHITE).apply {
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
-                setBackgroundColor(0x99000000.toInt())
+                // light backing + text shadow: readable on bright frames without hiding much of the picture
+                setBackgroundColor(0x4D000000)
+                setShadowLayer(3f, 0f, 1f, Color.BLACK)
                 setPadding(Ui.dp(ctx, 6), Ui.dp(ctx, 2), Ui.dp(ctx, 6), Ui.dp(ctx, 2))
             }
             addView(tv, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START))
@@ -816,9 +818,10 @@ class ClipsActivity : Activity() {
                 setMargins(Ui.dp(ctx, 8), Ui.dp(ctx, 4), 0, 0)
             })
             // cloud protection badge (bottom-right, next to the time label)
-            val status = Ui.label(ctx, "", 11f, Color.WHITE).apply {
-                setBackgroundColor(0x99000000.toInt())
-                setPadding(Ui.dp(ctx, 5), Ui.dp(ctx, 2), Ui.dp(ctx, 5), Ui.dp(ctx, 2))
+            // small badge without a box (a shadow keeps it visible on any frame)
+            val status = Ui.label(ctx, "", 10f, Color.WHITE).apply {
+                setShadowLayer(4f, 0f, 0f, Color.BLACK)
+                setPadding(Ui.dp(ctx, 4), Ui.dp(ctx, 2), Ui.dp(ctx, 6), Ui.dp(ctx, 3))
                 visibility = View.GONE
             }
             addView(status, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END))
@@ -832,11 +835,27 @@ class ClipsActivity : Activity() {
     // ------------------------------------------------------------------ multi-select
 
     private fun updateSelection() {
+        // the selection bar is shorter than the normal header: keep the grid where it is on screen, so it does not
+        // slide under the finger that is still holding a clip (which used to select the clip below at once)
+        val switching = (normalBar.visibility == View.VISIBLE) == selecting
+        if (switching) keepListInPlace()
         normalBar.visibility = if (selecting) View.GONE else View.VISIBLE
         actionRow.visibility = normalBar.visibility
         selBar.visibility = if (selecting) View.VISIBLE else View.GONE
         selTitle.text = "${selected.size} selected"
         adapter.notifyDataSetChanged()
+    }
+
+    private fun keepListInPlace() {
+        val before = IntArray(2).also { list.getLocationOnScreen(it) }[1]
+        list.viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                list.viewTreeObserver.removeOnPreDrawListener(this)
+                val d = IntArray(2).also { list.getLocationOnScreen(it) }[1] - before
+                if (d != 0) { list.scrollListBy(d); updatePinned() }
+                return true
+            }
+        })
     }
 
     private fun exitSelection() {
@@ -899,6 +918,12 @@ class ClipsActivity : Activity() {
     }
 
     private fun dragTo(rawX: Float, rawY: Float) {
+        // only a real drag extends the selection (not the finger resting where the long-press happened)
+        if (!dragMoved) {
+            val slop = Ui.dp(this, 16)
+            if (Math.abs(rawX - downX) < slop && Math.abs(rawY - downY) < slop) return
+            dragMoved = true
+        }
         val idx = clipAt(rawX, rawY)
         if (idx < 0 || anchorIdx < 0) return
         val range = (minOf(anchorIdx, idx)..maxOf(anchorIdx, idx)).map { display[it].id }
@@ -914,6 +939,7 @@ class ClipsActivity : Activity() {
             val y = lastRawY - loc[1]
             val edge = Ui.dp(this@ClipsActivity, 72)
             val step = when {
+                !dragMoved -> 0                                   // not dragging yet: never scroll on its own
                 y < edge -> -((edge - y) / 3).toInt().coerceAtLeast(4)
                 y > list.height - edge -> ((y - (list.height - edge)) / 3).toInt().coerceAtLeast(4)
                 else -> 0
@@ -923,7 +949,12 @@ class ClipsActivity : Activity() {
         }
     }
 
+    private var downX = 0f
+    private var downY = 0f
+    private var dragMoved = false
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) { downX = ev.rawX; downY = ev.rawY; dragMoved = false }
         if (!dragSelecting) return super.dispatchTouchEvent(ev)
         lastRawX = ev.rawX
         lastRawY = ev.rawY

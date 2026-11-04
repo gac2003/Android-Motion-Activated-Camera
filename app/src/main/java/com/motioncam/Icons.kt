@@ -119,7 +119,6 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 c.drawCircle(12f, 17.3f, 1f, fill)
                 stroke.strokeWidth = 1.6f
                 for (r in floatArrayOf(2.2f, 4.6f, 7f)) c.drawArc(RectF(12f - r, 9f - r, 12f + r, 9f + r), 225f, 90f, false, stroke)
-                c.drawCircle(12f, 9f, 1.1f, fill)
             }
             Kind.NETWORK -> {
                 // three linked devices (filled nodes, connecting lines): "your phones connected"

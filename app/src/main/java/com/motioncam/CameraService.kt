@@ -71,11 +71,13 @@ class CameraService : Service() {
     }
 
     private fun onStatus(s: Status) {
+        // the phone shows its own battery; the useful extra here is when motion was last seen
+        val lastMotion = if (s.lastMotionWall > 0) " · last motion " + Fmt.t(prefs, s.lastMotionWall, seconds = false) else ""
         val text = when (s.mode) {
             Mode.RECORDING -> "● Recording — ${s.format}"
-            Mode.WATCHING -> "Watching for motion"
-            else -> s.message.ifEmpty { s.mode.name }
-        } + if (s.batteryPct >= 0) " · ${s.batteryPct}%" else ""
+            Mode.WATCHING -> "Watching for motion$lastMotion"
+            else -> s.message.ifEmpty { s.mode.name } + lastMotion
+        }
         if (text == lastNotifText || instance == null) return
         lastNotifText = text
         getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notification(text))

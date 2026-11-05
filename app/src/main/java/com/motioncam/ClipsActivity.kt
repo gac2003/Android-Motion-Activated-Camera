@@ -116,7 +116,7 @@ open class ClipsActivity : Activity() {
         override fun sizeOf(key: Long, value: Bitmap) = value.byteCount
     }
     private lateinit var prefs: Prefs
-    private var timeFmt = SimpleDateFormat("h:mm:ss a", Locale.getDefault())
+    private var timeFmt = SimpleDateFormat("h:mm:ss a", Fmt.symbols())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -739,9 +739,11 @@ open class ClipsActivity : Activity() {
         head.addView(prev); head.addView(title, LinearLayout.LayoutParams(0, -2, 1f)); head.addView(next)
         box.addView(head)
         val grid = GridLayout(ctx).apply { columnCount = 7 }
-        box.addView(grid, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(ctx, 8) })
+        // the month in the middle of the window; days as large as the window allows (up to 48 dp)
+        box.addView(grid, LinearLayout.LayoutParams(-2, -2).apply { topMargin = Ui.dp(ctx, 8); gravity = Gravity.CENTER_HORIZONTAL })
         lateinit var dialog: AlertDialog
-        val cell = Ui.dp(ctx, 40)
+        val winW = minOf(resources.displayMetrics.widthPixels, Ui.dp(ctx, 560))
+        val cell = ((winW - Ui.dp(ctx, 96)) / 7).coerceIn(Ui.dp(ctx, 36), Ui.dp(ctx, 48))
         fun render() {
             grid.removeAllViews()
             val cal = Calendar.getInstance().apply { clear(); set(month / 12, month % 12, 1) }
@@ -861,7 +863,7 @@ open class ClipsActivity : Activity() {
                 h.status.apply { text = if (locked) "" else b ?: ""; visibility = if (b == null || locked) View.GONE else View.VISIBLE }
                 h.cloud.visibility = if (remote == null && c.id in backedUp) View.VISIBLE else View.GONE
                 bindThumb(iv, c)
-                h.label.text = "${timeFmt.format(Date(c.startMs))}  ·  ${durText(c.durationMs)}"
+                h.label.text = "${timeFmt.format(Date(c.startMs))} · ${durText(c.durationMs)}"
                 cell.contentDescription = h.label.text.toString() + (if (locked) ", protected" else "") +
                     (if (h.cloud.visibility == View.VISIBLE) ", backed up" else "") + if (c.id in favIds) ", favourite" else ""
                 val sel = c.id in selected

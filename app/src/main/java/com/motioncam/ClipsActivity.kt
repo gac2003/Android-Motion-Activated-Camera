@@ -217,13 +217,15 @@ open class ClipsActivity : Activity() {
                 LinearLayout.LayoutParams(0, -2, 1f))
         if (remote == null) act(IconDrawable.Kind.SHARE, "Share") { shareSelected() }
         else act(IconDrawable.Kind.DOWNLOAD, "Save") { saveToPhone(selectedClips()) }
-        act(IconDrawable.Kind.STAR, "Favourite") { favouriteSelected() }
+        // in Favourites itself, Unlist does that
+        if (collectionId != Collections.FAVOURITES) act(IconDrawable.Kind.STAR, "Favourite") { favouriteSelected() }
         if (canMark()) act(IconDrawable.Kind.LOCK, "Protect") { protect(selectedClips(), true) }
         // this phone's clips: upload the selection to the backup folders (the counterpart of Save in remote folders)
         if (remote == null) act(IconDrawable.Kind.CLOUD_UP, "Back up") { CollectionActions.backUpAll(this, selectedClips()) { exitSelection() } }
         else if (canEditShared()) act(IconDrawable.Kind.ADD_TO, "Add to") { addSelectedTo() }
         when {
-            collectionId != null && canEditShared() -> act(IconDrawable.Kind.REMOVE, "Remove") { removeSelectedFromCollection() }
+            // out of this collection only: the clips themselves stay
+            collectionId != null && canEditShared() -> act(IconDrawable.Kind.REMOVE, "Unlist") { removeSelectedFromCollection() }
             remote == null -> act(IconDrawable.Kind.TRASH, "Delete", danger = true) { deleteSelected() }
             CloudDelete.canDelete(remote) -> act(IconDrawable.Kind.TRASH, "Delete", danger = true) { deleteFromCloud() }
         }
@@ -398,7 +400,7 @@ open class ClipsActivity : Activity() {
                 (since?.let { " (noticed " + SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(it)) + ")" } ?: "") +
                 ". It was deleted from the cloud, or the folder changed.\n\nIt is removed from collections automatically after " +
                 "${com.motioncam.remote.SharedSync.MISSING_DAYS} days." + if (local != null) "\n\nA copy is saved on this phone." else "")
-        if (canEditShared()) b.setPositiveButton("Remove from collections") { _, _ ->
+        if (canEditShared()) b.setPositiveButton("Unlist from collections") { _, _ ->
             remote?.let { com.motioncam.remote.SharedSync.removeEverywhere(this, it.id, listOf(c.name)) }
             reload()
         }
@@ -1070,7 +1072,7 @@ open class ClipsActivity : Activity() {
         val ids = selectedClips().map { it.id }
         if (ids.isEmpty()) return
         store.remove(this, cid, ids)
-        Toast.makeText(this, "Removed ${ids.size} from this collection (clips kept)", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Unlisted ${ids.size} from this collection (the clips are kept)", Toast.LENGTH_SHORT).show()
         exitSelection()
         reload()
     }

@@ -72,7 +72,7 @@ class LiveActivity : Activity() {
             return
         }
         val prefs = Prefs(this)
-        for (e in list) box.addView(ActivityLogActivity.eventRow(this, prefs, e, showCam = true))
+        for (e in list) box.addView(ActivityLogActivity.eventRow(this, prefs, e, showCam = true, seconds = false))
     }
 
     private fun render() {

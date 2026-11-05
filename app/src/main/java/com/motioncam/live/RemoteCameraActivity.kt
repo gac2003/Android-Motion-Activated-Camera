@@ -83,7 +83,7 @@ class RemoteCameraActivity : Activity() {
             return
         }
         val p = Prefs(this)
-        for (e in list) box.addView(ActivityLogActivity.eventRow(this, p, e, showCam = false, openCamera = false))
+        for (e in list) box.addView(ActivityLogActivity.eventRow(this, p, e, showCam = false, openCamera = false, seconds = false))
     }
     private lateinit var r: CamRemote
     private lateinit var feed: CamRemote.Feed

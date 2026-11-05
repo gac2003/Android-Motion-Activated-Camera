@@ -157,31 +157,43 @@ class ActivityLogActivity : Activity() {
     companion object {
         private const val EXTRA_FROM_ALL = "fromAll"
 
+        /** 8s, 1m 05s */
+        private fun durText(sec: Long) = if (sec < 60) "${sec}s" else "${sec / 60}m %02ds".format(sec % 60)
+
         /**
          * One event as a row: time, icon and text; a motion with its clip gets the clip on a second line (tap to watch).
          * Tapping opens the clip when there is one, otherwise the camera. [showCam]: the camera's name in the row.
          */
-        fun eventRow(a: Activity, prefs: Prefs, e: ActivityEvent, showCam: Boolean, openCamera: Boolean = true): View {
+        fun eventRow(a: Activity, prefs: Prefs, e: ActivityEvent, showCam: Boolean, openCamera: Boolean = true, seconds: Boolean = true): View {
             val ctx: Context = a
             val r = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, Ui.dp(ctx, 5), 0, Ui.dp(ctx, 5))
                 isClickable = true
                 background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30FFFFFF), null,
                     android.graphics.drawable.ColorDrawable(0xFFFFFFFF.toInt()))
             }
-            r.addView(Ui.label(ctx, Fmt.t(prefs, e.t), 13f, Ui.GREY).apply { minWidth = Ui.dp(ctx, 84) })
-            val texts = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-            val main = (if (e.type == "motion") "Motion detected" else e.d.optString("text")) +
-                if (showCam) "  ·  " + (Live.phones[e.cam]?.name?.ifEmpty { null } ?: "Camera") else ""
-            texts.addView(Ui.label(ctx, ActivityTypes.icon(e.type) + "  " + main, 14f,
-                if (e.type in setOf("hot", "safety_stop", "pin_locked")) Ui.RED else 0xFFFFFFFF.toInt()))
+            r.addView(Ui.label(ctx, Fmt.t(prefs, e.t, seconds = seconds), 13f, Ui.GREY).apply { minWidth = Ui.dp(ctx, if (seconds) 84 else 64) })
+            // one line: what happened (· which camera) and, for a recording, a "▶ 3s" mark in the accent colour = tap to watch
             val clip = e.clip ?: e.d.takeIf { e.type == "clip" }
             val ref = clip?.let { Alerts.clipRef(it) }
-            if (e.clip != null) texts.addView(Ui.label(ctx, "    🎞  " + e.clip!!.optString("text") + if (ref != null) "  ·  ▶ Watch" else "", 13f,
-                if (ref != null) Ui.ACCENT else Ui.GREY))
-            else if (e.type == "clip" && ref != null) texts.addView(Ui.label(ctx, "    ▶ Watch", 13f, Ui.ACCENT))
-            r.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+            val main = (when (e.type) { "motion" -> "Motion detected"; "clip" -> "Clip saved"; else -> e.d.optString("text") }) +
+                if (showCam) "  ·  " + (Live.phones[e.cam]?.name?.ifEmpty { null } ?: "Camera") else ""
+            val line = android.text.SpannableStringBuilder(ActivityTypes.icon(e.type) + "  " + main)
+            if (clip != null) {
+                val sec = (clip.optLong("dur") / 1000).takeIf { it > 0 }
+                    ?: Regex("(\\d+)\\s*s").find(clip.optString("text"))?.groupValues?.get(1)?.toLongOrNull()
+                val mark = "   " + (if (ref != null) "▶ " else "🎞 ") + (sec?.let { durText(it) } ?: "clip")
+                val start = line.length
+                line.append(mark)
+                line.setSpan(android.text.style.ForegroundColorSpan(if (ref != null) Ui.ACCENT else Ui.GREY), start, line.length,
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            r.addView(Ui.label(ctx, "", 14f, if (e.type in setOf("hot", "safety_stop", "pin_locked")) Ui.RED else 0xFFFFFFFF.toInt()).apply {
+                text = line; maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
+                contentDescription = if (ref != null) "$main, with a clip — tap to watch" else null
+            }, LinearLayout.LayoutParams(0, -2, 1f))
             r.setOnClickListener {
                 if (ref != null) OpenClipActivity.open(a, e.cam, ref.toString())
                 else if (openCamera) a.startActivity(Intent(a, RemoteCameraActivity::class.java).putExtra(Alerts.EXTRA_CAM, e.cam))

@@ -79,6 +79,8 @@ class RemoteReader(private val p: CloudProvider) : java.io.Closeable {
     fun delete(folder: String, file: RemoteFile) = p.delete(folder, file)
     /** Shared collections of the folder (read-only for a Dropbox viewer link). */
     fun collectionFiles(folder: String) = com.motioncam.cloud.CollectionFiles(p, folder, writable = p !is DropboxLinkProvider)
+    /** Creates a folder (only when adding a folder: "New folder here"; refused by a viewer link). */
+    fun createFolder(parent: String?, name: String): RemoteFolder = p.createFolder(parent, name)
     /** Dropbox link only: the shared folder's name. */
     fun linkFolderName(): String? = (p as? DropboxLinkProvider)?.folderName()
     override fun close() = p.close()

@@ -91,13 +91,14 @@ Long-press any control button on the main screen to choose which buttons are sho
 * Raise *Motion must last at least* (e.g. 500 ms) to ignore brief flashes.
 
 ## Cloud backup (optional)
-Backing up and viewing are the same thing: **cloud folders** of clips. Clips → **Remote Folders** lists them – the
-folder this phone backs up to (↑) and other phones' folders – and tapping one shows its clips. **＋ Add → Back up this
-phone to…** copies every new clip to **Google Drive**, **Dropbox**, an **FTP/FTPS** server or an **SFTP** server, so
-footage survives if the phone is damaged or stolen (one folder per service; a folder you already view can become it via
-⋮ → *Back up this phone here*). The screen also has the **Upload queue** and **Clear downloaded clips**; its ⚙ opens the folder
-settings (upload only on Wi-Fi / while charging, quality, delete the phone copy, thumbnails, FTP/SFTP, keep a copy),
-which are also in the app's Settings. Each folder's ⋮ → *Backup settings* has its account, clean-up rules and viewer link.
+Backing up and viewing are the same thing: **remote folders** (cloud folders of clips). Clips → **Remote Folders** lists
+them; tapping one shows its clips. **＋ Add → Add remote folder**: pick **Google Drive**, **Dropbox**, a Dropbox viewer
+link, an **FTP/FTPS** or **SFTP** server, sign in, then **create a new folder** or open an existing one, and choose
+whether this phone backs up its new clips there. Every folder has a **Back up new clips here** switch (one folder per
+service; a viewer link is view-only), so footage survives if the phone is damaged or stolen and other phones can watch
+it. The screen also has the **Upload queue** and **Clear downloaded clips**; its ⚙ opens the folder settings (upload
+only on Wi-Fi / while charging, quality, delete the phone copy, thumbnails, FTP/SFTP, keep a copy), which are also in the
+app's Settings. Each backed-up folder's ⋮ → *Backup settings* has its account, clean-up rules and viewer link.
 
 * **Back up older clips**: select them in Clips and tap **Back up** (or *Back up all* in a collection).
 
@@ -183,7 +184,9 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
 * **Alerts open the clip**: once the camera saves the clip a motion alert recorded, the alert (notification, Alerts list,
   Activity log) says "tap to watch" and plays it from the camera's cloud backup – waiting for the upload if needed.
   This needs the camera's backup folder added once under Clips → Remote Folders; the screen explains if it isn't.
-  Or choose **inside MotionCam only**: a banner on the open screen and the Alerts list, nothing in the notification shade.
+  Or choose **inside MotionCam only**: a card on the open screen and the Alerts list, nothing in the notification shade.
+  In-app cards stack like the phone's notifications (one in front, "+N more" with layers behind): swipe a card sideways
+  to dismiss it, up to dismiss all, tap to open; they hide by themselves after a few seconds.
 * **Remote camera**: low-rate live view (a frame every 2 s, only while watched, stops after 3 min), a **high-quality
   frame** on request (shown under the live view; tap for full screen, save it to Pictures/MotionCam), the camera
   controls (lens, exposure, ISO, shutter, focus, white balance, zoom), recording and motion settings, start / pause /

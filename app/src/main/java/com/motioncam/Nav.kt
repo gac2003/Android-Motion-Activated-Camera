@@ -269,6 +269,14 @@ object Nav {
 
 /** The Clips tab's switch between this phone's clips and the remote folders (it remembers which was shown). */
 object ClipsSwitch {
+    /** "Clips" with the switch beside it, on one line. */
+    fun header(a: Activity, remote: Boolean): View = LinearLayout(a).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(Ui.label(a, "Clips", 26f).apply { setTypeface(typeface, Typeface.BOLD); setPadding(0, 0, Ui.dp(a, 12), 0) })
+        addView(view(a, remote), LinearLayout.LayoutParams(0, -2, 1f))
+    }
+
     fun view(a: Activity, remote: Boolean): View {
         val ctx: Context = a
         val box = LinearLayout(ctx).apply {
@@ -278,8 +286,10 @@ object ClipsSwitch {
         }
         for ((label, isRemote) in listOf("On this phone" to false, "Remote folders" to true)) {
             val on = isRemote == remote
-            box.addView(Ui.label(ctx, label, 14f, if (on) 0xFF15171B.toInt() else 0xFFFFFFFF.toInt()).apply {
+            box.addView(Ui.label(ctx, label, 13f, if (on) 0xFF15171B.toInt() else 0xFFFFFFFF.toInt()).apply {
                 gravity = Gravity.CENTER
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
                 setPadding(0, Ui.dp(ctx, 8), 0, Ui.dp(ctx, 8))
                 if (on) {
                     setTypeface(typeface, Typeface.BOLD)

@@ -135,7 +135,7 @@ open class ClipsActivity : Activity() {
         actionRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             val p = Ui.dp(this@ClipsActivity, 8)
-            setPadding(p, 0, p, Ui.dp(this@ClipsActivity, 4))
+            setPadding(p, 0, p, 0)
             fun add(kind: IconDrawable.Kind, label: String, tint: Int = 0xFFFFFFFF.toInt(), click: () -> Unit) =
                 addView(labeledButton(this@ClipsActivity, kind, label, tint, click).apply {
                     // a tile: icon above its name on a rounded card
@@ -224,7 +224,6 @@ open class ClipsActivity : Activity() {
             act(IconDrawable.Kind.STAR, "Favourite") { favouriteSelected() }
             favBtn = bottomBar.getChildAt(bottomBar.childCount - 1) as? LinearLayout
         }
-        if (canMark()) act(IconDrawable.Kind.LOCK, "Protect") { protect(selectedClips(), true) }
         // this phone's clips: upload the selection to the backup folders (the counterpart of Save in remote folders)
         if (remote == null) act(IconDrawable.Kind.CLOUD_UP, "Back up") { CollectionActions.backUpAll(this, selectedClips()) { exitSelection() } }
         else if (canEditShared()) act(IconDrawable.Kind.ADD_TO, "Add to") { addSelectedTo() }
@@ -245,8 +244,8 @@ open class ClipsActivity : Activity() {
             }
             if (collectionId != null && CloudDelete.canDelete(remote)) pm.menu.add(0, 7, 52, "Delete from cloud")
             if (canMark()) {
+                pm.menu.add(0, 4, 53, "Protect in cloud")
                 pm.menu.add(0, 5, 54, "Remove cloud protection")
-                pm.menu.add(0, 6, 55, "Protected in cloud…")
             }
             if (pm.menu.size() == 0) pm.menu.add(0, 0, 0, "No more actions").isEnabled = false
             pm.setOnMenuItemClickListener {
@@ -287,7 +286,11 @@ open class ClipsActivity : Activity() {
         }
         val listBox = FrameLayout(this)
         listBox.addView(list, FrameLayout.LayoutParams(-1, -1))
-        pinned = headerView().apply { setBackgroundColor(Ui.BG); visibility = View.GONE; elevation = Ui.dp(this@ClipsActivity, 2).toFloat() }
+        // the sticky copy sits as close under the tiles as the count line sits above them
+        pinned = headerView().apply {
+            setBackgroundColor(Ui.BG); visibility = View.GONE; elevation = Ui.dp(this@ClipsActivity, 2).toFloat()
+            setPadding(paddingLeft, Ui.dp(this@ClipsActivity, 2), paddingRight, paddingBottom)
+        }
         listBox.addView(pinned, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
         listBox.addView(bottomBar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         if (remote != null) {
@@ -857,6 +860,8 @@ open class ClipsActivity : Activity() {
             }
             if (row is Row.Header) {
                 val v = (convertView as? LinearLayout)?.takeIf { it.tag == "header" } ?: headerView().apply { tag = "header" }
+                // the first day right under the tiles: the same small gap as the sticky copy (later days keep their space)
+                v.setPadding(v.paddingLeft, Ui.dp(this@ClipsActivity, if (position == 0) 2 else 10), v.paddingRight, v.paddingBottom)
                 bindHeader(v, row)
                 return v
             }
@@ -1061,8 +1066,7 @@ open class ClipsActivity : Activity() {
         tag = "clipsHeader"
         orientation = LinearLayout.VERTICAL
         setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8))
-        addView(Ui.label(this@ClipsActivity, "Clips", 26f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 0, 0, Ui.dp(this@ClipsActivity, 10)) })
-        addView(ClipsSwitch.view(this@ClipsActivity, remote = remote != null))
+        addView(com.motioncam.ClipsSwitch.header(this@ClipsActivity, remote = remote != null))
         // a remote folder or a collection opened in the Clips tab: its name, tap to go back one step
         val name = collectionId?.let { store.get(this@ClipsActivity, it)?.name } ?: remote?.name
         if (name != null) addView(backRow(this@ClipsActivity, name, remote?.takeIf { collectionId != null }?.name) { finish() }.apply { tag = "slides" })

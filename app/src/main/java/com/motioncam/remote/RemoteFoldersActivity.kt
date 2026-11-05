@@ -69,8 +69,7 @@ open class RemoteFoldersActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@RemoteFoldersActivity, 16)
             setPadding(p, p, p, Ui.dp(this@RemoteFoldersActivity, 4))
-            addView(Ui.label(this@RemoteFoldersActivity, "Clips", 26f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 0, 0, Ui.dp(this@RemoteFoldersActivity, 10)) })
-            addView(com.motioncam.ClipsSwitch.view(this@RemoteFoldersActivity, remote = true))
+            addView(com.motioncam.ClipsSwitch.header(this@RemoteFoldersActivity, remote = true))
         }) else {
             val actions = Ui.chip(this, "＋ Add").apply { setOnClickListener { addSource() } }
             root.addView(topBar(this, "Remote folders", actions))

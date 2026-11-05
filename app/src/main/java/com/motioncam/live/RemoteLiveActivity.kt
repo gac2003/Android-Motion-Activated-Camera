@@ -35,7 +35,7 @@ import kotlin.math.roundToInt
  * Full-screen live view of a camera phone, laid out like MotionCam's own camera screen: the picture fills the screen,
  * status at the top, and at the bottom the same control buttons (lens, format, EV, ISO, shutter, focus, white balance,
  * zoom) with their slider, plus Start / Stop monitoring. Tap the picture to hide or show the controls.
- * Controls apply when the finger lifts (one request per change, so the camera isn't flooded); the picture shows the
+ * Changes are lined up and sent together with Save (a remote change shows in the picture a few seconds later); the picture shows the
  * result within a couple of seconds. Zones aren't offered: they are drawn on the camera phone itself.
  */
 class RemoteLiveActivity : Activity() {
@@ -71,8 +71,14 @@ class RemoteLiveActivity : Activity() {
     /** Values sent but not yet confirmed by the camera's status (shown meanwhile so controls don't flick back). */
     private val pending = JSONObject()
     private var pendingAt = 0L
-    /** Values changed during the current slider drag; sent when the finger lifts. */
-    private val dragArgs = JSONObject()
+    /** Changes made here but not sent yet: the camera gets them all at once with Save (remote changes show a few seconds
+     *  later in the picture, so they are lined up first, then sent). */
+    private val draft = JSONObject()
+    private var saving = false
+    private var leaveOk = false
+    private lateinit var saveBar: LinearLayout
+    private lateinit var saveInfo: TextView
+    private lateinit var saveBtn: TextView
 
     private val refresh: () -> Unit = { runOnUiThread { refreshAll() } }
 
@@ -179,6 +185,18 @@ class RemoteLiveActivity : Activity() {
         panel.addView(valueTv)
         panel.addView(seek, LinearLayout.LayoutParams(0, -2, 1f))
         panel.addView(autoBtn)
+        saveBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(d(12), d(2), d(12), d(8))
+            visibility = View.GONE
+        }
+        saveInfo = Ui.label(this, "", 13f, Ui.ACCENT)
+        saveBar.addView(saveInfo, LinearLayout.LayoutParams(0, -2, 1f))
+        saveBar.addView(Ui.chip(this, "Cancel").apply { setOnClickListener { cancelDraft() } })
+        saveBtn = Ui.chip(this, "Save").apply { Ui.setChipState(this, true); setOnClickListener { saveDraft() } }
+        saveBar.addView(saveBtn, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = d(8) })
+        bottomBox.addView(saveBar)
         bottomBox.addView(panel)
         strip = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         chipRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(d(8), 0, d(8), 0) }
@@ -197,7 +215,7 @@ class RemoteLiveActivity : Activity() {
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) { if (fromUser && !updating) onSeek(p) }
             override fun onStartTrackingTouch(sb: SeekBar) { touching = true }
-            override fun onStopTrackingTouch(sb: SeekBar) { touching = false; sendDrag() }
+            override fun onStopTrackingTouch(sb: SeekBar) { touching = false; updateSaveBar() }
         })
         setContentView(root)
     }
@@ -264,6 +282,7 @@ class RemoteLiveActivity : Activity() {
         for (k in pending.keys().asSequence().toList()) {
             if (server.opt(k)?.toString() == pending.opt(k)?.toString()) pending.remove(k) else m.put(k, pending.get(k))
         }
+        for (k in draft.keys()) m.put(k, draft.get(k))
         return m
     }
 
@@ -498,8 +517,7 @@ class RemoteLiveActivity : Activity() {
             "WB" -> a.put("wbAuto", false).put("wbKelvin", ProCaps.wbPresets[p.coerceIn(0, ProCaps.wbPresets.size - 1)].second)
             "ZOOM" -> a.put("zoom", ((zMin + (zMax - zMin) * p / 1000.0) * 10).roundToInt() / 10.0)
         }
-        for (k in a.keys()) { dragArgs.put(k, a.get(k)); pending.put(k, a.get(k)) }
-        pendingAt = System.currentTimeMillis()
+        stage(a, refresh = false)
         val now = st()
         when (selected) {
             "ISO", "SPEED" -> setAutoBtn("AUTO", now.optBoolean("exposureAuto", true))
@@ -516,13 +534,6 @@ class RemoteLiveActivity : Activity() {
         a.put("iso", lv.optInt("iso").takeIf { it > 0 } ?: st.optInt("iso", 400))
         val (lo, hi) = shutterRange(st)
         a.put("shutterNs", (lv.optLong("shutterNs").takeIf { it > 0 } ?: st.optLong("shutterNs", 16_666_666L)).toDouble().coerceIn(lo, hi).toLong())
-    }
-
-    private fun sendDrag() {
-        if (dragArgs.length() == 0) return
-        val a = JSONObject(dragArgs.toString())
-        dragArgs.keys().asSequence().toList().forEach { dragArgs.remove(it) }
-        apply(a, alreadyShown = true)
     }
 
     private fun onAuto() {
@@ -550,17 +561,65 @@ class RemoteLiveActivity : Activity() {
         apply(a)
     }
 
-    /** Sends settings to the camera; shown at once, and taken back if the camera refuses them. */
-    private fun apply(a: JSONObject, alreadyShown: Boolean = false) {
-        if (!alreadyShown) { for (k in a.keys()) pending.put(k, a.get(k)); pendingAt = System.currentTimeMillis() }
-        refreshAll()
+    /** Lines up a change (shown right away on the buttons and slider); sent with Save. */
+    private fun apply(a: JSONObject) = stage(a, refresh = true)
+
+    private fun stage(a: JSONObject, refresh: Boolean) {
+        val server = status()?.optJSONObject("settings") ?: JSONObject()
+        for (k in a.keys()) {
+            // back to what the camera already has: nothing to send for it
+            if (server.opt(k)?.toString() == a.opt(k)?.toString() && pending.opt(k) == null) draft.remove(k) else draft.put(k, a.get(k))
+        }
+        if (refresh) refreshAll()
+        updateSaveBar()
+    }
+
+    private fun updateSaveBar() {
+        if (!::saveBar.isInitialized) return
+        val n = draft.length()
+        val show = n > 0 || saving
+        saveInfo.text = if (saving) "Sending…" else "$n change${if (n == 1) "" else "s"} not sent yet"
+        saveBtn.isEnabled = !saving; saveBtn.alpha = if (saving) 0.5f else 1f
+        saveBar.visibility = if (show) View.VISIBLE else View.GONE
+    }
+
+    /** Sends every lined-up change at once; shown until the camera confirms, taken back if it refuses. */
+    private fun saveDraft() {
+        if (draft.length() == 0 || saving) return
+        val a = JSONObject(draft.toString())
+        for (k in a.keys()) pending.put(k, a.get(k))
+        pendingAt = System.currentTimeMillis()
+        draft.keys().asSequence().toList().forEach { draft.remove(it) }
+        saving = true; updateSaveBar(); refreshAll()
         fun undo(keys: Collection<String>) { keys.forEach { if (pending.opt(it)?.toString() == a.opt(it)?.toString()) pending.remove(it) }; refreshAll() }
-        r.send("set", a, quiet = true, onFail = { undo(a.keys().asSequence().toList()) }) { ok, res ->
+        r.send("set", a, quiet = false, onFail = {
+            saving = false
+            // not sent: put the changes back so nothing is lost
+            for (k in a.keys()) if (!draft.has(k)) draft.put(k, a.get(k))
+            undo(a.keys().asSequence().toList()); updateSaveBar()
+        }) { ok, res ->
+            saving = false
             if (!ok) {
                 val applied = res?.optJSONArray("applied")?.let { arr -> (0 until arr.length()).map { arr.getString(it) } } ?: emptyList()
                 undo(a.keys().asSequence().toList() - applied.toSet())
             } else pendingAt = System.currentTimeMillis()
+            updateSaveBar()
         }
+    }
+
+    private fun cancelDraft() {
+        draft.keys().asSequence().toList().forEach { draft.remove(it) }
+        updateSaveBar(); refreshAll()
+    }
+
+    /** Leaving with changes not sent asks first. */
+    override fun finish() {
+        if (draft.length() == 0 || leaveOk) { super.finish(); return }
+        AlertDialog.Builder(this).setTitle("Changes not sent")
+            .setMessage("${draft.length()} change${if (draft.length() == 1) "" else "s"} made here ha${if (draft.length() == 1) "s" else "ve"} not been sent to the camera.")
+            .setPositiveButton("Save") { _, _ -> saveDraft() }
+            .setNegativeButton("Discard") { _, _ -> leaveOk = true; finish() }
+            .setNeutralButton("Keep editing", null).show()
     }
 
     /** Tap the value: type the exact number (as on the camera screen). */
@@ -573,7 +632,7 @@ class RemoteLiveActivity : Activity() {
             "EV" -> "Exposure compensation (EV)" to "%.1f".format(st.optInt("evIndex") * evStep)
             "ISO" -> "ISO (${isoLo.roundToInt()}–${isoHi.roundToInt()})" to "${lv.optInt("iso").takeIf { it > 0 && st.optBoolean("exposureAuto", true) } ?: st.optInt("iso", 400)}"
             "SPEED" -> "Shutter speed: 1 / …" to "${(1e9 / (lv.optLong("shutterNs").takeIf { it > 0 && st.optBoolean("exposureAuto", true) } ?: st.optLong("shutterNs", 16_666_666L))).roundToInt()}"
-            "FOCUS" -> "Focus distance in cm (empty = infinity)" to ""
+            "FOCUS" -> "Focus distance in metres (empty = infinity)" to ""
             "WB" -> "White balance in Kelvin (snaps to the nearest preset)" to "${st.optInt("wbKelvin", 5200)}"
             "ZOOM" -> "Zoom (%.1f–%.1f)".format(zMin, zMax) to "%.1f".format(st.optDouble("zoom", 1.0))
             else -> return
@@ -595,7 +654,7 @@ class RemoteLiveActivity : Activity() {
                 }
                 "FOCUS" -> if (minFocus > 0) {
                     if (t.isEmpty()) a.put("focusAuto", false).put("focusPos", 1.0)
-                    else v?.takeIf { it > 0 }?.let { a.put("focusAuto", false).put("focusPos", (1 - (100 / it) / minFocus).coerceIn(0.0, 1.0)) }
+                    else v?.takeIf { it > 0 }?.let { a.put("focusAuto", false).put("focusPos", (1 - (1 / it) / minFocus).coerceIn(0.0, 1.0)) }
                 }
                 "WB" -> v?.let { a.put("wbAuto", false).put("wbKelvin", ProCaps.wbPresets[ProCaps.nearestPreset(it.roundToInt())].second) }
                 "ZOOM" -> v?.let { a.put("zoom", it.coerceIn(zMin, zMax)) }
@@ -647,10 +706,11 @@ class RemoteLiveActivity : Activity() {
         val den = 1_000_000_000.0 / ns
         return if (den >= 1.5) "1/${den.roundToInt()}" else "%.1fs".format(ns / 1e9)
     }
+    /** Focus distance, always in metres (as on the camera screen), ∞ for infinity. */
     private fun diopterText(dpt: Double): String {
         if (dpt < 0.1) return "∞"
-        val cm = 100 / dpt
-        return if (cm >= 100) "%.1fm".format(cm / 100) else "%.0fcm".format(cm)
+        val m = 1 / dpt
+        return if (m < 10) "%.2fm".format(m) else "%.1fm".format(m)
     }
     private fun focusText(pos: Double) = diopterText((1 - pos) * (if (minFocus > 0) minFocus else 10.0))
 }

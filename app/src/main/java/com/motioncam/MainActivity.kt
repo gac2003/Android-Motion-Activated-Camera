@@ -1002,7 +1002,7 @@ class MainActivity : Activity() {
             "EV" -> Triple("Exposure compensation (EV)", "e.g. -0.7", "%.1f".format(prefs.evIndex * c.evStep))
             "ISO" -> Triple("ISO (${c.isoMin}–${c.isoMax})", "e.g. 400", "${if (prefs.exposureAuto) engine?.liveIso ?: prefs.iso else prefs.iso}")
             "SPEED" -> Triple("Shutter speed: 1 / …", "e.g. 60 for 1/60 s", "${(1e9 / (if (prefs.exposureAuto) engine?.liveShutterNs?.takeIf { it > 0 } ?: prefs.shutterNs else prefs.shutterNs)).roundToInt()}")
-            "FOCUS" -> Triple("Focus distance in cm (empty = infinity)", "e.g. 150", "")
+            "FOCUS" -> Triple("Focus distance in metres (empty = infinity)", "e.g. 1.5", "")
             "WB" -> Triple("White balance in Kelvin (snaps to nearest preset)", "e.g. 5200", "${prefs.wbKelvin}")
             "ZOOM" -> Triple("Zoom (%.1f–%.1f)".format(c.zoomMin, c.zoomMax), "e.g. 2.0", "%.1f".format(prefs.zoom))
             "ZONES" -> Triple("Motion sensitivity (1–${MotionDetector.MAX_SENSITIVITY})", "5", "${prefs.sensitivity}")
@@ -1026,7 +1026,7 @@ class MainActivity : Activity() {
                         prefs.shutterNs = (1e9 / v).toLong().coerceIn(lo, hi)
                     }
                     "FOCUS" -> if (c.canManualFocus) {
-                        val d = if (v == null || v <= 0) 0f else (100.0 / v).toFloat()
+                        val d = if (v == null || v <= 0) 0f else (1.0 / v).toFloat()
                         prefs.focusPos = (1f - d / c.minFocusDiopter).coerceIn(0f, 1f)
                         prefs.focusAuto = false
                     }
@@ -1090,10 +1090,11 @@ class MainActivity : Activity() {
         return if (den >= 1.5) "1/${den.roundToInt()}" else "%.1fs".format(ns / 1e9)
     }
 
+    /** Focus distance, always in metres (0.63m, 2.50m, 12.5m), ∞ for infinity. */
     private fun diopterText(d: Float): String {
         if (d < 0.1f) return "∞"
-        val cm = 100f / d
-        return if (cm >= 100f) "%.1fm".format(cm / 100f) else "%.0fcm".format(cm)
+        val m = 1f / d
+        return if (m < 10f) "%.2fm".format(m) else "%.1fm".format(m)
     }
 
     private fun focusText(c: ProCaps?, pos: Float): String = diopterText((1f - pos) * (c?.minFocusDiopter ?: 10f))

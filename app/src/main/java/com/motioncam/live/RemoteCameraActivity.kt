@@ -446,14 +446,14 @@ class RemoteCameraActivity : Activity() {
         if (minFocus > 0) {
             sf.toggle("Focus: automatic", st.optBoolean("focusAuto", true), enabled) { set("focusAuto", it) }
             if (!st.optBoolean("focusAuto", true)) {
-                fun cmOf(pos: Double): Double { val d = (1 - pos) * minFocus; return if (d < 0.1) Double.POSITIVE_INFINITY else 100 / d }
-                sf.scaled("Focus distance", "cm", st.optDouble("focusPos", 1.0).coerceIn(0.0, 1.0), 1000,
+                fun mOf(pos: Double): Double { val d = (1 - pos) * minFocus; return if (d < 0.1) Double.POSITIVE_INFINITY else 1 / d }
+                sf.scaled("Focus distance", "m", st.optDouble("focusPos", 1.0).coerceIn(0.0, 1.0), 1000,
                     toPos = { (it * 1000).roundToInt() }, fromPos = { it / 1000.0 },
-                    format = { pos -> cmOf(pos).let { if (it.isInfinite()) "" else "${it.roundToInt()}" } },
-                    parse = { t -> if (t.isEmpty() || t == "∞") 1.0 else t.replace(',', '.').toDoubleOrNull()?.takeIf { it > 0 }?.let { cm ->
-                        (1 - (100 / cm) / minFocus).coerceIn(0.0, 1.0) } },
+                    format = { pos -> mOf(pos).let { if (it.isInfinite()) "" else if (it < 10) "%.2f".format(it) else "%.1f".format(it) } },
+                    parse = { t -> if (t.isEmpty() || t == "∞") 1.0 else t.replace(',', '.').toDoubleOrNull()?.takeIf { it > 0 }?.let { m ->
+                        (1 - (1 / m) / minFocus).coerceIn(0.0, 1.0) } },
                     hint = "∞", enabled = enabled) { set("focusPos", it) }
-                f.note("Closest: about ${(100 / minFocus).roundToInt()} cm. Leave the box empty for infinity (∞).")
+                f.note("Closest: about %.2f m. Leave the box empty for infinity (∞).".format(1 / minFocus))
             }
         }
         // white balance: automatic or one of the camera screen's presets

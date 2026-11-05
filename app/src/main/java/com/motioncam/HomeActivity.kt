@@ -74,7 +74,7 @@ class HomeActivity : Activity(), Nav.Reselect {
         AlertInbox.listeners += changed
         StatusBus.add(statusL)
         CameraService.ensureStandby(this)
-        feed = ActivityFeed(this, 12) { fillRecent() }
+        feed = ActivityFeed(this, 40) { fillRecent() }
         render()
         ui.postDelayed(tick, 30_000)
     }
@@ -286,7 +286,7 @@ class HomeActivity : Activity(), Nav.Reselect {
         val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM; setPadding(0, d(22), 0, d(8)) }
         head.addView(Ui.label(this, "CAMERA OVERVIEW", 13f, Ui.ACCENT).apply { setTypeface(typeface, Typeface.BOLD); letterSpacing = 0.06f },
             LinearLayout.LayoutParams(0, -2, 1f))
-        if (cams.isNotEmpty()) head.addView(Ui.label(this, "$on camera${if (on == 1) "" else "s"} online" + if (off > 0) " · $off offline" else "", 13f, Ui.GREY))
+        if (cams.isNotEmpty()) head.addView(Ui.label(this, "$on online" + if (off > 0) " · $off offline" else "", 13f, Ui.GREY))
         box.addView(head)
         if (cams.isEmpty()) {
             box.addView(Ui.label(this, if (Live.devicesLoaded) "No cameras yet. Open Camera mode on another phone of yours (on the same network) and it appears here."

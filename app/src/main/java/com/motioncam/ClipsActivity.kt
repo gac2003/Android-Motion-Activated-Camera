@@ -1031,7 +1031,20 @@ open class ClipsActivity : Activity() {
         orientation = LinearLayout.VERTICAL
         setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8))
         addView(Ui.label(this@ClipsActivity, "Clips", 26f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 0, 0, Ui.dp(this@ClipsActivity, 10)) })
-        addView(ClipsSwitch.view(this@ClipsActivity, remote = false))
+        addView(ClipsSwitch.view(this@ClipsActivity, remote = remote != null))
+        // a remote folder opened in the Clips tab: its name, tap to go back to your folders
+        val r = remote
+        if (r != null) addView(LinearLayout(this@ClipsActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, Ui.dp(this@ClipsActivity, 10), 0, 0)
+            isClickable = true
+            contentDescription = "Back to your folders (${r.name})"
+            setOnClickListener { finish() }
+            addView(Ui.label(this@ClipsActivity, "‹", 24f).apply { setPadding(0, 0, Ui.dp(this@ClipsActivity, 10), Ui.dp(this@ClipsActivity, 2)) })
+            addView(Ui.label(this@ClipsActivity, r.name, 16f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END },
+                LinearLayout.LayoutParams(0, -2, 1f))
+        })
     }
 
     private fun deleteSelected() {

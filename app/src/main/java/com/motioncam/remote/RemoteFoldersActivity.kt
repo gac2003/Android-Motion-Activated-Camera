@@ -316,7 +316,9 @@ open class RemoteFoldersActivity : Activity() {
     }
 
     private fun open(s: RemoteSource) {
-        startActivity(Intent(this, ClipsActivity::class.java).putExtra(ClipsActivity.EXTRA_REMOTE, s.id))
+        // in the Clips tab the folder opens inside the tab (tab bar and switch stay)
+        startActivity(Intent(this, if (asTab) com.motioncam.RemoteClipsTabActivity::class.java else ClipsActivity::class.java)
+            .putExtra(ClipsActivity.EXTRA_REMOTE, s.id))
     }
 
     // ------------------------------------------------------------------ adding

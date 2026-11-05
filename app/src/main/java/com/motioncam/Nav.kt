@@ -29,6 +29,10 @@ object Nav {
     fun lastPlace(ctx: Context): String = sp(ctx).getString("place", "home") ?: "home"
     fun lastTab(ctx: Context): Tab = try { Tab.valueOf(sp(ctx).getString("tab", "HOME") ?: "HOME").takeIf { it != Tab.CAMERA } ?: Tab.HOME } catch (_: Exception) { Tab.HOME }
     /** The Clips tab shows its remote folders (true) or this phone's clips. */
+    /** A remote folder open in the Clips tab (the tab returns to it). */
+    @Volatile var openFolder: Activity? = null
+    fun lastFolder(ctx: Context): String? = sp(ctx).getString("clipsFolder", null)
+    fun setLastFolder(ctx: Context, id: String?) = sp(ctx).edit().putString("clipsFolder", id).apply()
     fun clipsRemote(ctx: Context): Boolean = sp(ctx).getBoolean("clipsRemote", false)
     fun setClipsRemote(ctx: Context, remote: Boolean) = sp(ctx).edit().putBoolean("clipsRemote", remote).apply()
 
@@ -39,7 +43,8 @@ object Nav {
         Tab.HOME -> HomeActivity::class.java
         Tab.ACTIVITY -> ActivityTabActivity::class.java
         Tab.CAMERA -> MainActivity::class.java
-        Tab.CLIPS -> if (clipsRemote(ctx)) RemoteTabActivity::class.java else ClipsTabActivity::class.java
+        Tab.CLIPS -> if (!clipsRemote(ctx)) ClipsTabActivity::class.java
+            else if (openFolder?.isFinishing == false) RemoteClipsTabActivity::class.java else RemoteTabActivity::class.java
         Tab.SETTINGS -> SettingsTabActivity::class.java
     }
 
@@ -201,9 +206,10 @@ object ClipsSwitch {
                 isClickable = true
                 contentDescription = label + if (on) " (shown)" else ""
                 setOnClickListener {
-                    if (on) return@setOnClickListener
+                    // in an open folder, "Remote folders" goes back to the list of folders
+                    if (on) { if (a is RemoteClipsTabActivity) a.finish(); return@setOnClickListener }
                     Nav.setClipsRemote(a, isRemote)
-                    Nav.open(a, if (isRemote) RemoteTabActivity::class.java else ClipsTabActivity::class.java)
+                    Nav.open(a, if (isRemote) Nav.cls(a, Nav.Tab.CLIPS) else ClipsTabActivity::class.java)
                 }
             }, LinearLayout.LayoutParams(0, -2, 1f))
         }

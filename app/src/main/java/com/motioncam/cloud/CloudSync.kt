@@ -132,6 +132,69 @@ object CloudSync {
     /** This phone's clips that are in at least one backup folder. */
     fun backedUpIds(ctx: Context): Set<Long> = synchronized(lock) { load(ctx); index!!.map { it.clipId }.toSet() }
 
+    /** Folders this phone can back up to: every set-up destination, whether or not it backs up new clips by itself. */
+    fun targets(ctx: Context): List<Dest> = Dest.all(ctx).filter { CloudConfig(ctx, it).let { c -> c.isConfigured && c.folderId != null } }
+
+    /** Per destination: how many of [clipIds] are in it, and how many are waiting to be uploaded there. */
+    fun presence(ctx: Context, clipIds: Collection<Long>): Map<Dest, Pair<Int, Int>> = synchronized(lock) {
+        load(ctx)
+        val ids = clipIds.toSet()
+        targets(ctx).associateWith { d ->
+            val up = index!!.filter { it.kind == d && it.clipId in ids }.map { it.clipId }.toSet()
+            up.size to jobs!!.count { it.kind == d && it.clipId in ids && it.clipId !in up }
+        }
+    }
+
+    /** Queues these clips for exactly these folders (already there or waiting: skipped). Returns how many uploads were added. */
+    fun enqueueTo(ctx: Context, clipIds: List<Long>, dests: Collection<Dest>): Int {
+        for (k in dests) reconcile(ctx, k)   // clips deleted from the cloud meanwhile are uploaded again
+        var n = 0
+        synchronized(lock) {
+            load(ctx)
+            var seq = (jobs!!.maxOfOrNull { it.seq } ?: System.currentTimeMillis()) + 1
+            for (id in clipIds) for (k in dests) if (addJobLocked(ctx, id, k)) { jobs!!.last().seq = seq++; n++ }
+            save(ctx)
+        }
+        kick(ctx)
+        return n
+    }
+
+    /**
+     * Takes these clips out of one backup folder: waiting uploads are dropped and their cloud copies deleted (with their
+     * thumbnails, protection marks and collection entries there). The clips on this phone are kept. Network; returns how
+     * many cloud copies were deleted.
+     */
+    fun removeFrom(ctx: Context, clipIds: Collection<Long>, d: Dest): Int {
+        val ids = clipIds.toSet()
+        val names: List<String> = synchronized(lock) {
+            load(ctx)
+            jobs!!.filter { it.kind == d && it.clipId in ids }.forEach { it.abort = true }
+            jobs!!.removeAll { it.kind == d && it.clipId in ids }
+            save(ctx)
+            index!!.filter { it.kind == d && it.clipId in ids }.map { it.name }
+        }
+        if (names.isEmpty()) return 0
+        val cfg = CloudConfig(ctx, d)
+        val folder = cfg.folderId ?: return 0
+        var n = 0
+        providerFor(ctx, d).use { p ->
+            val files = p.list(folder).associateBy { it.name }
+            val marks = MarkStore.forProvider(p, folder)
+            val shared = CollectionFiles(p, folder, true)
+            for (name in names) {
+                files[name]?.let { f ->
+                    p.delete(folder, f); n++
+                    try { deleteThumb(cfg, p, folder, name) } catch (_: Exception) {}
+                    try { marks.forget(name) } catch (_: Exception) {}
+                    try { shared.forgetClip(name) } catch (_: Exception) {}
+                }
+                forget(ctx, d, name)
+            }
+        }
+        com.motioncam.live.Live.nudge(ctx, cfg.kind, folder, "clips")   // viewing phones refresh now
+        return n
+    }
+
     fun enabledKinds(ctx: Context) = Dest.all(ctx).filter { CloudConfig(ctx, it).let { c -> c.enabled && c.isConfigured } }
 
     /** Called when a clip has been saved: queue it for every enabled destination. */
@@ -386,9 +449,11 @@ object CloudSync {
         val app = ctx.applicationContext
         if (Prefs(app).cloudPaused) return
         val now = System.currentTimeMillis()
-        val enabled = enabledKinds(app).filter { CloudConfig(app, it).blocked == null }
+        // folders backing up new clips, and any other folder with clips chosen for it by hand
+        val all = targets(app).filter { CloudConfig(app, it).blocked == null }
         synchronized(lock) {
             load(app)
+            val enabled = all.filter { k -> CloudConfig(app, k).enabled || jobs!!.any { it.kind == k } }
             stop = false
             var nextWake = Long.MAX_VALUE
             for (k in enabled) {

@@ -225,7 +225,7 @@ open class ClipsActivity : Activity() {
             favBtn = bottomBar.getChildAt(bottomBar.childCount - 1) as? LinearLayout
         }
         // this phone's clips: upload the selection to the backup folders (the counterpart of Save in remote folders)
-        if (remote == null) act(IconDrawable.Kind.CLOUD_UP, "Back up") { CollectionActions.backUpAll(this, selectedClips()) { exitSelection() } }
+        if (remote == null) act(IconDrawable.Kind.CLOUD_UP, "Back up") { BackupSheet.show(this, selectedClips()) { exitSelection(); reload() } }
         else if (canEditShared()) act(IconDrawable.Kind.ADD_TO, "Add to") { addSelectedTo() }
         when {
             // out of this collection only: the clips themselves stay
@@ -629,6 +629,9 @@ open class ClipsActivity : Activity() {
         }
         if (CloudDelete.canDelete(remote)) opts += Opt("Delete all $n from the cloud", "Protected clips are kept", danger = true, section = "Cloud") {
             remote?.let { r -> CloudDelete.confirm(this, r, h.clips.filter { it.id !in missingIds }) { reload() } }
+        }
+        if (remote == null) opts += Opt("Back up this day…", "Choose which backup folders its $n clips are in", IconDrawable.Kind.CLOUD_UP, section = "Cloud") {
+            BackupSheet.show(this, h.clips) { reload() }
         }
         if (remote == null) opts += Opt("Delete all $n clips of this day", "From this phone", danger = true, section = "Phone") {
             AlertDialog.Builder(this).setTitle("Delete $n clips?")

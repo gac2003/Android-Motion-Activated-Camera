@@ -35,31 +35,6 @@ object CollectionActions {
         }.start()
     }
 
-    /** Queues phone clips for every enabled backup destination (clips already backed up are skipped). */
-    fun backUpAll(a: Activity, list: List<Clip>, done: () -> Unit = {}) {
-        if (list.isEmpty()) return
-        if (CloudSync.enabledKinds(a).isEmpty()) {
-            AlertDialog.Builder(a).setTitle("Cloud backup is off")
-                .setMessage("Set up where clips are backed up first (Google Drive, Dropbox or your own FTP/SFTP server).")
-                .setPositiveButton("Set up backup") { _, _ ->
-                    a.startActivity(android.content.Intent(a, com.motioncam.remote.RemoteFoldersActivity::class.java)
-                        .putExtra(com.motioncam.remote.RemoteFoldersActivity.EXTRA_BACKUP, true))
-                }
-                .setNegativeButton("Cancel", null).show()
-            return
-        }
-        Thread {
-            val r = CloudSync.enqueueClips(a, list.map { it.id })
-            a.runOnUiThread {
-                val parts = ArrayList<String>()
-                parts += if (r.queued > 0) "${plural(r.queued)} queued for upload (Clips → Remote folders → Upload queue)."
-                         else "Nothing new to upload."
-                if (r.already > 0) parts += "${plural(r.already)} already backed up or waiting."
-                if (r.savedCopies > 0) parts += "${plural(r.savedCopies)} skipped: copies saved from a remote folder are never uploaded."
-                done()
-                AlertDialog.Builder(a).setTitle("Back up").setMessage(parts.joinToString("\n\n")).setPositiveButton("OK", null)
-                    .setNeutralButton("Upload queue") { _, _ -> a.startActivity(android.content.Intent(a, com.motioncam.cloud.UploadQueueActivity::class.java)) }.show()
-            }
-        }.start()
-    }
+    /** "Back up to…": choose which backup folders these phone clips are in (see [BackupSheet]). */
+    fun backUpAll(a: Activity, list: List<Clip>, done: () -> Unit = {}) = BackupSheet.show(a, list, done)
 }

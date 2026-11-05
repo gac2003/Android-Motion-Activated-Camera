@@ -121,7 +121,10 @@ rules, viewer link). A phone can back up to **several folders**, also on the sam
 **Remote folder settings** has the **Upload queue**, **Clear downloaded clips** and the folder settings (upload only on
 Wi-Fi / while charging, quality, delete the phone copy, thumbnails, FTP/SFTP, keep a copy – also in the app's Settings).
 
-* **Back up older clips**: select them in Clips and tap **Back up** (or *Back up all* in a collection).
+* **Back up to…** (select clips → **Back up**, a clip's ⋮ in the player, a day's ⋮, or *Back up all* in a collection):
+  every folder this phone can back up to, with a checkbox showing whether the clips are in it (✓ all, – some, empty
+  none). Tick folders to back the clips up there – a folder doesn't have to back up new clips by itself for that; untick
+  one to take them out of it, which deletes those cloud copies after a confirmation (the clips on the phone are kept).
 
 * **Connect**: Google Drive uses the phone's Google account picker; Dropbox opens a sign-in page; FTP/SFTP take the
   server address and login (stored encrypted on the phone).

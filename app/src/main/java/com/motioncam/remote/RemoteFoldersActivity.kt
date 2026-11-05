@@ -271,22 +271,8 @@ open class RemoteFoldersActivity : Activity() {
      * folder's switched-off destination or the service's unused one, otherwise adds a destination.
      */
     private fun backUpHere(s: RemoteSource, done: (Boolean) -> Unit = {}) {
-        val d = destsOf(s, onOnly = false).firstOrNull()
-            ?: com.motioncam.cloud.Dest.primary(s.kind).takeIf { CloudConfig(this, it).let { c -> !c.isConfigured || c.folderId == null } }
-            ?: com.motioncam.cloud.Dest.create(this, s.kind)
-        val c = CloudConfig(this, d)
-        when (s.kind) {
-            CloudKind.DRIVE -> c.account = s.account
-            CloudKind.DROPBOX -> { c.refreshToken = s.refreshToken; c.account = s.account }
-            CloudKind.FTP -> { c.host = s.host; c.port = s.port; c.user = s.user; c.tls = s.tls; c.password = s.password }
-            CloudKind.SFTP -> {
-                c.host = s.host; c.port = s.port; c.user = s.user; c.useKey = s.useKey; c.password = s.password
-                c.privateKey = s.privateKey; c.passphrase = s.passphrase; c.hostKey = s.hostKey
-            }
-        }
-        c.folderId = s.folderId; c.folderName = s.folderName.ifEmpty { s.name }
-        c.blocked = null
-        c.enabled = true
+        val d = FolderDests.destFor(this, s)
+        CloudConfig(this, d).enabled = true
         com.motioncam.cloud.CloudSync.kick(this)
         Toast.makeText(this, "New clips will also be backed up to ${s.name}", Toast.LENGTH_LONG).show()
         done(true)

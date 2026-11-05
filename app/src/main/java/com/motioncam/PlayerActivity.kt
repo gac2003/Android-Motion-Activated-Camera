@@ -746,6 +746,7 @@ class PlayerActivity : Activity() {
         val isProt = com.motioncam.cloud.MarkSync.isProtected(spaces, c.name)
         if (canMark) pm.menu.add(0, 7, 2, if (isProt) "Remove cloud protection" else "Protect in cloud")
         if (remote != null) pm.menu.add(0, 6, 2, "Save to phone")
+        else pm.menu.add(0, 10, 2, "Back up to…")
         if (CloudDelete.canDelete(remote)) pm.menu.add(0, 8, 9, "Delete from cloud")
         else {
             pm.menu.add(0, 1, 2, "Open in another app")
@@ -766,6 +767,7 @@ class PlayerActivity : Activity() {
                      else com.motioncam.cloud.CloudProtect.protect(this, remote, listOf(c.name))
                 1 -> startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(c.uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                 9 -> FileReveal.show(this, c)
+                10 -> BackupSheet.show(this, listOf(c))
                 2 -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("video/mp4")
                     .putExtra(Intent.EXTRA_STREAM, c.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share clip"))
                 3 -> AlertDialog.Builder(this).setTitle("Delete this clip?")

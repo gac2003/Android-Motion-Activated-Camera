@@ -363,7 +363,7 @@ open class ClipsActivity : Activity() {
                 setSummary(when {
                     all.isEmpty() && collectionId != null -> "No clips in this collection yet. In Clips, hold a clip to select it, then Add to…"
                     all.isEmpty() -> "No clips yet"
-                    else -> "${all.size} clip${if (all.size == 1) "" else "s"} · ${sizeText(total)}" + legend()
+                    else -> "${all.size} clip${if (all.size == 1) "" else "s"} · ${sizeText(total)}" + if (asTab) "" else legend()
                 })
             }
         }.start()
@@ -529,7 +529,7 @@ open class ClipsActivity : Activity() {
             all.isEmpty() -> if (lastError != null) "Could not load this folder (tap for details)" else "No MotionCam clips in this folder yet$ago"
             else -> "${all.size - missing} clips · ${sizeText(total)}" + ago +
                 (if (missing > 0) " · $missing missing from the cloud" else "") +
-                (if (lastError != null) " · offline, showing the last list (tap for details)" else "") + legend()
+                (if (lastError != null) " · offline, showing the last list (tap for details)" else "") + if (asTab) "" else legend()
         })
     }
 
@@ -552,7 +552,8 @@ open class ClipsActivity : Activity() {
         val wDp = resources.displayMetrics.widthPixels / resources.displayMetrics.density
         cols = maxOf(2, (wDp / 170).toInt())
         val out = ArrayList<Row>()
-        if (!asTab) out += Row.Title
+        // in the Clips tab the count is above the tiles; only the badges' legend (collections) is a first row, scrolling away
+        if (!asTab || legend().isNotEmpty()) out += Row.Title
         for ((day, items) in clips.groupBy { dayStart(it.startMs) }.toSortedMap(compareByDescending { it })) {
             out += Row.Header(day, items)
             if (day !in collapsed) items.chunked(cols).forEach { out += Row.Items(it) }
@@ -832,8 +833,14 @@ open class ClipsActivity : Activity() {
             val row = rows[position]
             if (row is Row.Title) {
                 val v = (convertView as? LinearLayout)?.takeIf { it.tag == "title" } ?: titleView().apply { tag = "title" }
-                (v.getChildAt(0) as TextView).text = when { collectionId != null -> "COLLECTION"; remote != null -> "REMOTE FOLDER"; else -> "LOCAL CLIPS" }
-                (v.getChildAt(1) as TextView).text = summary.text
+                (v.getChildAt(0) as TextView).apply {
+                    text = when { collectionId != null -> "COLLECTION"; remote != null -> "REMOTE FOLDER"; else -> "LOCAL CLIPS" }
+                    visibility = if (asTab) View.GONE else View.VISIBLE
+                }
+                (v.getChildAt(1) as TextView).apply {
+                    text = if (asTab) legend().trim() else summary.text
+                    setPadding(if (asTab) 0 else Ui.dp(this@ClipsActivity, 10), 0, 0, 0)
+                }
                 // remote folder that could not be refreshed: tap for the reason
                 v.setOnClickListener(if (remote != null && lastError != null) View.OnClickListener {
                     AlertDialog.Builder(this@ClipsActivity).setTitle("Could not refresh").setMessage(lastError).setPositiveButton("OK", null).show()

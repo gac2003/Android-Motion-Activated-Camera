@@ -69,7 +69,7 @@ Turn the phone sideways and every screen uses the width instead of stacking (por
 * **Headers** take one row: title, switch, count and tools side by side, with no extra space above.
 * **Clips**: as many columns as fit with clips at least 150 dp wide (5 on most phones). When selecting, the actions sit
   in the bar at the top instead of a bar over the clips.
-* **Home**: cameras three to a row on the left, recent activity on the right. **Activity**: two events per row, filters
+* **Home**: cameras three to a row on the left, recent activity on the right. **Activity**: one column at a readable width, filters
   in the title row. **Collections**: two per row.
 * **Settings**: categories and search on the left, the chosen category on the right (the last one is remembered).
 * **Camera mode**, like a phone's camera app: the status as small pills at the top left (with a small red eye while

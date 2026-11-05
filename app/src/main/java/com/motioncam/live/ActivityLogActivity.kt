@@ -114,7 +114,8 @@ open class ActivityLogActivity : Activity() {
             }
         }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        if (!land) Ui.capWidth(box)   // landscape uses the width for two columns
+        // one column in every orientation (a timeline reads top to bottom), centred at a readable width when wide
+        Ui.capWidth(box)
         setContentView(root)
         buildChips()
         KeepActivity.load(this)
@@ -326,9 +327,7 @@ open class ActivityLogActivity : Activity() {
         var lastDay = -1L
         var block: LinearLayout? = null
         var blockCam: String? = null
-        // landscape: two events side by side in each card (newest first, left to right)
-        val twoCols = com.motioncam.Nav.landscape(this)
-        var pair: LinearLayout? = null
+
         for (e in list) {
             val day = startOfDay(e.t)
             if (day != lastDay) {
@@ -339,7 +338,6 @@ open class ActivityLogActivity : Activity() {
                 block = null
             }
             if (block == null || blockCam != e.cam) {
-                pair = null
                 blockCam = e.cam
                 val b = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
@@ -351,11 +349,7 @@ open class ActivityLogActivity : Activity() {
                 block = b
             }
             val row = eventRow(this, prefs, e, showCam = false, openCamera = all, newSince = newSince, seenFor = { c -> seenBefore[c] ?: newSince })
-            if (!twoCols) block.addView(row)
-            else {
-                val p = pair?.takeIf { it.childCount < 2 } ?: LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f }.also { block.addView(it); pair = it }
-                p.addView(row, LinearLayout.LayoutParams(0, -2, 1f).apply { if (p.childCount == 1) leftMargin = d(16) })
-            }
+            block.addView(row)
         }
         val more = sources.values.any { !it.done }
         box.addView(Ui.label(this, when {

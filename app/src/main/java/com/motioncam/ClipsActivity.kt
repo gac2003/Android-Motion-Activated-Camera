@@ -1174,6 +1174,7 @@ open class ClipsActivity : Activity() {
 
     /** Landscape header, second row: "‹ name" inside a folder or collection, and the tools on the right. */
     private lateinit var landRow2: LinearLayout
+    private lateinit var landRow1: LinearLayout
 
     /**
      * Landscape: "Clips" and the switch on their own row (they fit on any phone), then one row with "‹ name" (inside a
@@ -1183,7 +1184,8 @@ open class ClipsActivity : Activity() {
         tag = "clipsHeader"
         orientation = LinearLayout.VERTICAL
         setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 6), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 2))
-        addView(ClipsSwitch.header(this@ClipsActivity, remote = remote != null))
+        landRow1 = ClipsSwitch.header(this@ClipsActivity, remote = remote != null) as LinearLayout
+        addView(landRow1)
         landRow2 = LinearLayout(this@ClipsActivity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1220,7 +1222,14 @@ open class ClipsActivity : Activity() {
             (t.getChildAt(1) as? TextView)?.apply { setPadding(Ui.dp(this@ClipsActivity, 6), 0, 0, 0); textSize = 12f; layoutParams = LinearLayout.LayoutParams(-2, -2) }
             t.layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(Ui.dp(this@ClipsActivity, 3), 0, Ui.dp(this@ClipsActivity, 3), 0) }
         }
-        landRow2.addView(actionRow, LinearLayout.LayoutParams(-2, -2))
+        val inner = collectionId != null || remote != null
+        if (inner) landRow2.addView(actionRow, LinearLayout.LayoutParams(-2, -2))
+        else {
+            // this phone's clips: the tools join "Clips" and the switch on one row (no second row)
+            landRow1.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+            landRow1.addView(actionRow, LinearLayout.LayoutParams(-2, -2))
+            landRow2.visibility = View.GONE
+        }
     }
 
     private fun tabHeader(): View = LinearLayout(this).apply {

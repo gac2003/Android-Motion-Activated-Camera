@@ -46,6 +46,10 @@ class SearchSheet private constructor(
             SearchSheet(a, where, start.copy(), clips, clips.associate { it.id to tagsOf(it) }, cols, onApply).open()
         }
 
+        /** The sheet open now (to keep it, with its unsaved choices, when the phone is turned). */
+        var showing: SearchSheet? = null
+            private set
+
         private const val SHOWN_TAGS = 24
         private val DATE_PRESETS = listOf(null to "Any time", "today" to "Today", "yesterday" to "Yesterday", "7d" to "Last 7 days", "30d" to "Last 30 days")
         private val LENGTHS = listOf(Triple("Any length", null, null), Triple("Under 15 s", null, 15), Triple("15 s – 1 min", 15, 60),
@@ -69,7 +73,14 @@ class SearchSheet private constructor(
     private lateinit var showBtn: TextView
     private lateinit var clearBtn: TextView
 
+    /** The choices made so far (not applied yet), for reopening after the screen is rebuilt. */
+    fun draft(): String = f.toJson().toString()
+    fun belongsTo(x: Activity) = a === x
+    fun close() { try { dialog.dismiss() } catch (_: Exception) {} }
+
     private fun open() {
+        showing = this
+        dialog.setOnDismissListener { if (showing === this) showing = null }
         val root = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
         // top: close, title and what is searched; Clear all on the right
         val top = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(d(4), d(8), d(12), d(4)) }

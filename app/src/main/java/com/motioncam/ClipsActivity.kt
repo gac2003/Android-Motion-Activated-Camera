@@ -140,6 +140,7 @@ open class ClipsActivity : Activity() {
             store = Collections.forRemote(rid)
         }
         filter = ClipFilter.load(this, filterKey)
+        searchDraft = savedInstanceState?.getString("searchDraft")
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
         // actions as a labelled row under the title, so the title keeps the whole top bar
         actionRow = LinearLayout(this).apply {
@@ -370,6 +371,7 @@ open class ClipsActivity : Activity() {
     }
 
     override fun onDestroy() {
+        SearchSheet.showing?.takeIf { it.belongsTo(this) }?.close()
         pool.shutdownNow()
         bestPool.shutdownNow()
         super.onDestroy()
@@ -611,7 +613,7 @@ open class ClipsActivity : Activity() {
         display = out.filterIsInstance<Row.Items>().flatMap { it.clips }
         selected.retainAll(shown.map { it.id }.toSet())
         if (selecting && selected.isEmpty()) exitSelection() else updateSelection()
-        list.post { updatePinned() }
+        list.post { updatePinned(); reopenSearch() }
     }
 
     private fun dayLabel(day: Long): String {
@@ -796,14 +798,28 @@ open class ClipsActivity : Activity() {
         return all.filter { c -> filter.matches(c, TagStore.tagsOf(this, src, c)) { id -> cols[id]?.contains(c.id) == true } }
     }
 
-    private fun openSearch() {
+    /** A search that was open when the phone was turned: reopened with its choices once the clips are back. */
+    private var searchDraft: String? = null
+
+    override fun onSaveInstanceState(out: Bundle) {
+        super.onSaveInstanceState(out)
+        SearchSheet.showing?.takeIf { it.belongsTo(this) }?.let { out.putString("searchDraft", it.draft()) }
+    }
+
+    private fun reopenSearch() {
+        val d = searchDraft ?: return
+        searchDraft = null
+        openSearch(try { ClipFilter.fromJson(org.json.JSONObject(d)) } catch (_: Exception) { filter })
+    }
+
+    private fun openSearch(start: ClipFilter = filter) {
         val all = clips.filter { it.id !in missingIds }
         val where = when {
             collectionId != null -> (store.get(this, collectionId!!)?.name ?: "Collection") + (remote?.let { " · ${it.name}" } ?: "")
             remote != null -> remote!!.name
             else -> "Clips on this phone"
         }
-        SearchSheet.show(this, where, filter, all, { TagStore.tagsOf(this, sourceId, it) }, colInfos()) { f ->
+        SearchSheet.show(this, where, start, all, { TagStore.tagsOf(this, sourceId, it) }, colInfos()) { f ->
             setFilter(f)
             list.setSelection(0)
         }
@@ -1156,23 +1172,25 @@ open class ClipsActivity : Activity() {
         return maxOf(3, ((w - 12 + 8) / (150 + 8)).toInt())
     }
 
-    /** Landscape: one row with "Clips" and the switch, or "‹ name" inside a folder or collection. */
+    /** Landscape header, second row: "‹ name" inside a folder or collection, and the tools on the right. */
+    private lateinit var landRow2: LinearLayout
+
+    /**
+     * Landscape: "Clips" and the switch on their own row (they fit on any phone), then one row with "‹ name" (inside a
+     * folder or collection) and the tools. The count line is the list's first row.
+     */
     private fun landHeader(): View = LinearLayout(this).apply {
         tag = "clipsHeader"
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 4), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 4))
-        minimumHeight = Ui.dp(this@ClipsActivity, 52)
+        orientation = LinearLayout.VERTICAL
+        setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 6), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 2))
+        addView(ClipsSwitch.header(this@ClipsActivity, remote = remote != null))
+        landRow2 = LinearLayout(this@ClipsActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = Ui.dp(this@ClipsActivity, 44)
+        }
         val name = collectionId?.let { store.get(this@ClipsActivity, it)?.name } ?: remote?.name
-        if (name == null) {
-            addView(Ui.label(this@ClipsActivity, "Clips", 20f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 0, Ui.dp(this@ClipsActivity, 12), 0) })
-            addView(ClipsSwitch.view(this@ClipsActivity, false), LinearLayout.LayoutParams(Ui.dp(this@ClipsActivity, 250), -2))
-        } else {
-            // inside a folder or collection the switch stays (compact), then "‹ name"
-            addView(ClipsSwitch.view(this@ClipsActivity, remote != null).also { sw ->
-                for (i in 0 until (sw as ViewGroup).childCount) (sw.getChildAt(i) as? TextView)?.apply { textSize = 12f; setPadding(0, Ui.dp(this@ClipsActivity, 6), 0, Ui.dp(this@ClipsActivity, 6)) }
-            }, LinearLayout.LayoutParams(Ui.dp(this@ClipsActivity, 220), -2).apply { rightMargin = Ui.dp(this@ClipsActivity, 12) })
-            addView(LinearLayout(this@ClipsActivity).apply {
+        if (name != null) landRow2.addView(LinearLayout(this@ClipsActivity).apply {
             tag = "slides"
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1180,18 +1198,16 @@ open class ClipsActivity : Activity() {
             contentDescription = "Back from $name"
             setOnClickListener { finish() }
             addView(Ui.label(this@ClipsActivity, "‹", 24f).apply { setPadding(0, 0, Ui.dp(this@ClipsActivity, 10), Ui.dp(this@ClipsActivity, 2)) })
-            addView(Ui.label(this@ClipsActivity, name, 17f).apply {
+            addView(Ui.label(this@ClipsActivity, name, 16f).apply {
                 setTypeface(typeface, android.graphics.Typeface.BOLD); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
-                maxWidth = Ui.dp(this@ClipsActivity, 180)
             })
-        })
-        }
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        else landRow2.addView(View(this@ClipsActivity), LinearLayout.LayoutParams(0, 1, 1f))
+        addView(landRow2, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@ClipsActivity, 2) })
     }
 
-    /** The rest of the landscape header: the count (one line) and the tools as compact icon + name pills. */
+    /** The tools as compact icon + name pills at the end of the second row. */
     private fun fillLandHeader(h: LinearLayout) {
-        // the count line isn't here: it is the first row of the list (see buildRows)
-        h.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         (actionRow.parent as? ViewGroup)?.removeView(actionRow)
         actionRow.setPadding(0, 0, 0, 0)
         actionRow.tag = "slides"
@@ -1202,11 +1218,9 @@ open class ClipsActivity : Activity() {
             t.setPadding(Ui.dp(this, 10), Ui.dp(this, 7), Ui.dp(this, 12), Ui.dp(this, 7))
             (t.getChildAt(0)?.layoutParams as? LinearLayout.LayoutParams)?.let { it.width = Ui.dp(this, 20); it.height = Ui.dp(this, 20) }
             (t.getChildAt(1) as? TextView)?.apply { setPadding(Ui.dp(this@ClipsActivity, 6), 0, 0, 0); textSize = 12f; layoutParams = LinearLayout.LayoutParams(-2, -2) }
-            // Refresh and Timeline (play) are clear as icons alone (leaves room for the switch)
-            if (t.contentDescription == "Refresh" || t.contentDescription == "Timeline") { t.getChildAt(1)?.visibility = View.GONE; t.setPadding(Ui.dp(this, 10), Ui.dp(this, 7), Ui.dp(this, 10), Ui.dp(this, 7)); t.tooltipText = t.contentDescription }
             t.layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(Ui.dp(this@ClipsActivity, 3), 0, Ui.dp(this@ClipsActivity, 3), 0) }
         }
-        h.addView(actionRow, LinearLayout.LayoutParams(-2, -2))
+        landRow2.addView(actionRow, LinearLayout.LayoutParams(-2, -2))
     }
 
     private fun tabHeader(): View = LinearLayout(this).apply {

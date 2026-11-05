@@ -461,7 +461,7 @@ open class ActivityLogActivity : Activity() {
             val ctx: Context = a
             val r = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
+                gravity = Gravity.TOP   // time on the first line (baselines line up), also when the text wraps
                 setPadding(0, Ui.dp(ctx, 8), 0, Ui.dp(ctx, 8))
                 isClickable = true
                 background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30FFFFFF), null,

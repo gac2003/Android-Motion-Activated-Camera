@@ -114,7 +114,7 @@ class LiveActivity : Activity() {
             box.addView(dashBox)
             dash?.sync()
             fillDash()
-            f.button("See all activity", full = false) { startActivity(Intent(this, ActivityLogActivity::class.java)) }
+            f.button("See all activity", full = false) { com.motioncam.Nav.go(this, com.motioncam.Nav.Tab.ACTIVITY) }
         } else dashBox = null
 
         f.title("Your phones' network")

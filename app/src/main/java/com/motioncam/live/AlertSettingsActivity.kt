@@ -56,7 +56,7 @@ class AlertSettingsActivity : Activity() {
         f.note("These settings decide what notifies this phone. Everything the cameras report is in Activity either way " +
             "(Live connection → See all activity; new entries are marked, and the Live connection icon shows a dot). Each " +
             "camera's alerts are grouped, and every alert has Mute 1 h / 8 h buttons. Mute a camera for longer in Live connection → ⋮.")
-        f.button("See all activity", full = false) { startActivity(android.content.Intent(this, ActivityLogActivity::class.java)) }
+        f.button("See all activity", full = false) { com.motioncam.Nav.go(this, com.motioncam.Nav.Tab.ACTIVITY) }
 
         f.title("Motion")
         f.toggle("Motion detected", p.alertMotion) { p.alertMotion = it; render() }

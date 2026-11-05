@@ -14,7 +14,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.*
 import kotlin.math.roundToInt
 
-class SettingsActivity : Activity() {
+open class SettingsActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var box: LinearLayout
 

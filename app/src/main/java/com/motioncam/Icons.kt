@@ -12,7 +12,8 @@ import android.widget.ImageView
 
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
-    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, SCREEN, VIDEOCAM, NETWORK, LIVE, CLOSE, SHARE, TRASH, ADD_TO, REMOVE, SELECT_ALL, FULLSCREEN, CLOUD_UP }
+    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, SCREEN, VIDEOCAM, NETWORK, LIVE, CLOSE, SHARE, TRASH, ADD_TO, REMOVE, SELECT_ALL, FULLSCREEN, CLOUD_UP,
+        HOME, PULSE, EYE, LOCK, STAR, STAR_ON, PLAY_LINE, CLOCK, COLLECTIONS, CHECK }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -236,6 +237,59 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 c.drawLine(8f, 3f, 8f, 6.5f, stroke)
                 c.drawLine(16f, 3f, 16f, 6.5f, stroke)
                 for (y in listOf(13f, 16.5f)) for (x in listOf(8f, 12f, 16f)) c.drawCircle(x, y, 1.1f, fill)
+            }
+            Kind.HOME -> {
+                stroke.strokeWidth = 2f
+                path.moveTo(3.5f, 11f); path.lineTo(12f, 4f); path.lineTo(20.5f, 11f)
+                path.moveTo(6f, 9.5f); path.lineTo(6f, 20f); path.lineTo(18f, 20f); path.lineTo(18f, 9.5f)
+                c.drawPath(path, stroke)
+            }
+            Kind.PULSE -> {
+                stroke.strokeWidth = 2f
+                path.moveTo(3f, 12f); path.lineTo(7f, 12f); path.lineTo(10f, 5f); path.lineTo(14f, 19f); path.lineTo(17f, 12f); path.lineTo(21f, 12f)
+                c.drawPath(path, stroke)
+            }
+            Kind.EYE -> {
+                stroke.strokeWidth = 2f
+                path.moveTo(2.5f, 12f); path.cubicTo(4.6f, 7.6f, 8f, 5.5f, 12f, 5.5f); path.cubicTo(16f, 5.5f, 19.4f, 7.6f, 21.5f, 12f)
+                path.cubicTo(19.4f, 16.4f, 16f, 18.5f, 12f, 18.5f); path.cubicTo(8f, 18.5f, 4.6f, 16.4f, 2.5f, 12f); path.close()
+                c.drawPath(path, stroke)
+                c.drawCircle(12f, 12f, 3.2f, stroke)
+            }
+            Kind.LOCK -> {
+                stroke.strokeWidth = 2.2f
+                c.drawRoundRect(RectF(5f, 11f, 19f, 20f), 2f, 2f, stroke)
+                path.moveTo(8f, 11f); path.lineTo(8f, 8f); path.cubicTo(8f, 5.6f, 9.8f, 4f, 12f, 4f); path.cubicTo(14.2f, 4f, 16f, 5.6f, 16f, 8f); path.lineTo(16f, 11f)
+                c.drawPath(path, stroke)
+            }
+            Kind.STAR, Kind.STAR_ON -> {
+                stroke.strokeWidth = 1.8f
+                val pts = floatArrayOf(12f, 3.5f, 14.6f, 8.8f, 20.5f, 9.7f, 16.2f, 13.8f, 17.2f, 19.6f, 12f, 16.9f, 6.8f, 19.6f, 7.8f, 13.8f, 3.5f, 9.7f, 9.4f, 8.8f)
+                path.moveTo(pts[0], pts[1]); var i = 2; while (i < pts.size) { path.lineTo(pts[i], pts[i + 1]); i += 2 }; path.close()
+                if (kind == Kind.STAR_ON) c.drawPath(path, fill)
+                c.drawPath(path, stroke)
+            }
+            Kind.PLAY_LINE -> {
+                stroke.strokeWidth = 2f
+                path.moveTo(7.5f, 4.8f); path.lineTo(19f, 12f); path.lineTo(7.5f, 19.2f); path.close()
+                c.drawPath(path, stroke)
+            }
+            Kind.CLOCK -> {
+                stroke.strokeWidth = 2f
+                c.drawCircle(12f, 12f, 8.5f, stroke)
+                path.moveTo(12f, 7.5f); path.lineTo(12f, 12f); path.lineTo(15f, 14f)
+                c.drawPath(path, stroke)
+            }
+            Kind.COLLECTIONS -> {
+                stroke.strokeWidth = 2f
+                c.drawRoundRect(RectF(3f, 8f, 17f, 20f), 2f, 2f, stroke)
+                path.moveTo(7f, 4.5f); path.lineTo(19f, 4.5f); path.cubicTo(20.1f, 4.5f, 21f, 5.4f, 21f, 6.5f); path.lineTo(21f, 16f)
+                c.drawPath(path, stroke)
+            }
+            Kind.CHECK -> {
+                stroke.strokeWidth = 3f
+                path.moveTo(5f, 12.5f); path.lineTo(9.5f, 17f); path.lineTo(19f, 7.5f)
+                c.drawPath(path, stroke)
             }
             Kind.ZOOM_RESET -> {
                 // four corner brackets pointing outwards = "fit to screen"

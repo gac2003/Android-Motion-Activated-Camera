@@ -239,7 +239,7 @@ object Alerts {
         try {
             channels(ctx)
             val open = PendingIntent.getActivity(ctx, nid(cam, "missed"),
-                Intent(ctx, ActivityLogActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
+                Intent(ctx, com.motioncam.ActivityTabActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT), PendingIntent.FLAG_IMMUTABLE)
             ctx.getSystemService(NotificationManager::class.java).notify(nid(cam, "missed"), Notification.Builder(ctx, CH_QUIET)
                 .setSmallIcon(android.R.drawable.ic_menu_camera).setContentTitle(title).setContentText(summary)
                 .setContentIntent(open).setAutoCancel(true).setGroup("cam_$cam").build())

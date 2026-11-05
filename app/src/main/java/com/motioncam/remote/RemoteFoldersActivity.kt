@@ -39,7 +39,7 @@ import com.motioncam.topBar
  * Remote folders: MotionCam backup folders of other devices (or of this account on another phone), opened
  * read-only in the normal Clips gallery and timeline player. Nothing in these folders is ever written.
  */
-class RemoteFoldersActivity : Activity() {
+open class RemoteFoldersActivity : Activity() {
     companion object {
         private const val REQ_GOOGLE = 911
         /** Opened to set up backup (from Settings or "backup is off" prompts): shows the choices when nothing is backed up yet. */

@@ -24,7 +24,7 @@ import com.motioncam.remote.RemoteSource
 import com.motioncam.remote.RemoteSources
 
 /** Gallery of recorded clips with thumbnails, grouped by day. Tap = play in timeline. */
-class ClipsActivity : Activity() {
+open class ClipsActivity : Activity() {
     companion object {
         /** Open showing only the clips of this collection. */
         const val EXTRA_COLLECTION = "collection"

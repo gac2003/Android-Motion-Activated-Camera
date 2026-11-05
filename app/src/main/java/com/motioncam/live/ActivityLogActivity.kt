@@ -26,7 +26,7 @@ import java.util.Locale
  * camera's notable events, newest first, consecutive events of one phone grouped in a card under its name. Motion and
  * the clip it recorded are one entry (the clip under the motion, tap to watch).
  */
-class ActivityLogActivity : Activity() {
+open class ActivityLogActivity : Activity() {
     private var cam: String? = null
     private lateinit var f: Form
     private lateinit var chips: LinearLayout
@@ -50,7 +50,7 @@ class ActivityLogActivity : Activity() {
                 setOnClickListener {
                     // came from the all-cameras list: just go back to it
                     if (intent.getBooleanExtra(EXTRA_FROM_ALL, false)) finish()
-                    else startActivity(Intent(this@ActivityLogActivity, ActivityLogActivity::class.java))
+                    else com.motioncam.Nav.go(this@ActivityLogActivity, com.motioncam.Nav.Tab.ACTIVITY)
                 }
             } else null))
         chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(Ui.dp(this@ActivityLogActivity, 12), 0, 0, Ui.dp(this@ActivityLogActivity, 6)) }

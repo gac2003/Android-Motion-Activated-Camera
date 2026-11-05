@@ -130,30 +130,69 @@ class MainActivity : Activity() {
         com.motioncam.live.AlertInbox.listeners += inboxChanged
         com.motioncam.live.Live.listeners += inboxChanged
         tintLiveIcon()
+        Nav.cameraShown(this)
     }
 
     private val inboxChanged: () -> Unit = { tintLiveIcon() }
 
     /**
-     * The live connection icon: red with "LIVE" under the cloud while this phone sends its live picture to another phone;
-     * yellow while at least one other phone is online as a camera; white otherwise. Camera events not seen yet: their number.
+     * Camera mode's eye: shown (red) while your other phones watch this camera's live view; tap it to see who.
      */
     private fun tintLiveIcon() {
-        val v = liveChip as? ImageView ?: return
-        val on = prefs.liveOn
-        val me = com.motioncam.cloud.Device.id(this)
-        val streaming = on && com.motioncam.live.CameraLink.streaming
-        val cams = if (on) com.motioncam.live.Live.phones.values.filter { it.id != me && it.online && it.camera } else emptyList()
-        val unread = if (on) com.motioncam.live.AlertInbox.newCount(this) else 0   // camera events not seen yet
-        v.setImageDrawable(LiveIconDrawable(when { streaming -> Ui.RED; cams.isNotEmpty() -> Ui.ACCENT; else -> 0xFFFFFFFF.toInt() },
-            caption = streaming, count = unread))
-        val what = when {
-            streaming -> "this phone is live: another phone is watching it"
-            cams.isNotEmpty() -> cams.joinToString { it.name.ifEmpty { "a camera" } } + " online"
-            else -> "no camera online"
-        } + if (unread > 0) " · $unread new in Activity" else ""
-        v.contentDescription = "Live connection ($what)"
-        v.tooltipText = "Live connection — $what"
+        val v = liveChip ?: return
+        val watching = com.motioncam.live.CameraLink.streaming
+        v.visibility = if (watching) View.VISIBLE else View.GONE
+        val names = watcherNames()
+        v.contentDescription = "Being watched live" + if (names.isNotEmpty()) " by " + names.joinToString() else ""
+        v.tooltipText = v.contentDescription
+        watchersPop?.let { if (!watching) { it.dismiss(); watchersPop = null } else fillWatchers(it) }
+    }
+
+    private fun watcherNames(): List<String> = com.motioncam.live.CameraLink.watchers.map { id ->
+        com.motioncam.live.Live.phones[id]?.name?.ifEmpty { null } ?: "A phone"
+    }
+
+    private var watchersPop: android.widget.PopupWindow? = null
+
+    /** "WATCHING LIVE" and the phones watching. */
+    private fun showWatchers(anchor: View) {
+        watchersPop?.dismiss()
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = Ui.dp(this@MainActivity, 14)
+            setPadding(p, Ui.dp(this@MainActivity, 12), p, Ui.dp(this@MainActivity, 12))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFF202328.toInt()); cornerRadius = Ui.dp(this@MainActivity, 14).toFloat()
+                setStroke(Ui.dp(this@MainActivity, 1), 0xFF3A3E45.toInt())
+            }
+            minimumWidth = Ui.dp(this@MainActivity, 220)
+        }
+        val pop = android.widget.PopupWindow(box, -2, -2, true).apply {
+            elevation = Ui.dp(this@MainActivity, 8).toFloat()
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
+            isOutsideTouchable = true
+            setOnDismissListener { if (watchersPop === this) watchersPop = null }
+        }
+        watchersPop = pop
+        fillWatchers(pop)
+        pop.showAsDropDown(anchor, 0, Ui.dp(this, 4), Gravity.END)
+    }
+
+    private fun fillWatchers(pop: android.widget.PopupWindow) {
+        val box = pop.contentView as LinearLayout
+        box.removeAllViews()
+        box.addView(Ui.label(this, "●  WATCHING LIVE", 13f, 0xFFFF8A85.toInt()).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); letterSpacing = 0.04f })
+        for (n in watcherNames()) box.addView(Ui.label(this, n, 14f).apply { setPadding(0, Ui.dp(this@MainActivity, 8), 0, 0) })
+        box.addView(Ui.label(this, "Your other phones see this camera's picture while they watch.", 11f, Ui.GREY).apply {
+            setPadding(0, Ui.dp(this@MainActivity, 8), 0, 0); maxWidth = Ui.dp(this@MainActivity, 240)
+        })
+    }
+
+    /** Back to Home (the same Home as on every phone). Monitoring carries on. */
+    private fun backHome() {
+        if (isTaskRoot) startActivity(Intent(this, HomeActivity::class.java))
+        finish()
+        @Suppress("DEPRECATION") overridePendingTransition(0, 0)
     }
 
     override fun onPause() {
@@ -426,32 +465,32 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Ui.PANEL)
             val p = Ui.dp(this@MainActivity, 10)
-            setPadding(p + 2, p - 4, p, p - 4)
+            setPadding(Ui.dp(this@MainActivity, 2), p - 4, p, p - 4)
             gravity = Gravity.CENTER_VERTICAL
         }
+        top.addView(iconButton(this, IconDrawable.Kind.BACK, 48, 12) { backHome() }.apply {
+            contentDescription = "Back to Home"; tooltipText = "Home"
+        }, LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)).apply { rightMargin = Ui.dp(this@MainActivity, 4) })
         val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         statusTv = Ui.label(this, "", 15f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
         infoTv = Ui.label(this, "", 11f, 0xFFB0B4BA.toInt()).apply { maxLines = 3; includeFontPadding = false }
         texts.addView(statusTv)
         texts.addView(infoTv)
         top.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
-        // app-bar actions as icons (name on long-press), so the status text keeps the room it needs
-        // 48 dp touch targets (Android's recommended size) with a gap between them, so they are hard to mis-press.
-        // The icon inside grows with how much the screen fits (Screen zoom set smaller = more dp across): it keeps the same
-        // share of the screen width, never below the standard 24 dp and at most 30 dp, so the bar's height never changes.
-        // Zooming in (larger display size, accessibility) still makes it bigger, as the system intends.
-        val glyph = (resources.configuration.smallestScreenWidthDp * 24f / 411f).toInt().coerceIn(24, 30)
-        fun action(kind: IconDrawable.Kind, name: String, click: () -> Unit) = iconButton(this, kind, 48, (48 - glyph) / 2) { click() }.apply {
-            contentDescription = name
-            tooltipText = name
+        // the eye (only while other phones watch this camera): tap it for who's watching
+        liveChip = FrameLayout(this).apply {
+            val eyeBg = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(Ui.RED) }
+            addView(ImageView(this@MainActivity).apply {
+                setImageDrawable(IconDrawable(IconDrawable.Kind.EYE))
+                background = eyeBg
+                val p = Ui.dp(this@MainActivity, 7)
+                setPadding(p, p, p, p)
+            }, FrameLayout.LayoutParams(Ui.dp(this@MainActivity, 36), Ui.dp(this@MainActivity, 36), Gravity.CENTER))
+            isClickable = true
+            setOnClickListener { v -> showWatchers(v) }
+            visibility = View.GONE
         }
-        liveChip = action(IconDrawable.Kind.LIVE, "Live connection (your phones)") {
-            startActivity(Intent(this@MainActivity, com.motioncam.live.LiveActivity::class.java))
-        }
-        val gap = { LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(this@MainActivity, 10) } }
-        top.addView(liveChip, gap())
-        top.addView(action(IconDrawable.Kind.CLIPS, "Clips") { startActivity(Intent(this@MainActivity, ClipsActivity::class.java)) }, gap())
-        top.addView(action(IconDrawable.Kind.SETTINGS, "Settings") { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }, gap())
+        top.addView(liveChip, LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)).apply { leftMargin = Ui.dp(this@MainActivity, 6) })
         root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
 
         // bottom pro panel
@@ -724,7 +763,7 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         val e = editor
         if (e != null) { (e.parent as? ViewGroup)?.removeView(e); editor = null; return }
-        @Suppress("DEPRECATION") super.onBackPressed()
+        backHome()
     }
 
     // ------------------------------------------------------------------ start / stop / permissions

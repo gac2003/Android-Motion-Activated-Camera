@@ -223,7 +223,7 @@ object BannerStack {
         // several alerts waiting: the list shows them all; one alert: its camera
         val list = c.openList || h.cards.size > 1
         dismissAll(h)
-        if (list) a.startActivity(Intent(a, ActivityLogActivity::class.java))
+        if (list) com.motioncam.Nav.go(a, com.motioncam.Nav.Tab.ACTIVITY)
         else a.startActivity(Intent(a, RemoteCameraActivity::class.java).putExtra(Alerts.EXTRA_CAM, c.cam))
     }
 

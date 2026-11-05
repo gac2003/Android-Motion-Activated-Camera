@@ -113,6 +113,7 @@ object CameraLink {
         cmdL?.let { path(c, "cmd")?.removeEventListener(it) }
         main.removeCallbacks(reportLocal); localKeys.clear()
         stopLive()
+        watchers = emptyList()
         Live.cameraActive = false
         Live.refresh(c)
         // no longer reachable: standby has no purpose any more
@@ -297,11 +298,13 @@ object CameraLink {
     private fun listen(ctx: Context) {
         watchL = object : ValueEventListener {
             override fun onDataChange(s: DataSnapshot) {
-                val fresh = s.children.any { c ->
+                val who = s.children.filter { c ->
                     val at = (c.child("at").value as? Number)?.toLong() ?: 0
                     at > Live.now() - 30_000 && (!Prefs(ctx).livePinForView || pinOk(ctx, "watch:${c.key}:$at", c.child("sig").value as? String) == true)
-                }
-                if (fresh) startLive(ctx) else stopLive()
+                }.mapNotNull { it.key }
+                watchers = who
+                if (who.isNotEmpty()) startLive(ctx) else stopLive()
+                Live.notifyChanged()
             }
             override fun onCancelled(e: DatabaseError) {}
         }.also { path(ctx, "watchers")?.addValueEventListener(it) }
@@ -321,6 +324,8 @@ object CameraLink {
         }.also { path(ctx, "cmd")?.addChildEventListener(it) }
     }
 
+    /** Phones (device ids) watching this camera's live view right now. */
+    @Volatile var watchers: List<String> = emptyList()
     @Volatile private var liveThread: Thread? = null
     /** This phone is sending its live picture to another phone right now. */
     val streaming: Boolean get() = running && liveThread != null

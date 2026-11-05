@@ -154,7 +154,7 @@ class RemoteLiveActivity : Activity() {
         })
         val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         statusTv = Ui.label(this, "", 15f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
-        infoTv = Ui.label(this, "", 11f, 0xFFB0B4BA.toInt()).apply { maxLines = 2; includeFontPadding = false }
+        infoTv = Ui.label(this, "", 11f, 0xFFB0B4BA.toInt()).apply { maxLines = 3; includeFontPadding = false }
         texts.addView(statusTv); texts.addView(infoTv)
         top.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
         liveTv = Ui.label(this, "", 12f, Ui.GREY).apply { setPadding(d(8), 0, 0, 0) }
@@ -296,7 +296,10 @@ class RemoteLiveActivity : Activity() {
         parts += "%.0f°C".format(s.optDouble("tempC"))
         if (s.optInt("battery", -1) >= 0) parts += com.motioncam.BatteryDrawable.text(infoTv, s.optInt("battery"), s.optBoolean("charging"))
         s.optLong("lastMotion").takeIf { it > 0 }?.let { parts += "motion " + Fmt.t(prefs, it, seconds = false) }
-        infoTv.text = android.text.SpannableStringBuilder().apply { parts.filter { it.isNotBlank() }.forEachIndexed { i, x -> if (i > 0) append(" · "); append(x) } }
+        infoTv.text = android.text.SpannableStringBuilder().apply {
+            parts.filter { it.isNotBlank() }.forEachIndexed { i, x -> if (i > 0) append(" · "); append(x) }
+            if (r.holder() != null) append("\n").append(r.remoteText(prefs))
+        }
     }
 
     private fun renderStart() {
@@ -315,6 +318,7 @@ class RemoteLiveActivity : Activity() {
     private fun onStartStop() {
         val s = status() ?: return
         if (!r.online()) { Toast.makeText(this, "The camera is offline", Toast.LENGTH_SHORT).show(); return }
+        if (r.lockedOut()) { r.take { refreshAll() }; return }
         when {
             s.optBoolean("monitoring") -> AlertDialog.Builder(this).setTitle("Stop monitoring?")
                 .setMessage(if (s.optBoolean("standbyOn")) "The camera closes and the phone goes to standby: you can start monitoring again from here."
@@ -358,6 +362,8 @@ class RemoteLiveActivity : Activity() {
     private fun onChip(name: String) {
         // never act on defaults: wait until the camera has said what its settings are
         if (status()?.has("settings") != true) { Toast.makeText(this, "Loading the camera's settings…", Toast.LENGTH_SHORT).show(); return }
+        // another phone has the remote: offer to take it over (it is told) instead of changing anything
+        if (r.lockedOut()) { r.take { refreshAll() }; return }
         when (name) {
             "LENS" -> { showLensDialog(); return }
             "FORMAT" -> { showFormatDialog(); return }

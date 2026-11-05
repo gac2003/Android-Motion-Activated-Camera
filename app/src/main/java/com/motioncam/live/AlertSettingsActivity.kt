@@ -77,6 +77,7 @@ class AlertSettingsActivity : Activity() {
         f.toggle("Charger unplugged", p.alertCharger) { p.alertCharger = it }
         f.toggle("Too hot (camera paused)", p.alertHot) { p.alertHot = it }
         f.toggle("Monitoring stopped (by the phone or someone else)", p.alertMonitoring) { p.alertMonitoring = it }
+        f.toggle("Another phone takes a camera's remote", p.alertRemote) { p.alertRemote = it }
 
         f.title("Connection")
         f.toggle("Camera offline", p.alertOffline) { p.alertOffline = it; render() }

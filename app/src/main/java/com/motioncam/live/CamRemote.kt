@@ -30,6 +30,36 @@ class CamRemote(private val a: Activity, val cam: String) {
 
     fun pinFor(): String? = SecretStore.get(a, "live.pin.$cam")
 
+    // ------------------------------------------------------------------ the remote (one controlling phone at a time)
+
+    /** The phone holding this camera's remote (id, name, until), or null when it's free. */
+    fun holder(): JSONObject? = status()?.optJSONObject("remote")?.takeIf { it.optLong("until") > Live.now() && it.optString("id").isNotEmpty() }
+    fun iHold() = holder()?.optString("id") == Device.id(a)
+    /** Another phone holds the remote: this one can watch but not change anything. */
+    fun lockedOut() = holder()?.let { it.optString("id") != Device.id(a) } == true
+
+    /** Takes the remote; asks first when another phone has it (that phone is told). */
+    fun take(done: () -> Unit = {}) {
+        val h = holder()
+        if (h != null && h.optString("id") != Device.id(a)) {
+            AlertDialog.Builder(a).setTitle("Take over the remote?")
+                .setMessage("${h.optString("name").ifEmpty { "Another phone" }} has the remote of ${name()}. If you take it, that phone can only " +
+                    "watch until it takes it back, and it is told.")
+                .setPositiveButton("Take over") { _, _ -> send("take") { ok, _ -> if (ok) done() } }
+                .setNegativeButton("Cancel", null).show()
+        } else send("take") { ok, _ -> if (ok) done() }
+    }
+
+    fun release(done: () -> Unit = {}) = send("release", quiet = true) { _, _ -> done() }
+
+    /** One line about the remote, for status areas. */
+    fun remoteText(prefs: com.motioncam.Prefs): String {
+        val h = holder() ?: return "Remote: free — your first change takes it"
+        val until = com.motioncam.Fmt.t(prefs, h.optLong("until") - Live.serverOffset, seconds = false)
+        return if (iHold()) "You have the remote (until $until unless you keep using it)"
+            else "${h.optString("name").ifEmpty { "Another phone" }} has the remote — you can watch, not change"
+    }
+
     fun askPin(then: () -> Unit, cancelled: () -> Unit = {}) {
         val input = EditText(a).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; hint = "PIN" }
         AlertDialog.Builder(a).setTitle("PIN of this camera").setView(input)

@@ -14,7 +14,10 @@ class DropboxProvider(private val appKey: String, private val refreshToken: Stri
     private var accessExp = 0L
 
     companion object {
-        const val APP_KEY = "m5m6p1cg7v9crh6"
+        /** The Dropbox app's key, set when building (credentials.properties or CI variables; see SETUP.md). */
+        val APP_KEY: String = com.motioncam.BuildConfig.DROPBOX_APP_KEY
+        /** Dropbox is usable in this build. */
+        val configured get() = APP_KEY.isNotEmpty()
         const val REDIRECT = "http://localhost:53682/"
         const val REDIRECT_PORT = 53682
 

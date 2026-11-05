@@ -173,6 +173,16 @@ object Alerts {
             "monitor_off", "monitor_paused", "safety_stop" ->
                 if (p.alertMonitoring) gate(ctx, cam, false)?.let { s -> post(ctx, cam, "monitor", CH_STATUS, "Monitoring stopped · $name", d.optString("text"), s) }
             "monitor_on" -> cancel(ctx, cam, "monitor")
+            "remote_taken" -> if (p.alertRemote) {
+                val me = com.motioncam.cloud.Device.id(ctx)
+                val by = d.optString("by"); val from = d.optString("from")
+                if (by != me) gate(ctx, cam, false)?.let { s ->
+                    val who = d.optString("byName").ifEmpty { "Another phone" }
+                    // the phone that lost it is told plainly; everyone else gets a quiet note
+                    if (from == me) post(ctx, cam, "remote", CH_STATUS, "Remote taken · $name", "$who took the remote: you can watch, but not change $name until you take it back.", s)
+                    else post(ctx, cam, "remote", CH_STATUS, "Remote · $name", "$who now has the remote of $name.", silent = true)
+                }
+            }
         }
     }
 

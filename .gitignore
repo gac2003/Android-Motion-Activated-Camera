@@ -7,3 +7,6 @@ local.properties
 *.jks
 *.keystore
 *.p12
+
+# your own API credentials (SETUP.md)
+credentials.properties

@@ -191,7 +191,9 @@ class RemoteCameraActivity : Activity() {
         val n = draft.length()
         val show = n > 0 || saving
         saveInfo.text = if (saving) "Saving…" else "$n unsaved change${if (n == 1) "" else "s"}"
-        saveBtn.isEnabled = !saving; saveBtn.alpha = if (saving) 0.5f else 1f
+        val can = !saving && !r.lockedOut()
+        saveBtn.isEnabled = can; saveBtn.alpha = if (can) 1f else 0.5f
+        if (r.lockedOut() && !saving) saveInfo.text = "Another phone has the remote" 
         if (show == (saveBar.visibility == android.view.View.VISIBLE)) return
         if (show) {
             saveBar.visibility = android.view.View.VISIBLE
@@ -351,7 +353,8 @@ class RemoteCameraActivity : Activity() {
         if (s == null) { f.note(if (phone?.online == true) "Waiting for the camera's status…" else "The camera is not connected right now."); return }
         val st = shownSettings(s.optJSONObject("settings") ?: JSONObject())
         val c = caps() ?: JSONObject()
-        val enabled = online()
+        // one controller at a time: while another phone has the remote this one can only watch
+        val enabled = online() && !r.lockedOut()
 
         f.title("Status")
         val mode = s.optString("mode")
@@ -372,6 +375,15 @@ class RemoteCameraActivity : Activity() {
         }
         if (s.optBoolean("pin")) f.note("This camera needs a PIN for controls" + if (pinFor() != null) " (remembered)." else ".")
 
+        f.title("Remote")
+        f.line(r.remoteText(prefs), 14f, if (r.lockedOut()) Ui.ACCENT else Color.WHITE)
+        when {
+            r.iHold() -> f.row(f.chip("Give the remote back") { r.release { lastSettings = ""; renderIfChanged() } })
+            r.lockedOut() -> f.row(f.chip("Take over the remote") { r.take() }.apply { Ui.setChipState(this, true) })
+            else -> f.row(f.chip("Take the remote") { r.take() })
+        }
+        f.note("Only one phone at a time can change this camera, so changes don't clash. Others can still watch and get alerts.")
+
         f.title("Monitoring")
         val stopChip = f.chip("Stop monitoring") {
             val standbyOn = s.optBoolean("standbyOn")
@@ -385,7 +397,7 @@ class RemoteCameraActivity : Activity() {
             s.optBoolean("standby") -> f.row(f.chip("▶ Start monitoring") { send("start") }.apply { Ui.setChipState(this, true) })
             s.optBoolean("monitoring") -> f.row(f.chip("Pause monitoring") { send("pause") }, stopChip)
             else -> f.row(f.chip("Resume monitoring") { send("resume") }, stopChip)
-        }
+        }.also { row -> if (!enabled) for (i in 0 until row.childCount) row.getChildAt(i).apply { isEnabled = false; alpha = 0.4f } }
 
         // never show (or send) defaults: the controls appear only once the camera has said what its settings are
         if (!s.has("settings")) { f.title("Settings"); f.note("Loading the camera's settings…"); return }

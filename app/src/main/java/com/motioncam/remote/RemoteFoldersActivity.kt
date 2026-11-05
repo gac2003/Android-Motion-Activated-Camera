@@ -307,6 +307,9 @@ class RemoteFoldersActivity : Activity() {
 
     /** Uses the Dropbox account connected for backup, or signs in (any Dropbox account works for a viewer link). */
     private fun dropboxAccount(then: (refresh: String, who: String) -> Unit) {
+        if (!DropboxProvider.configured) { android.app.AlertDialog.Builder(this).setTitle("Dropbox isn't set up in this build")
+                .setMessage("This copy of MotionCam was built without a Dropbox app key. Whoever builds it can add their own " +
+                    "(free, a few minutes): see SETUP.md in the project.").setPositiveButton("OK", null).show(); return }
         val cfg = CloudConfig(this, CloudKind.DROPBOX)
         val existing = cfg.refreshToken
         if (existing != null) {

@@ -3,12 +3,31 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+/**
+ * Your own API credentials (Firebase, Google sign-in, Dropbox): from environment variables (CI) or from
+ * credentials.properties in the project folder (local builds; never committed). See SETUP.md.
+ * Anything missing simply turns that feature off in the build ("not set up in this build").
+ */
+val credentials = java.util.Properties().apply {
+    rootProject.file("credentials.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+fun cred(name: String): String = (System.getenv(name)?.takeIf { it.isNotBlank() } ?: credentials.getProperty(name) ?: "").trim()
+fun str(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 android {
     namespace = "com.motioncam"
     compileSdk = 34
+    buildFeatures { buildConfig = true }
 
     defaultConfig {
-        applicationId = "com.motioncam"
+        // your own package name if you like (it must match your Firebase app and Google OAuth client)
+        applicationId = cred("MC_APPLICATION_ID").ifEmpty { "com.motioncam" }
+        buildConfigField("String", "FIREBASE_API_KEY", str(cred("MC_FIREBASE_API_KEY")))
+        buildConfigField("String", "FIREBASE_APP_ID", str(cred("MC_FIREBASE_APP_ID")))
+        buildConfigField("String", "FIREBASE_PROJECT_ID", str(cred("MC_FIREBASE_PROJECT_ID")))
+        buildConfigField("String", "FIREBASE_DB_URL", str(cred("MC_FIREBASE_DB_URL")))
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", str(cred("MC_GOOGLE_WEB_CLIENT_ID")))
+        buildConfigField("String", "DROPBOX_APP_KEY", str(cred("MC_DROPBOX_APP_KEY")))
         minSdk = 30
         targetSdk = 34
         // CI build number, so every published APK is newer than the previous one

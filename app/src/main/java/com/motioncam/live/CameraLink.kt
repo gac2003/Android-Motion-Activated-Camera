@@ -157,6 +157,7 @@ object CameraLink {
         val e = EngineHost.peek()
         val o = JSONObject()
             .put("name", Device.name(ctx)).put("mode", s.mode.name).put("monitoring", s.monitoring).put("message", s.message)
+            .put("remote", holderJson())
             .put("standby", CameraService.inStandby).put("standbyOn", CameraService.standbyAllowed(ctx)).put("canStart", CameraService.inStandby || (CameraService.monitoring && !s.monitoring))
             .put("recSince", s.recordingSinceWall).put("lastMotion", s.lastMotionWall).put("battery", s.batteryPct)
             .put("charging", s.charging).put("tempC", s.tempC.toDouble()).put("lens", s.lens).put("format", s.format)
@@ -334,7 +335,33 @@ object CameraLink {
     }
 
     private val seenCmds = HashSet<String>()
-    private val PROTECTED = setOf("set", "pause", "resume", "stop", "start")
+    private val PROTECTED = setOf("set", "pause", "resume", "stop", "start", "take", "release")
+    /** Commands that change the camera: only the phone holding the remote may send them. */
+    private val CONTROL = setOf("set", "pause", "resume", "stop", "start")
+
+    // ------------------------------------------------------------------ the remote (one controlling phone at a time)
+
+    /** The remote is kept while its holder uses it; 15 minutes without a change frees it. */
+    private const val LEASE_MS = 15 * 60_000L
+    @Volatile private var holderId: String? = null
+    @Volatile private var holderName = ""
+    @Volatile private var holderUntil = 0L
+
+    private fun holder(): String? = holderId?.takeIf { Live.now() < holderUntil }
+    private fun holderJson(): Any = holder()?.let { JSONObject().put("id", it).put("name", holderName).put("until", holderUntil) } ?: JSONObject.NULL
+
+    /** [by] takes the remote (or keeps it); tells everyone when it changes hands. */
+    private fun giveRemote(ctx: Context, by: String, name: String) {
+        val prev = holder()
+        holderId = by; holderName = name; holderUntil = Live.now() + LEASE_MS
+        if (prev != by) {
+            event(ctx, "remote_taken", "$name has the remote" + if (prev != null) " (taken from ${holderNameOf(prev)})" else "",
+                JSONObject().put("by", by).put("byName", name).put("from", prev ?: "").put("fromName", if (prev != null) holderNameOf(prev) else ""))
+            main.post { publishStatus(ctx) }
+        }
+    }
+    private var lastHolderName = HashMap<String, String>()
+    private fun holderNameOf(id: String) = lastHolderName[id] ?: "another phone"
 
     private fun command(ctx: Context, s: DataSnapshot) {
         val id = s.key ?: return
@@ -356,7 +383,20 @@ object CameraLink {
             }
         }
         val who = d.optString("byName", "another phone")
+        val by = d.optString("by")
+        if (by.isNotEmpty()) lastHolderName[by] = who
+        // one controller at a time: the first change takes a free remote; someone else's remote must be taken over
+        if (type in CONTROL) {
+            val h = holder()
+            if (h != null && h != by) { reply(false, "$holderName has the remote. Take it over to make changes."); return }
+            if (by.isNotEmpty()) giveRemote(ctx, by, who)
+        }
         when (type) {
+            "take" -> { giveRemote(ctx, by, who); reply(true, "You have the remote") }
+            "release" -> {
+                if (holder() == by) { holderId = null; holderUntil = 0; main.post { publishStatus(ctx) } }
+                reply(true, "Remote given back")
+            }
             "pause" -> { EngineHost.peek()?.setMonitoring(false); event(ctx, "monitor_paused", "Monitoring paused by $who"); reply(true, "Monitoring paused") }
             "resume" -> { EngineHost.peek()?.setMonitoring(true); reply(true, "Monitoring resumed") }
             "start" -> when {

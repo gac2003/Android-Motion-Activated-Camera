@@ -50,6 +50,12 @@ Open this folder in Android Studio (Hedgehog or newer), let it sync, then *Build
 ### Option C – command line
 With the Android SDK installed (`ANDROID_HOME` set, platform 34): `./gradlew assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`.
 
+### Your own credentials
+Builds you make don't use anyone else's accounts: Google Drive, Dropbox and the live connection use **your own** free
+Google Cloud / Dropbox / Firebase projects. **[SETUP.md](SETUP.md)** walks through each one (about 10 minutes each);
+the values go in `credentials.properties` (local) or repository variables (GitHub Actions). Features you skip are just
+off in your build.
+
 ## First run
 1. Open the app. The live preview starts right away (no monitoring needed), so you can set everything up first.
 2. Use the bottom strip like the Pro Video mode:
@@ -184,13 +190,16 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
 * **Standby** (camera phones, on by default): when monitoring stops, the phone stays connected with the camera off (a
   "standby" notification with Start / Turn off), so another phone can start monitoring again. It begins whenever
   MotionCam is opened on the camera phone. Most reliable while charging (Android may delay messages to a sleeping phone).
+* **The remote**: only one phone at a time can change a camera (settings, start/pause/stop). The first change takes a
+  free remote; another phone can **take it over** (the previous holder and the others are told). It frees itself after
+  15 minutes without changes, or with *Give the remote back*. Everyone can still watch and get alerts.
 * **PIN**: every camera phone has one (6+ characters); it protects controls and settings and, by default, the live view
   and frames. Requests are signed with it (never sent; slow hashing against offline guessing); 5 wrong PINs lock remote
   control for 10 minutes, doubling each time. Network codes are always made by the app (20 random characters, ~99 bits).
 * **Sync**: a change to shared collections, protections or new clips nudges the other phones, which sync within seconds.
   Sync status shows which phone still has unsent changes or a conflict to decide.
-* Builds from this repository use the author's Firebase project (its free tier is shared by everyone using it). To use
-  your own, change the values in `live/LiveNet.kt` (`LiveConfig`) and publish the database rules shown there.
+* The published builds use the author's Firebase project. Your own builds use yours: see [SETUP.md](SETUP.md)
+  (database rules in `firebase/database.rules.json`).
 
 ## Remote viewing
 The web viewer password is shown/changed in Settings (user name: `admin`). The app lists the phone's addresses, e.g. `http://192.168.42.129:8080`.

@@ -28,16 +28,17 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * Firebase project of the app (public identifiers, not secrets: access is controlled by the database rules).
- * Empty = live connection not set up yet.
+ * The Firebase project this build uses, set when building (credentials.properties or CI variables; see SETUP.md).
+ * Public identifiers, not secrets: access is controlled by the database rules (firebase/database.rules.json).
+ * Empty = the live connection is not set up in this build.
  */
 object LiveConfig {
-    const val API_KEY = "AIzaSyASIj5IkW7MJAgrqQWLJVHHDwCVYPd2vug"
-    const val APP_ID = "1:198396848516:android:cfbb20e804460c47bf55d1"
-    const val PROJECT_ID = "android-motion-camera"
-    const val DB_URL = "https://android-motion-camera-default-rtdb.firebaseio.com"
-    /** OAuth "Web client" created by Firebase for Google sign-in. */
-    const val WEB_CLIENT_ID = "198396848516-6np4ldb18s7k0mt85ihg0b1kss7j5716.apps.googleusercontent.com"
+    val API_KEY: String = com.motioncam.BuildConfig.FIREBASE_API_KEY
+    val APP_ID: String = com.motioncam.BuildConfig.FIREBASE_APP_ID
+    val PROJECT_ID: String = com.motioncam.BuildConfig.FIREBASE_PROJECT_ID
+    val DB_URL: String = com.motioncam.BuildConfig.FIREBASE_DB_URL
+    /** OAuth "Web client" created by Firebase for Google sign-in (Authentication → Google); empty = network code only. */
+    val WEB_CLIENT_ID: String = com.motioncam.BuildConfig.GOOGLE_WEB_CLIENT_ID
 
     val configured get() = API_KEY.isNotEmpty() && APP_ID.isNotEmpty() && PROJECT_ID.isNotEmpty() && DB_URL.isNotEmpty()
 }

@@ -64,6 +64,7 @@ object CameraLink {
         onStatus(c, StatusBus.status)
         listen(c)
         trimEvents(c)
+        main.removeCallbacks(dailyTrim); main.postDelayed(dailyTrim, 24 * 3_600_000L)
         // settings changed on the camera itself (its screen, Settings): other phones see them within a second
         c.getSharedPreferences("motioncam", Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(prefsL)
     }
@@ -99,10 +100,16 @@ object CameraLink {
         event(c, "settings_local", "Changed on the camera phone: " + names.joinToString(), JSONObject().put("keys", JSONArray(keys)))
     }
 
+    /** Long-running cameras apply "Keep activity" once a day. */
+    private val dailyTrim = object : Runnable {
+        override fun run() { val c = app ?: return; if (running) { trimEvents(c); main.postDelayed(this, 24 * 3_600_000L) } }
+    }
+
     fun stop(ctx: Context) {
         val c = ctx.applicationContext
         if (!running) return
         running = false
+        main.removeCallbacks(dailyTrim)
         c.getSharedPreferences("motioncam", Context.MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(prefsL)
         main.removeCallbacks(publishSoon)
         statusListener?.let { StatusBus.remove(it) }
@@ -145,20 +152,105 @@ object CameraLink {
 
     /**
      * A clip finished uploading: viewing phones then know that a clip missing from the folder later was deleted (not
-     * still waiting to be uploaded). Not shown in Activity.
+     * still waiting to be uploaded). Recorded on the clip's own event (no extra entry); an older clip whose event this
+     * phone no longer remembers gets a separate "clip uploaded" event as before. Not shown in Activity.
      */
     fun clipUploaded(ctx: Context, name: String, kind: com.motioncam.cloud.CloudKind, folderId: String) {
         if (!running) return
-        event(ctx, "clip_up", "Clip uploaded", JSONObject().put("name", name).put("f", Live.folderKey(kind, folderId)))
+        val f = Live.folderKey(kind, folderId)
+        val known = synchronized(clipEvents) { clipEvents[name] }
+        if (known != null) {
+            val (key, d) = known
+            synchronized(d) {
+                val up = d.optJSONArray("up") ?: JSONArray().also { d.put("up", it) }
+                if ((0 until up.length()).none { up.optString(it) == f }) up.put(f)
+            }
+            path(ctx, "events/$key/d")?.setValue(LiveNet.seal(ctx, d.toString()))
+            return
+        }
+        event(ctx, "clip_up", "Clip uploaded", JSONObject().put("name", name).put("f", f))
     }
 
     /** Monitoring stopped by the phone itself (battery, heat, storage…). */
     fun safetyStop(ctx: Context, why: String) = event(ctx, "safety_stop", why)
 
+    /** The recent clips' events (name → key, data), so an upload can be noted on the clip's own event. */
+    private val clipEvents = object : LinkedHashMap<String, Pair<String, JSONObject>>() {
+        override fun removeEldestEntry(e: MutableMap.MutableEntry<String, Pair<String, JSONObject>>?) = size > 300
+    }
+
+    // a busy camera (a tree in the wind, a TV…) must not bury Activity: a motion within 5 s of the previous one is the
+    // same motion; after the 20th in an hour, the rest of that hour is one entry, "Motion detected ×N", with its clips
+    @Volatile private var lastMotionAt = 0L
+    private var hourOf = -1L
+    private var hourCount = 0
+    private var burstKey: String? = null
+    private var burst: JSONObject? = null
+    /** The latest motion was folded into the previous one (5 s rule) or into the hour's burst: its clip goes there too. */
+    @Volatile private var clipToBurst = false
+    const val BURST_AFTER = 20
+    private const val SAME_MOTION_MS = 5_000L
+
     fun event(ctx: Context, type: String, text: String, extra: JSONObject? = null) {
         if (!running) return
+        val now = System.currentTimeMillis()
+        if (type == "motion") {
+            if (now - lastMotionAt < SAME_MOTION_MS) { lastMotionAt = now; return }   // the same motion continuing
+            lastMotionAt = now
+            synchronized(this) {
+                val hour = now / 3_600_000L
+                if (hour != hourOf) { hourOf = hour; hourCount = 0; burstKey = null; burst = null }
+                hourCount++
+                if (hourCount > BURST_AFTER) { clipToBurst = true; addToBurst(ctx, null); dayCount(ctx, "m"); return }
+            }
+            clipToBurst = false
+        }
+        if (type == "clip" && clipToBurst) { synchronized(this) { if (burst != null) { addToBurst(ctx, extra); return } } }
         val d = (extra ?: JSONObject()).put("type", type).put("text", text)
-        path(ctx, "events")?.push()?.setValue(mapOf("t" to ServerValue.TIMESTAMP, "d" to LiveNet.seal(ctx, d.toString())))
+        val ref = path(ctx, "events")?.push() ?: return
+        ref.setValue(mapOf("t" to ServerValue.TIMESTAMP, "d" to LiveNet.seal(ctx, d.toString())))
+        if (type == "clip") d.optString("name").takeIf { it.isNotEmpty() }?.let { n -> ref.key?.let { k -> synchronized(clipEvents) { clipEvents[n] = k to d } } }
+        kindLetter(type)?.let { dayCount(ctx, it) }
+    }
+
+    /** One more motion (or, with [clip], its clip) in this hour's "Motion detected ×N" entry. */
+    private fun addToBurst(ctx: Context, clip: JSONObject?) {
+        val b = burst ?: JSONObject().put("type", "motion_burst").put("n", BURST_AFTER).put("from", hourOf * 3_600_000L)
+            .put("clips", JSONArray()).also { burst = it }
+        if (clip == null) b.put("n", b.optInt("n") + 1)
+        else {
+            val list = b.optJSONArray("clips") ?: JSONArray().also { b.put("clips", it) }
+            if (list.length() < 400) list.put(clip) else b.put("more", b.optInt("more") + 1)
+        }
+        b.put("text", "Motion detected ×${b.optInt("n")}")
+        val sealed = LiveNet.seal(ctx, b.toString())
+        val k = burstKey
+        if (k == null) {
+            val ref = path(ctx, "events")?.push() ?: return
+            burstKey = ref.key
+            ref.setValue(mapOf("t" to ServerValue.TIMESTAMP, "d" to sealed))
+        } else path(ctx, "events/$k/d")?.setValue(sealed)
+    }
+
+    /** Which Activity filter an event counts for in the per-day summary (m motion, o monitoring, b battery & heat, s settings). */
+    fun kindLetter(type: String): String? = when (type) {
+        "motion", "motion_burst" -> "m"
+        "monitor_on", "monitor_off", "monitor_paused", "safety_stop", "pin_locked", "remote_taken" -> "o"
+        "battery", "unplugged", "hot" -> "b"
+        "settings_local" -> "s"
+        else -> null
+    }
+
+    /** yyyyMMdd of a time on this phone's calendar. */
+    fun dayKey(ms: Long): String = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date(ms))
+
+    /**
+     * Per-day counts (days/<yyyyMMdd>/<letter>, and n = entries stored), so phones can show a calendar of activity and
+     * how much history is kept without downloading the events themselves.
+     */
+    private fun dayCount(ctx: Context, letter: String) {
+        val day = dayKey(System.currentTimeMillis())
+        path(ctx, "days/$day")?.updateChildren(mapOf(letter to ServerValue.increment(1), "n" to ServerValue.increment(1)))
     }
 
     // ------------------------------------------------------------------ status + events from state changes
@@ -230,18 +322,71 @@ object CameraLink {
             .put("fps", JSONArray(listOf(24, 30, 60).filter { c.supportsFps(it) })).put("maxSensitivity", MotionDetector.MAX_SENSITIVITY)
     }
 
-    /** Keeps 7 days / 500 events. */
+    /**
+     * Keeps activity as long as the network's "Keep activity" setting says (forever by default). Safety net: when all
+     * cameras' history together nears the database's free 1 GB, the oldest events of this camera go first (and its
+     * Activity says so), so new alerts and status updates never stop for lack of room.
+     */
     private fun trimEvents(ctx: Context) {
         val ref = path(ctx, "events") ?: return
-        ref.orderByChild("t").addListenerForSingleValueEvent(object : ValueEventListener {
+        Live.ref(ctx, "settings/keepDays")?.addListenerForSingleValueEvent(object : ValueEventListener {
             override fun onDataChange(s: DataSnapshot) {
-                val cutoff = Live.now() - 7 * 86_400_000L
-                val all = s.children.toList()
-                val extra = (all.size - 500).coerceAtLeast(0)
-                all.forEachIndexed { i, c ->
-                    val t = (c.child("t").value as? Number)?.toLong() ?: 0
-                    if (i < extra || t < cutoff) c.key?.let { ref.child(it).removeValue() }
-                }
+                val days = (s.value as? Number)?.toInt() ?: 0
+                if (days > 0) removeOlder(ctx, ref, Live.now() - days * 86_400_000L)
+                Thread { try { safetyNet(ctx, ref) } catch (_: Exception) {} }.start()
+            }
+            override fun onCancelled(e: DatabaseError) {}
+        })
+    }
+
+    /** Removes this camera's events older than [cutoff], a batch at a time. */
+    private fun removeOlder(ctx: Context, ref: com.google.firebase.database.DatabaseReference, cutoff: Long) {
+        ref.orderByChild("t").endAt(cutoff.toDouble()).limitToFirst(1000).addListenerForSingleValueEvent(object : ValueEventListener {
+            override fun onDataChange(s: DataSnapshot) {
+                val m = HashMap<String, Any?>()
+                for (c in s.children) c.key?.let { m[it] = null }
+                if (m.isEmpty()) return
+                ref.updateChildren(m)
+                val old = dayKey(cutoff)
+                path(ctx, "days")?.orderByKey()?.endAt(old)?.addListenerForSingleValueEvent(object : ValueEventListener {
+                    override fun onDataChange(d: DataSnapshot) {
+                        val dm = HashMap<String, Any?>(); for (c in d.children) if ((c.key ?: "") < old) c.key?.let { dm[it] = null }
+                        if (dm.isNotEmpty()) path(ctx, "days")?.updateChildren(dm)
+                    }
+                    override fun onCancelled(e: DatabaseError) {}
+                })
+                if (m.size >= 1000) removeOlder(ctx, ref, cutoff)
+            }
+            override fun onCancelled(e: DatabaseError) {}
+        })
+    }
+
+    /** About this many events fit in 90% of the free 1 GB (≈300 bytes each). */
+    const val SAFE_EVENTS = 3_000_000L
+
+    private fun safetyNet(ctx: Context, ref: com.google.firebase.database.DatabaseReference) {
+        val ids = (Live.phones.keys + me(ctx)).toSet()
+        val totals = java.util.concurrent.ConcurrentHashMap<String, Long>()
+        val latch = java.util.concurrent.CountDownLatch(ids.size)
+        for (id in ids) Live.ref(ctx, "cams/$id/days")?.addListenerForSingleValueEvent(object : ValueEventListener {
+            override fun onDataChange(s: DataSnapshot) { totals[id] = s.children.sumOf { (it.child("n").value as? Number)?.toLong() ?: 0L }; latch.countDown() }
+            override fun onCancelled(e: DatabaseError) { latch.countDown() }
+        }) ?: latch.countDown()
+        latch.await(30, java.util.concurrent.TimeUnit.SECONDS)
+        val total = totals.values.sum()
+        val mine = totals[me(ctx)] ?: 0L
+        if (total <= SAFE_EVENTS || mine <= 0) return
+        // this camera's share of what has to go, oldest first
+        val drop = ((total - SAFE_EVENTS) * mine / total + 1000).coerceAtMost(mine)
+        ref.orderByChild("t").limitToFirst(drop.coerceAtMost(5000).toInt()).addListenerForSingleValueEvent(object : ValueEventListener {
+            override fun onDataChange(s: DataSnapshot) {
+                val m = HashMap<String, Any?>()
+                var newest = 0L
+                for (c in s.children) { c.key?.let { m[it] = null }; newest = maxOf(newest, (c.child("t").value as? Number)?.toLong() ?: 0L) }
+                if (m.isEmpty()) return
+                ref.updateChildren(m)
+                path(ctx, "days/${dayKey(newest - Live.serverOffset)}/n")?.setValue(ServerValue.increment(-m.size.toLong()))
+                event(ctx, "trimmed", "Oldest activity removed to stay within the database's free storage")
             }
             override fun onCancelled(e: DatabaseError) {}
         })

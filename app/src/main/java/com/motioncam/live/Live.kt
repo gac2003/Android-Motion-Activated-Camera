@@ -24,7 +24,9 @@ import java.util.concurrent.ConcurrentHashMap
  *   devices/<device>            online, seen (server time), d = sealed {name, camera, viewer, sync…}
  *   cams/<device>/status        at, d = sealed status of a camera phone
  *   cams/<device>/caps          d = sealed camera capabilities (lenses, ranges)
- *   cams/<device>/events/<id>   t, d = sealed {type, text…}   (kept 7 days / 500)
+ *   cams/<device>/events/<id>   t, d = sealed {type, text…}   (kept as "Keep activity" says, forever by default)
+ *   cams/<device>/days/<yyyyMMdd>  per-day counts (m motion, o monitoring, b battery & heat, s settings, n entries)
+ *   settings/keepDays           how long activity is kept (absent = forever)
  *   cams/<device>/watchers/<v>  time a viewer last asked for the live view
  *   cams/<device>/live          at, img = sealed JPEG (low rate, only while watched)
  *   cams/<device>/snapReq/<id>, snap/<id>     high-quality frame on request
@@ -244,7 +246,7 @@ object Live {
 
     /**
      * Reads the events a camera recorded since this phone last handled one (up to [until], where live alerts take over)
-     * and alerts / marks them new in Activity. The camera keeps 7 days of events; the first time, nothing old is shown.
+     * and alerts / marks them new in Activity. The first time, nothing old is shown.
      */
     private fun catchUp(ctx: Context, cam: String, until: Long) {
         val last = seen(ctx).getLong(cam, 0)

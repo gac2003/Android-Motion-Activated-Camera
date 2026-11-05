@@ -27,7 +27,7 @@ class AlertSettingsActivity : Activity() {
         super.onCreate(savedInstanceState)
         p = Prefs(this)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
-        root.addView(topBar(this, "Alerts & notifications"))
+        root.addView(topBar(this, "Alerts & activity"))
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; val pd = Ui.dp(this@AlertSettingsActivity, 16); setPadding(pd, 0, pd, pd * 2) }
         root.addView(ScrollView(this).apply { addView(box) }, LinearLayout.LayoutParams(-1, 0, 1f))
         Ui.capWidth(box)
@@ -40,22 +40,68 @@ class AlertSettingsActivity : Activity() {
     private fun hm(m: Int) = com.motioncam.Fmt.t(p, java.util.Calendar.getInstance().apply {
         set(java.util.Calendar.HOUR_OF_DAY, m / 60); set(java.util.Calendar.MINUTE, m % 60) }.timeInMillis, seconds = false)
 
+    /** About how much activity history all cameras keep (from their per-day counts), or null while counting. */
+    private var usage: Long? = null
+
+    private fun loadUsage() {
+        val ids = (Live.phones.keys + com.motioncam.cloud.Device.id(this)).toSet()
+        val n = java.util.concurrent.atomic.AtomicLong()
+        val left = java.util.concurrent.atomic.AtomicInteger(ids.size)
+        for (id in ids) {
+            val ref = Live.ref(this, "cams/$id/days")
+            if (ref == null) { if (left.decrementAndGet() == 0) { usage = n.get(); render() }; continue }
+            ref.addListenerForSingleValueEvent(object : com.google.firebase.database.ValueEventListener {
+                override fun onDataChange(s: com.google.firebase.database.DataSnapshot) {
+                    n.addAndGet(s.children.sumOf { (it.child("n").value as? Number)?.toLong() ?: 0L })
+                    if (left.decrementAndGet() == 0) { usage = n.get(); runOnUiThread { if (!isFinishing) render() } }
+                }
+                override fun onCancelled(e: com.google.firebase.database.DatabaseError) { if (left.decrementAndGet() == 0) { usage = n.get() } }
+            })
+        }
+    }
+
+    private var keepLoaded = false
+
+    /** How long camera activity is kept: one setting for the whole network. */
+    private fun activitySection() {
+        f.title("Activity")
+        if (!NetJoin.joined(this)) { f.note("Join your phones' network (Settings › Your phones) to see and keep camera activity."); return }
+        if (!keepLoaded) { keepLoaded = true; KeepActivity.load(this) { runOnUiThread { if (!isFinishing) render() } }; loadUsage() }
+        val opts = KeepActivity.OPTIONS
+        f.choice("Keep activity", opts.map { KeepActivity.label(it) }, opts.indexOf(KeepActivity.cached).coerceAtLeast(0)) { i ->
+            KeepActivity.set(this, opts[i])
+        }
+        f.note("The same for all your phones. Older activity is removed by each camera once a day; clips are never affected.")
+        val u = usage
+        f.line(if (u == null) "Activity history: counting…" else "Activity history: about " + mb(u * 300) + " of the database's free 1 GB", 13f, 0xFFB0B4BA.toInt())
+        f.note("If all history together nears that limit, the oldest activity is removed first (and Activity says so), so new alerts never stop.")
+        f.button("Delete activity…", full = false) { startActivity(android.content.Intent(this, DeleteActivityActivity::class.java)) }
+    }
+
+    private fun mb(bytes: Long): String = when {
+        bytes < 1_000_000 -> "%.1f MB".format(bytes / 1e6)
+        bytes < 1_000_000_000 -> "%.0f MB".format(bytes / 1e6)
+        else -> "%.2f GB".format(bytes / 1e9)
+    }
+
     private fun render() {
         f.box.removeAllViews()
+        activitySection()
+        f.title("Alerts on this phone")
         f.toggle("Show camera alerts on this phone", p.alertsOn) { p.alertsOn = it; AlertCheckJob.schedule(this); render() }
         if (!p.alertsOn) return
         if (!p.liveStay) {
             f.toggle("Check for alerts every 15 minutes when MotionCam is closed", p.alertsPoll) { p.alertsPoll = it; AlertCheckJob.schedule(this); render() }
             f.note("Connects for a few seconds, then disconnects: very little battery. Android picks the exact moment, so an alert " +
-                "can be up to ~15 minutes late. For instant alerts turn on Stay connected (Live connection). Anything missed is " +
+                "can be up to ~15 minutes late. For instant alerts turn on Stay connected (Settings › Your phones). Anything missed is " +
                 "always shown when you open MotionCam.")
         }
         f.choice("Where alerts appear", listOf("Phone notifications when MotionCam isn't on screen (while it is: a card in the app)",
             "Inside MotionCam only (a card on the open screen; nothing in the notification shade)"),
             if (p.alertsInApp) 1 else 0) { p.alertsInApp = it == 1 }
         f.note("These settings decide what notifies this phone. Everything the cameras report is in Activity either way " +
-            "(Live connection → See all activity; new entries are marked, and the Live connection icon shows a dot). Each " +
-            "camera's alerts are grouped, and every alert has Mute 1 h / 8 h buttons. Mute a camera for longer in Live connection → ⋮.")
+            "(new entries are marked, and the Activity tab shows how many). Each camera's alerts are grouped, and every alert has " +
+            "Mute 1 h / 8 h buttons. Mute a camera for longer in Settings › Your phones → ⋮.")
         f.button("See all activity", full = false) { com.motioncam.Nav.go(this, com.motioncam.Nav.Tab.ACTIVITY) }
 
         f.title("Motion")

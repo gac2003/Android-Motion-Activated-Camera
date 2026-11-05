@@ -168,6 +168,16 @@ object Alerts {
                 if (p.alertClip) gate(ctx, cam, false)?.let { s -> post(ctx, cam, "clip", CH_CLIP, "New clip · $name",
                     d.optString("text") + if (ref != null) " — tap to watch" else "", s, clip = ref) }
             }
+            "motion_burst" -> {
+                // a very busy hour at the camera: one calm alert instead of one per motion
+                if (!p.alertMotion) return
+                val silent = gate(ctx, cam, false) ?: return
+                val st = motion.getOrPut(cam) { MotionState() }
+                val now = System.currentTimeMillis()
+                val within = now - st.lastAlert < p.alertMotionGapMin * 60_000L
+                if (!within) st.lastAlert = now
+                post(ctx, cam, "motion", CH_MOTION, "Motion · $name", "Lots of motion (×${d.optInt("n")} this hour)", silent = silent || within, update = within)
+            }
             "hot" -> if (p.alertHot) gate(ctx, cam, false)?.let { s -> post(ctx, cam, "hot", CH_STATUS, "Camera too hot · $name", d.optString("text"), s) }
             "unplugged" -> if (p.alertCharger) gate(ctx, cam, false)?.let { s -> post(ctx, cam, "power", CH_STATUS, "Charger unplugged · $name", d.optString("text"), s) }
             "monitor_off", "monitor_paused", "safety_stop" ->

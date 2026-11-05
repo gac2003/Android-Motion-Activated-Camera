@@ -8,6 +8,7 @@ import android.view.View
  */
 
 class ActivityTabActivity : com.motioncam.live.ActivityLogActivity() {
+    override val asTab = true
     override fun setContentView(view: View) = super.setContentView(Nav.wrap(this, view, Nav.Tab.ACTIVITY))
     override fun onResume() { super.onResume(); Nav.tabShown(this, Nav.Tab.ACTIVITY) }
     override fun finish() { if (!isTaskRoot) Nav.leaveTab(this, Nav.Tab.ACTIVITY) else super.finish() }

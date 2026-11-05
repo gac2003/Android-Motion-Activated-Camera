@@ -69,7 +69,7 @@ class LiveActivity : Activity() {
         val d = dash ?: return
         val list = d.events().take(3)
         if (list.isEmpty()) {
-            box.addView(Ui.label(this, if (d.loaded) "No camera activity in the last 7 days." else "Loading…", 13f, Ui.GREY).apply {
+            box.addView(Ui.label(this, if (d.loaded) "No camera activity yet." else "Loading…", 13f, Ui.GREY).apply {
                 setPadding(0, Ui.dp(this@LiveActivity, 4), 0, Ui.dp(this@LiveActivity, 4))
             })
             return
@@ -165,7 +165,7 @@ class LiveActivity : Activity() {
             else "Off: alerts arrive instantly while MotionCam is open; otherwise " +
                 (if (prefs.alertsPoll) "MotionCam checks about every 15 minutes (Alerts & notifications), so an alert can be up to ~15 minutes late. "
                 else "they are shown when you next open MotionCam. ") +
-                "Nothing is missed either way: cameras keep 7 days of events. Turn this on for instant alerts.")
+                "Nothing is missed either way: cameras keep their activity. Turn this on for instant alerts.")
 
         f.title("This phone as a camera")
         f.toggle("Let other phones see and control this phone while it is monitoring", prefs.liveCamera) { on ->

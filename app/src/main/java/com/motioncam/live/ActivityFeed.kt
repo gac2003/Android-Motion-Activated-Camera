@@ -8,7 +8,7 @@ import com.motioncam.cloud.Device
 import org.json.JSONObject
 
 /** One camera event; a motion event carries the clip it recorded ([clip], the "clip saved" event) when there is one. */
-class ActivityEvent(val cam: String, val t: Long, val d: JSONObject) {
+class ActivityEvent(val cam: String, val t: Long, val d: JSONObject, val key: String = "") {
     var clip: JSONObject? = null
     val type: String get() = d.optString("type")
 }
@@ -18,7 +18,16 @@ object ActivityTypes {
      * What the all-cameras views show: what happened at the cameras (motion and clips, monitoring started / stopped,
      * heat, power, battery, PIN lock-outs) — not housekeeping such as settings changed or who had the remote.
      */
-    val OVERVIEW = setOf("motion", "clip", "monitor_on", "monitor_off", "monitor_paused", "safety_stop", "hot", "unplugged", "battery", "pin_locked")
+    val OVERVIEW = setOf("motion", "clip", "motion_burst", "monitor_on", "monitor_off", "monitor_paused", "safety_stop", "hot", "unplugged", "battery", "pin_locked", "trimmed")
+
+    /** The Activity filters (any number can be on; an entry shows if it matches any of them). */
+    val FILTERS = listOf(
+        Triple("motion", "Motion & clips", setOf("motion", "clip", "motion_burst")),
+        Triple("monitor", "Monitoring", setOf("monitor_on", "monitor_off", "monitor_paused", "safety_stop", "pin_locked", "remote_taken", "settings_local", "trimmed")),
+        Triple("battery", "Battery & heat", setOf("battery", "unplugged", "hot")))
+
+    /** The per-day summary letters that count for a filter (see CameraLink.kindLetter). */
+    fun letters(filter: String) = when (filter) { "motion" -> setOf("m"); "monitor" -> setOf("o", "s"); "battery" -> setOf("b"); else -> emptySet() }
 
     fun icon(type: String) = when (type) {
         "motion" -> "🏃"; "clip" -> "🎞"; "monitor_on" -> "▶"; "monitor_off", "monitor_paused" -> "⏸"; "safety_stop" -> "⛔"
@@ -35,7 +44,7 @@ object ActivityTypes {
         for ((_, list) in events.groupBy { it.cam }) {
             var motion: ActivityEvent? = null
             for (e0 in list.sortedBy { it.t }) {
-                val e = ActivityEvent(e0.cam, e0.t, e0.d)   // a copy: pairing again (on every update) starts fresh
+                val e = ActivityEvent(e0.cam, e0.t, e0.d, e0.key)   // a copy: pairing again (on every update) starts fresh
                 when (e.type) {
                 "motion" -> { motion = e; out += e }
                 "clip" -> {
@@ -70,7 +79,7 @@ class ActivityFeed(private val ctx: Context, private val perCam: Int, private va
                     byCam[c] = s.children.mapNotNull { e ->
                         val t = (e.child("t").value as? Number)?.toLong() ?: return@mapNotNull null
                         val d = LiveNet.open(ctx, e.child("d").value as? String) ?: return@mapNotNull null
-                        try { ActivityEvent(c, t - Live.serverOffset, JSONObject(d)) } catch (_: Exception) { null }
+                        try { ActivityEvent(c, t - Live.serverOffset, JSONObject(d), e.key ?: "") } catch (_: Exception) { null }
                     }
                     loaded = true
                     // keeps "new activity" (the dot) right, also for events that arrived while this phone was offline

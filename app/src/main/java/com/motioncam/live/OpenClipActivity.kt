@@ -189,7 +189,7 @@ class OpenClipActivity : Activity() {
                 answered = true
                 val up = s.children.any { c ->
                     val d = LiveNet.open(this@OpenClipActivity, c.child("d").value as? String) ?: return@any false
-                    try { JSONObject(d).let { it.optString("type") == "clip_up" && it.optString("name") == name } } catch (_: Exception) { false }
+                    try { JSONObject(d).let { (it.optString("type") == "clip_up" || (it.optString("type") == "clip" && (it.optJSONArray("up")?.length() ?: 0) > 0)) && it.optString("name") == name } } catch (_: Exception) { false }
                 }
                 done(up)
             }

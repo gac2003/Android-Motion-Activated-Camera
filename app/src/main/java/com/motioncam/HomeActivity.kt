@@ -396,7 +396,7 @@ class HomeActivity : Activity(), Nav.Reselect {
         if (isFinishing) return
         c.removeAllViews()
         val f = feed ?: return
-        val list = f.events().take(3)
+        val list = f.events().take(8)
         if (list.isEmpty()) {
             c.addView(Ui.label(this, if (f.loaded) "No camera activity yet." else "Loading…", 13f, Ui.GREY).apply { setPadding(0, d(10), 0, d(10)) })
             return

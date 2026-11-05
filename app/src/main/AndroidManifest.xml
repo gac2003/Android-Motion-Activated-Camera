@@ -64,6 +64,7 @@
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize" />
         <activity android:name=".live.ActivityLogActivity" android:exported="false" />
         <activity android:name=".live.AlertSettingsActivity" android:exported="false" />
+        <activity android:name=".live.DeleteActivityActivity" android:exported="false" />
         <receiver android:name=".live.AlertActionReceiver" android:exported="false" />
         <service
             android:name=".live.LiveService"

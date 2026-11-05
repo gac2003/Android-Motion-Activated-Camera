@@ -78,7 +78,7 @@ class RemoteCameraActivity : Activity() {
         box.removeAllViews()
         val list = ActivityTypes.pair(recent.filter { it.type != "clip_up" && it.type != "remote_taken" }).take(3)
         if (list.isEmpty()) {
-            box.addView(Ui.label(this, if (recentLoaded) "Nothing in the last 7 days." else "Loading…", 13f, Ui.GREY).apply {
+            box.addView(Ui.label(this, if (recentLoaded) "No activity yet." else "Loading…", 13f, Ui.GREY).apply {
                 setPadding(0, Ui.dp(this@RemoteCameraActivity, 4), 0, Ui.dp(this@RemoteCameraActivity, 4))
             })
             return

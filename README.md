@@ -47,10 +47,15 @@ reopens where you were (Home and its last tab, or Camera mode).
   exactly what you choose: when, which phones, which kinds.
 * **Camera** (the middle tab): this phone as a camera, full screen – the live preview, Pro controls and Start/Stop.
   A red eye shows while your other phones watch it; tap it to see who. The tab's dot: green while monitoring, red while watched.
+  Its ⚙ holds everything about this camera, starting with **Show live camera preview** (and focus peaking, low-power
+  standby), then the lens and Pro controls, recording, motion detection, storage on this phone, battery & heat, and
+  shortcuts to the web viewer, Your phones and backup.
 * **Clips**: *On this phone* or *Remote folders*; Collections · Search · Timeline; each clip's time and length with its
   marks – protected, backed up, favourite.
 * **Settings**: categories (Camera & recording, Motion detection, Your phones, Alerts & activity, Remote folders & backup,
-  Storage & protection, Player, Web viewer, Display, About & help, Reset).
+  Storage & protection, Player, Web viewer, Display, About & help, Reset). **Search settings** at the top finds any
+  setting as you type (also by related words, like "battery" or "upload"), shows where it is, and opens it scrolled to
+  that setting with a brief highlight; Back clears the search.
 
 | Pro controls & focus peaking | Clips gallery | Timeline player | Collections |
 |:---:|:---:|:---:|:---:|

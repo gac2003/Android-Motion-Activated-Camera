@@ -57,14 +57,19 @@ class GrabSeekBar(ctx: Context) : SeekBar(ctx) {
  * the exact value. Used by this phone's Settings and, with the same labels and units, by a camera's remote settings.
  */
 class SettingsForm(private val a: Activity, var box: LinearLayout) {
+    companion object {
+        /** Settings search: while set, every row reports its label (0), a section heading (1) or a note (2). */
+        var indexer: ((Int, String) -> Unit)? = null
+    }
     private fun dp(v: Int) = Ui.dp(a, v)
 
     fun note(s: String) {
+        indexer?.invoke(2, s)
         box.addView(Ui.label(a, s, 12f, 0xFFB0B4BA.toInt()).apply { setPadding(0, dp(6), 0, dp(6)) })
     }
 
     fun toggle(label: String, value: Boolean, enabled: Boolean = true, set: (Boolean) -> Unit): Switch =
-        Switch(a).apply {
+        Switch(a).also { indexer?.invoke(0, label) }.apply {
             text = label
             setTextColor(Color.WHITE)
             isChecked = value
@@ -93,6 +98,7 @@ class SettingsForm(private val a: Activity, var box: LinearLayout) {
         label: String, unit: String, min: Int, max: Int, value: Int,
         offLabel: String? = null, minActive: Int = 1, slider: Boolean = true, enabled: Boolean = true, set: (Int) -> Unit,
     ) {
+        indexer?.invoke(0, label)
         val head = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val field = numberField(if (offLabel != null && value == 0) "" else "$value", false)
         if (offLabel != null) field.hint = offLabel
@@ -163,6 +169,7 @@ class SettingsForm(private val a: Activity, var box: LinearLayout) {
         toPos: (Double) -> Int, fromPos: (Int) -> Double, format: (Double) -> String, parse: (String) -> Double?,
         hint: String? = null, decimalInput: Boolean = true, signed: Boolean = false, enabled: Boolean = true, set: (Double) -> Unit,
     ) {
+        indexer?.invoke(0, label)
         val head = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val field = numberField(format(value), decimalInput, signed)
         hint?.let { field.hint = it }
@@ -205,6 +212,7 @@ class SettingsForm(private val a: Activity, var box: LinearLayout) {
     }
 
     fun choice(label: String, options: List<String>, current: Int, enabled: Boolean = true, set: (Int) -> Unit) {
+        indexer?.invoke(0, label)
         box.addView(Ui.label(a, label, 14f).apply { setPadding(0, dp(10), 0, 0) })
         val sp = Spinner(a)
         sp.adapter = ArrayAdapter(a, android.R.layout.simple_spinner_dropdown_item, options)

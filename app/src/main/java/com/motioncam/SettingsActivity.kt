@@ -18,12 +18,16 @@ open class SettingsActivity : Activity() {
     companion object {
         /** Show one category's settings (see [CATEGORIES]); without it: the list of categories. */
         const val EXTRA_SECTION = "section"
+        /** With [EXTRA_SECTION]: a setting's label to scroll to and flash (from search). */
+        const val EXTRA_HIGHLIGHT = "highlight"
     }
     /** Shown as the Settings tab (big title, no back arrow). */
     protected open val asTab = false
     private var sec: String? = null
     private lateinit var prefs: Prefs
     private lateinit var box: LinearLayout
+    private lateinit var scroll: ScrollView
+    private var searchField: EditText? = null
 
     /** Live connection state the page was built with (it is changed on its own screen). */
     private var builtLiveOn: Boolean? = null
@@ -56,7 +60,8 @@ open class SettingsActivity : Activity() {
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             setPadding(Ui.dp(this@SettingsActivity, 16), Ui.dp(this@SettingsActivity, 16), Ui.dp(this@SettingsActivity, 16), Ui.dp(this@SettingsActivity, 4))
         }) else root.addView(topBar(this, if (sec == "camera") "Camera settings" else CATEGORIES.firstOrNull { it.id == sec }?.title ?: "Settings"))
-        val scroll = ScrollView(this)
+        if (asTab || sec == null) root.addView(searchBar())
+        scroll = ScrollView(this)
         box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@SettingsActivity, 16)
@@ -69,14 +74,22 @@ open class SettingsActivity : Activity() {
         val sec = sec
         if (sec == null) { categories(); return }
 
-        if (sec == "display") {
-        title("Preview & display", Prefs.PREVIEW_KEYS)
+        buildSection(sec)
+        highlight(intent.getStringExtra(EXTRA_HIGHLIGHT))
+    }
+
+    /** One category's rows (also built off screen to index them for search). */
+    private fun buildSection(sec: String) {
+        // Camera mode's ⚙ starts with the preview, so it's quick to turn off and on
+        if (sec == "display" || sec == "camera") {
+        title("Preview & display", if (sec == "camera") listOf("previewOn", "peaking", "lowPowerIdle") else Prefs.PREVIEW_KEYS)
         toggle("Show live camera preview", prefs.previewOn) { prefs.previewOn = it }
+        note("Off: the screen shows no picture (the camera still watches and records). Saves a little power and keeps the screen dark.")
         toggle("Focus peaking (green edges) while adjusting FOCUS", prefs.peaking) { prefs.peaking = it }
         toggle("Low-power standby while monitoring with the screen off", prefs.lowPowerIdle) { prefs.lowPowerIdle = it }
         note("Between clips the camera only watches for motion at a reduced frame rate. As soon as motion starts a clip, " +
             "it switches to your recording frame rate, so clips are always recorded at the fps chosen below.")
-        toggle("24-hour clock (off = AM/PM)", prefs.use24h) { prefs.use24h = it }
+        if (sec == "display") toggle("24-hour clock (off = AM/PM)", prefs.use24h) { prefs.use24h = it }
 
         }
         if (sec == "camera") cameraBlock()
@@ -134,13 +147,13 @@ open class SettingsActivity : Activity() {
             "per tap. Pinch the filmstrip to show more or fewer frames of the playing clip.")
 
         }
-        if (sec == "storage") {
-        title("Storage", Prefs.STORAGE_KEYS)
+        if (sec == "storage" || sec == "camera") {
+        title(if (sec == "camera") "Storage on this phone" else "Storage", Prefs.STORAGE_KEYS)
         number("Delete clips older than", "days", 0, 365, prefs.keepDays, offLabel = "never") { prefs.keepDays = it }
         number("Storage limit for clips", "GB", 0, 500, prefs.maxStorageGb, offLabel = "no limit") { prefs.maxStorageGb = it }
         toggle("When the phone is nearly full, delete the oldest clips (otherwise recording pauses)", prefs.autoDeleteLow) { prefs.autoDeleteLow = it }
 
-        title("Protection", Prefs.PROTECTION_KEYS)
+        title(if (sec == "camera") "Battery & heat" else "Protection", Prefs.PROTECTION_KEYS)
         number("Stop monitoring when unplugged battery falls to", "%", 0, 50, prefs.minBattery, offLabel = "off") { prefs.minBattery = it }
         number("Pause the camera when battery temperature reaches", "°C", 0, 70, prefs.maxTempC, offLabel = "off", minActive = 35) { prefs.maxTempC = it }
         button("Exempt from battery optimisation (recommended)") {
@@ -154,6 +167,13 @@ open class SettingsActivity : Activity() {
             }
         }
 
+        }
+        if (sec == "camera") {
+        title("Watching this camera", null)
+        toggle("Web viewer while monitoring (watch from a computer browser)", prefs.serverOn) { prefs.serverOn = it }
+        button("Web viewer settings (password, port, addresses)…") { openCategory("web") }
+        button("Your phones: remote control, PIN, standby, card picture…") { openCategory("phones") }
+        button("Backup of this camera's clips (remote folders)…") { openCategory("cloud") }
         }
         if (sec == "web") {
         title("Remote viewing", Prefs.REMOTE_KEYS)
@@ -194,6 +214,7 @@ open class SettingsActivity : Activity() {
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
         com.motioncam.remote.FolderSettings.storageRows(this, box, live)
         com.motioncam.remote.FolderSettings.build(this, form, { s ->
+            SettingsForm.indexer?.invoke(1, s)
             box.addView(Ui.label(this, s, 14f, Ui.ACCENT).apply { setPadding(0, Ui.dp(this@SettingsActivity, 14), 0, 0) })
         }, { note(it) })
 
@@ -380,6 +401,272 @@ open class SettingsActivity : Activity() {
         build()
     }
 
+    // ------------------------------------------------------------------ search
+
+    /** One searchable setting: its label, where it is (category id, section heading) and the notes under it. */
+    private class Hit(val label: String, val cat: String, val section: String, var desc: String = "", val isCategory: Boolean = false)
+
+    private var index: List<Hit>? = null
+
+    /** Other words people use for what a category holds (matched against categories only, so rows aren't flooded). */
+    private val SYNONYMS = mapOf(
+        "recording" to "video quality resolution 4k 1080p 720p fps frame rate codec hevc h265 h264 bitrate audio microphone sound pre-record rotation orientation",
+        "motion" to "sensitivity zones mask detection light filter peephole trigger",
+        "storage" to "space delete old clips full disk memory battery temperature heat hot overheating protection",
+        "cloud" to "cloud backup upload google drive dropbox ftp sftp server wifi wi-fi data charging quality thumbnails",
+        "player" to "playback skip double tap filmstrip speed",
+        "web" to "browser computer pc stream password port remote viewing",
+        "display" to "screen preview peaking clock time 24 hour am pm power",
+        "phones" to "network pin remote control live connect sign in standby firebase",
+        "alerts" to "notifications notify ring sound vibrate alert activity history keep quiet hours",
+        "about" to "version help guide setup",
+        "reset" to "default restore reset",
+        "camera" to "lens exposure ev iso shutter focus white balance wb zoom preview camera mode",
+    )
+
+    /** Settings that live on their own screens (not built here). */
+    private val OTHER = listOf(
+        Hit("Connect your phones (network)", "phones", ""), Hit("Stay connected in the background", "phones", "Alerts on this phone"),
+        Hit("Let other phones see and control this phone while it is monitoring", "phones", "This phone as a camera"),
+        Hit("Change PIN", "phones", "This phone as a camera"), Hit("PIN also needed for the live view and frames", "phones", "This phone as a camera"),
+        Hit("Card picture every 15 minutes", "phones", "This phone as a camera"),
+        Hit("Standby: can be started from your other phones", "phones", "This phone as a camera"), Hit("Remove a phone", "phones", ""),
+        Hit("Keep activity", "alerts", "Activity"), Hit("Show camera alerts on this phone", "alerts", ""),
+        Hit("Check for alerts every 15 minutes when MotionCam is closed", "alerts", ""), Hit("Where alerts appear", "alerts", ""),
+        Hit("Motion detected", "alerts", "Which events"), Hit("New clip saved", "alerts", "Which events"), Hit("Battery low", "alerts", "Which events"),
+        Hit("Charger unplugged", "alerts", "Which events"), Hit("Too hot (camera paused)", "alerts", "Which events"),
+        Hit("Monitoring stopped", "alerts", "Which events"), Hit("Camera offline", "alerts", "Which events"), Hit("Back online", "alerts", "Which events"),
+        Hit("Collection sync needs a decision", "alerts", "Which events"), Hit("Quiet hours", "alerts", ""),
+        Hit("Upload queue", "cloud", "Remote folders (cloud backup)"), Hit("Clear downloaded clips", "cloud", "Remote folders (cloud backup)"),
+        Hit("Add a remote folder", "clips", "Remote folders"), Hit("Lens", "camera", "Camera"),
+        Hit("Detection zones (ZONES in Camera mode)", "motion", "Motion detection"),
+    )
+
+    private fun catTitle(id: String): String = CATEGORIES.firstOrNull { it.id == id }?.title ?: when (id) {
+        "camera" -> "Camera mode ⚙"
+        "clips" -> "Clips"
+        else -> id
+    }
+
+    /** Builds every category off screen once, collecting each row's label, its section and its notes. */
+    private fun buildIndex(): List<Hit> {
+        val out = ArrayList<Hit>()
+        for (c in CATEGORIES) out += Hit(c.title, c.id, "", isCategory = true)
+        out += Hit("Camera settings", "camera", "", isCategory = true)
+        val savedBox = box
+        val savedLive = ArrayList(live)
+        val scratch = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val seen = HashSet<String>()
+        for (id in listOf("recording", "motion", "storage", "cloud", "player", "web", "display", "about", "reset", "camera")) {
+            var heading = ""
+            var last: Hit? = null
+            SettingsForm.indexer = { kind, t ->
+                when (kind) {
+                    1 -> heading = t
+                    0 -> {
+                        // Camera mode's ⚙ repeats rows of other categories: those are found there already
+                        val key = t.lowercase()
+                        last = if (id == "camera" && key in seen) null else Hit(t, id, heading).also { seen += key; out += it }
+                    }
+                    else -> last?.let { it.desc += " " + t }
+                }
+            }
+            scratch.removeAllViews()
+            box = scratch
+            form.box = scratch
+            try { buildSection(id) } catch (_: Throwable) {}
+        }
+        SettingsForm.indexer = null
+        box = savedBox
+        form.box = savedBox
+        live.clear(); live.addAll(savedLive)
+        out += OTHER
+        return out
+    }
+
+    /** Best matches first: label starts with the words, then a word in the label, then inside it, then its section or notes. */
+    private fun search(q: String): List<Hit> {
+        val idx = index ?: buildIndex().also { index = it }
+        val words = q.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (words.isEmpty()) return emptyList()
+        return idx.mapNotNull { h ->
+            val label = h.label.lowercase()
+            val around = (h.section + " " + h.desc + " " + catTitle(h.cat)).lowercase()
+            val syn = if (h.isCategory) SYNONYMS[h.cat] ?: "" else ""
+            var score = 0
+            for (w in words) {
+                score += when {
+                    label.startsWith(w) -> 0
+                    Regex("\\b" + Regex.escape(w)).containsMatchIn(label) -> 1
+                    label.contains(w) -> 2
+                    syn.contains(w) -> 3
+                    around.contains(w) -> 5
+                    else -> return@mapNotNull null
+                }
+            }
+            h to score * 2 - (if (h.isCategory) 1 else 0)
+        }.sortedWith(compareBy({ it.second }, { it.first.label.length })).map { it.first }.distinctBy { it.cat + "|" + it.label.lowercase() }.take(60)
+    }
+
+    /** The search field at the top of the Settings tab (like a phone's own settings). */
+    private fun searchBar(): View {
+        val d = { v: Int -> Ui.dp(this, v) }
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF1E2126.toInt()); cornerRadius = d(24).toFloat() }
+            setPadding(d(14), 0, d(4), 0)
+        }
+        bar.addView(ImageView(this).apply { setImageDrawable(IconDrawable(IconDrawable.Kind.SEARCH, Ui.GREY)) }, LinearLayout.LayoutParams(d(20), d(20)))
+        val et = EditText(this).apply {
+            hint = "Search settings"
+            background = null
+            setTextColor(Color.WHITE)
+            setHintTextColor(0xFF8A8F96.toInt())
+            textSize = 15f
+            setSingleLine()
+            inputType = InputType.TYPE_CLASS_TEXT
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            setPadding(d(10), d(10), d(4), d(10))
+            contentDescription = "Search settings"
+        }
+        searchField = et
+        bar.addView(et, LinearLayout.LayoutParams(0, -2, 1f))
+        val clear = iconButton(this, IconDrawable.Kind.CLOSE, 40, 10) { et.setText("") }.apply { contentDescription = "Clear search"; visibility = View.GONE }
+        bar.addView(clear)
+        et.addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(e: android.text.Editable?) {
+                val q = e?.toString() ?: ""
+                clear.visibility = if (q.isEmpty()) View.GONE else View.VISIBLE
+                showResults(q)
+            }
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        })
+        et.setOnEditorActionListener { v, _, _ -> hideKeyboard(v); true }
+        return FrameLayout(this).apply {
+            setPadding(d(16), d(6), d(16), d(6))
+            addView(bar, FrameLayout.LayoutParams(-1, d(48)))
+            Ui.capWidth(bar)
+        }
+    }
+
+    private fun hideKeyboard(v: View) {
+        (getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)?.hideSoftInputFromWindow(v.windowToken, 0)
+        v.clearFocus()
+    }
+
+    /** Results while typing; the categories again when the field is empty. */
+    private fun showResults(q: String) {
+        box.removeAllViews()
+        live.clear()
+        if (q.isBlank()) { categories(); return }
+        val hits = search(q.trim())
+        val d = { v: Int -> Ui.dp(this, v) }
+        if (hits.isEmpty()) {
+            box.addView(Ui.label(this, "No settings found for \"${q.trim()}\"", 15f).apply { setPadding(d(4), d(18), d(4), d(4)) })
+            note("Try another word, like battery, upload, preview or PIN.")
+            return
+        }
+        box.addView(Ui.label(this, if (hits.size == 1) "1 result" else "${hits.size} results", 12f, Ui.GREY).apply { setPadding(d(4), d(10), 0, d(6)) })
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF1E2126.toInt()); cornerRadius = d(14).toFloat() }
+        }
+        box.addView(card)
+        val words = q.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        hits.forEachIndexed { i, h ->
+            if (i > 0) card.addView(View(this).apply { setBackgroundColor(0xFF2A2D33.toInt()) }, LinearLayout.LayoutParams(-1, d(1)))
+            card.addView(resultRow(h, words))
+        }
+    }
+
+    private fun resultRow(h: Hit, words: List<String>): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        val d = { v: Int -> Ui.dp(this@SettingsActivity, v) }
+        setPadding(d(14), d(10), d(10), d(10))
+        isClickable = true
+        background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30FFFFFF), null,
+            android.graphics.drawable.ColorDrawable(0xFFFFFFFF.toInt()))
+        val c = CATEGORIES.firstOrNull { it.id == h.cat }
+        addView(FrameLayout(this@SettingsActivity).apply {
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(c?.color ?: 0xFFF5C518.toInt()); cornerRadius = d(8).toFloat() }
+            addView(ImageView(this@SettingsActivity).apply { setImageDrawable(IconDrawable(c?.kind ?: if (h.cat == "clips") IconDrawable.Kind.CLIPS else IconDrawable.Kind.VIDEOCAM, 0xFF15171B.toInt())) },
+                FrameLayout.LayoutParams(d(16), d(16), Gravity.CENTER))
+        }, LinearLayout.LayoutParams(d(28), d(28)))
+        val col = LinearLayout(this@SettingsActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(d(12), 0, d(6), 0) }
+        // the typed words stand out in the label
+        val label = android.text.SpannableString(h.label)
+        val low = h.label.lowercase()
+        for (w in words) {
+            var at = low.indexOf(w)
+            while (at >= 0) {
+                label.setSpan(android.text.style.ForegroundColorSpan(Ui.ACCENT), at, at + w.length, 0)
+                label.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), at, at + w.length, 0)
+                at = low.indexOf(w, at + w.length)
+            }
+        }
+        col.addView(Ui.label(this@SettingsActivity, "", 15f).apply { text = label })
+        val path = if (h.isCategory) "Settings category" else listOf(catTitle(h.cat), h.section.takeIf { it.isNotEmpty() && !it.equals(catTitle(h.cat), true) })
+            .filterNotNull().joinToString("  ›  ")
+        col.addView(Ui.label(this@SettingsActivity, path, 12f, Ui.GREY).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+        addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        addView(Ui.label(this@SettingsActivity, "›", 20f, 0xFF6B7078.toInt()))
+        contentDescription = h.label + ", " + path
+        setOnClickListener { searchField?.let { hideKeyboard(it) }; openHit(h) }
+    }
+
+    private fun openHit(h: Hit) {
+        when (h.cat) {
+            "phones" -> startActivity(Intent(this, com.motioncam.live.LiveActivity::class.java))
+            "alerts" -> startActivity(Intent(this, com.motioncam.live.AlertSettingsActivity::class.java))
+            "clips" -> startActivity(Intent(this, com.motioncam.remote.RemoteFoldersActivity::class.java))
+            else -> startActivity(Intent(this, SettingsActivity::class.java).putExtra(EXTRA_SECTION, h.cat).apply {
+                if (!h.isCategory) putExtra(EXTRA_HIGHLIGHT, h.label)
+            })
+        }
+    }
+
+    /** Opened from search: scroll to the setting and flash it, like a phone's settings do. */
+    private fun highlight(label: String?) {
+        if (label.isNullOrEmpty()) return
+        box.post {
+            val target = findLabel(box, label) ?: return@post
+            // the setting's row: the first view whose parent is a vertical list
+            var row: View = target
+            while (true) {
+                val p = row.parent as? LinearLayout ?: break
+                if (p.orientation == LinearLayout.VERTICAL) break
+                row = p
+            }
+            var y = 0
+            var v: View? = row
+            while (v != null && v !== box) { y += v.top; v = v.parent as? View }
+            scroll.smoothScrollTo(0, (y - Ui.dp(this, 32)).coerceAtLeast(0))
+            android.animation.ValueAnimator.ofArgb(0x66F5C518, 0x00F5C518).apply {
+                duration = 2200
+                startDelay = 350
+                addUpdateListener { row.setBackgroundColor(it.animatedValue as Int) }
+                start()
+            }
+        }
+    }
+
+    private fun findLabel(v: View, label: String): View? {
+        if (v is TextView && v.text?.toString()?.removeSuffix("…") == label) return v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) findLabel(v.getChildAt(i), label)?.let { return it }
+        return null
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        // Back first clears a search, then leaves
+        val f = searchField
+        if (f != null && f.text.isNotEmpty()) { f.setText(""); hideKeyboard(f); return }
+        @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
     private fun toLog(v: Double, lo: Double, hi: Double): Int = (Math.log(v.coerceIn(lo, hi) / lo) / Math.log(hi / lo) * 1000).roundToInt()
     private fun fromLog(p: Int, lo: Double, hi: Double): Double = lo * Math.exp(Math.log(hi / lo) * p / 1000.0)
 
@@ -424,6 +711,7 @@ open class SettingsActivity : Activity() {
 
     /** Section heading; with [keys] it gets a "Reset" button for just that section. */
     private fun title(s: String, keys: List<String>?) {
+        SettingsForm.indexer?.invoke(1, s)
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -446,6 +734,7 @@ open class SettingsActivity : Activity() {
     }
 
     private fun note(s: String) {
+        SettingsForm.indexer?.invoke(2, s)
         box.addView(Ui.label(this, s, 12f, 0xFFB0B4BA.toInt()).apply { setPadding(0, Ui.dp(this@SettingsActivity, 6), 0, Ui.dp(this@SettingsActivity, 6)) })
     }
 
@@ -455,6 +744,7 @@ open class SettingsActivity : Activity() {
     private fun toggle(label: String, value: Boolean, set: (Boolean) -> Unit) { form.toggle(label, value) { set(it) } }
 
     private fun button(label: String, click: () -> Unit) {
+        SettingsForm.indexer?.invoke(0, label.removeSuffix("…"))
         box.addView(Ui.chip(this, label).apply { setOnClickListener { click() } },
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
     }
@@ -470,6 +760,7 @@ open class SettingsActivity : Activity() {
     private fun choice(label: String, options: List<String>, current: Int, set: (Int) -> Unit) = form.choice(label, options, current, set = set)
 
     private fun text(label: String, value: String, set: (String) -> Unit) {
+        SettingsForm.indexer?.invoke(0, label)
         box.addView(Ui.label(this, label, 14f).apply { setPadding(0, Ui.dp(this@SettingsActivity, 10), 0, 0) })
         box.addView(EditText(this).apply {
             setText(value)

@@ -13,6 +13,8 @@ plugins {
 val credentials = Properties().apply {
     rootProject.file("credentials.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
+/** The app's version: <major.minor> and the CI run that was its .0 (see version.properties). */
+val versionProps = Properties().apply { rootProject.file("version.properties").inputStream().use { load(it) } }
 fun cred(name: String): String = (System.getenv(name)?.takeIf { it.isNotBlank() } ?: credentials.getProperty(name).orEmpty()).trim()
 fun str(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
@@ -36,8 +38,7 @@ android {
         val build = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionCode = build
         // <major.minor> from version.properties; the patch counts builds since that version started
-        val ver = java.util.Properties().apply { rootProject.file("version.properties").inputStream().use { load(it) } }
-        versionName = ver.getProperty("major_minor") + "." + (build - ver.getProperty("base_run").toInt()).coerceAtLeast(0)
+        versionName = versionProps.getProperty("major_minor") + "." + (build - versionProps.getProperty("base_run").toInt()).coerceAtLeast(0)
     }
 
     // Release signing key comes from GitHub Actions secrets (never stored in the repo). Builds without it

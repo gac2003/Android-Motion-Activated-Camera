@@ -55,7 +55,7 @@ open class SettingsActivity : Activity() {
         if (asTab || sec == null) root.addView(Ui.label(this, "Settings", 26f).apply {
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             setPadding(Ui.dp(this@SettingsActivity, 16), Ui.dp(this@SettingsActivity, 16), Ui.dp(this@SettingsActivity, 16), Ui.dp(this@SettingsActivity, 4))
-        }) else root.addView(topBar(this, CATEGORIES.firstOrNull { it.id == sec }?.title ?: "Settings"))
+        }) else root.addView(topBar(this, if (sec == "camera") "Camera settings" else CATEGORIES.firstOrNull { it.id == sec }?.title ?: "Settings"))
         val scroll = ScrollView(this)
         box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -79,7 +79,8 @@ open class SettingsActivity : Activity() {
         toggle("24-hour clock (off = AM/PM)", prefs.use24h) { prefs.use24h = it }
 
         }
-        if (sec == "recording") {
+        if (sec == "camera") cameraBlock()
+        if (sec == "recording" || sec == "camera") {
         title("Recording", Prefs.RECORDING_KEYS)
         choice("Resolution", listOf("720p", "1080p (FHD)", "4K"), listOf(720, 1080, 2160).indexOf(prefs.resHeight).coerceAtLeast(1)) {
             prefs.resHeight = listOf(720, 1080, 2160)[it]
@@ -110,7 +111,7 @@ open class SettingsActivity : Activity() {
         note("For a phone fixed on a stand, set the rotation explicitly so clips are always upright, even with the screen locked.")
 
         }
-        if (sec == "motion") {
+        if (sec == "motion" || sec == "camera") {
         title("Motion detection", Prefs.MOTION_KEYS)
         number("Sensitivity (1 = least, 14 = most; default 5)", "", 1, MotionDetector.MAX_SENSITIVITY, prefs.sensitivity) { prefs.sensitivity = it }
         choice("Light filter", listOf("Off (any brightness change)", "Normal — ignore lights turning on/off, exposure changes", "Strong — also ignore glare and reflections (peepholes, windows)"), prefs.lightFilter) {
@@ -293,6 +294,94 @@ open class SettingsActivity : Activity() {
             else -> startActivity(Intent(this, SettingsActivity::class.java).putExtra(EXTRA_SECTION, id))
         }
     }
+
+    /**
+     * Camera mode's ⚙: this phone's camera controls (as on its strip), then recording and motion detection — everything
+     * your other phones can change from this camera's screen. Changes apply at once.
+     */
+    private fun cameraBlock() {
+        title("Camera", Prefs.CAMERA_KEYS)
+        note("Everything here can also be changed from your other phones (this camera's screen there). The same controls are " +
+            "on Camera mode's strip; yellow there = automatic.")
+        val holder = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        box.addView(holder)
+        fun build() {
+            holder.removeAllViews()
+            val sf = SettingsForm(this, holder)
+            val c = ProCaps.forPrefs(this, prefs)
+            fun pro() = EngineHost.peek()?.applyPro()
+            // lens
+            val lenses = Lenses.list(this)
+            val cur = c?.lens?.key ?: prefs.camera
+            holder.addView(Ui.chip(this, "Lens: " + (lenses.firstOrNull { it.key == cur }?.label?.substringBefore(" [") ?: "—")).apply {
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                setOnClickListener {
+                    if (lenses.isEmpty()) return@setOnClickListener
+                    OptionSheet.show(this@SettingsActivity, "Camera / lens", lenses.map { l ->
+                        Opt(l.label.substringBefore(" ["), l.label.substringAfter(" [", "").removeSuffix("]").ifEmpty { null }, checked = l.key == cur) {
+                            prefs.camera = l.key; prefs.zoom = 1f
+                            EngineHost.peek()?.applyConfig()
+                            build()
+                        }
+                    })
+                }
+            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
+            // exposure: EV while automatic; ISO + shutter when manual
+            sf.toggle("Exposure: automatic", prefs.exposureAuto) { prefs.exposureAuto = it; pro(); build() }
+            if (prefs.exposureAuto) {
+                val step = (c?.evStep ?: (1f / 6)).toDouble()
+                val lo = c?.evMin ?: -12; val hi = c?.evMax ?: 12
+                sf.scaled("Exposure compensation", "EV", prefs.evIndex * step, hi - lo,
+                    toPos = { (it / step).roundToInt() - lo }, fromPos = { (it + lo) * step },
+                    format = { (if (it > 0.001) "+" else "") + "%.1f".format(it) },
+                    parse = { t -> t.replace(',', '.').replace("+", "").toDoubleOrNull()?.let { ((it / step).roundToInt().coerceIn(lo, hi)) * step } },
+                    signed = true) { prefs.evIndex = (it / step).roundToInt(); pro() }
+            } else if (c?.manualSensor != false) {
+                val isoLo = (c?.isoMin ?: 50).toDouble(); val isoHi = (c?.isoMax ?: 3200).toDouble()
+                sf.scaled("ISO", "", prefs.iso.toDouble(), 1000, toPos = { toLog(it, isoLo, isoHi) }, fromPos = { fromLog(it, isoLo, isoHi).roundToInt().toDouble() },
+                    format = { "${it.roundToInt()}" }, parse = { it.toDoubleOrNull()?.coerceIn(isoLo, isoHi)?.roundToInt()?.toDouble() },
+                    decimalInput = false) { prefs.iso = it.roundToInt(); pro() }
+                val eMin = (c?.expMinNs ?: 100_000L).coerceAtLeast(125_000L).toDouble()
+                val eMax = minOf(c?.expMaxNs ?: 250_000_000L, 1_000_000_000L / prefs.fps.coerceAtLeast(1)).toDouble().coerceAtLeast(eMin * 2)
+                sf.scaled("Shutter speed  1 /", "s", prefs.shutterNs.toDouble(), 1000,
+                    toPos = { toLog(it, eMin, eMax) }, fromPos = { fromLog(it, eMin, eMax) },
+                    format = { ns -> val den = 1e9 / ns; if (den >= 10) "${den.roundToInt()}" else "%.2f".format(den).trimEnd('0').trimEnd('.') },
+                    parse = { t -> t.replace(',', '.').removePrefix("1/").toDoubleOrNull()?.takeIf { it > 0 }?.let { (1e9 / it).coerceIn(eMin, eMax) } }
+                ) { prefs.shutterNs = it.toLong(); pro() }
+            }
+            // focus: distance in metres (empty = infinity)
+            val minFocus = (c?.minFocusDiopter ?: 0f).toDouble()
+            if (minFocus > 0) {
+                sf.toggle("Focus: automatic", prefs.focusAuto) { prefs.focusAuto = it; pro(); build() }
+                if (!prefs.focusAuto) {
+                    fun mOf(pos: Double): Double { val d = (1 - pos) * minFocus; return if (d < 0.1) Double.POSITIVE_INFINITY else 1 / d }
+                    sf.scaled("Focus distance", "m", prefs.focusPos.toDouble().coerceIn(0.0, 1.0), 1000,
+                        toPos = { (it * 1000).roundToInt() }, fromPos = { it / 1000.0 },
+                        format = { pos -> mOf(pos).let { if (it.isInfinite()) "" else if (it < 10) "%.2f".format(it) else "%.1f".format(it) } },
+                        parse = { t -> if (t.isEmpty() || t == "∞") 1.0 else t.replace(',', '.').toDoubleOrNull()?.takeIf { it > 0 }?.let { m ->
+                            (1 - (1 / m) / minFocus).coerceIn(0.0, 1.0) } },
+                        hint = "∞") { prefs.focusPos = it.toFloat(); pro() }
+                    note("Closest: about %.2f m. Leave the box empty for infinity (∞).".format(1 / minFocus))
+                }
+            }
+            // white balance: automatic, or the camera's presets
+            val presets = ProCaps.wbPresets
+            sf.toggle("White balance: automatic", prefs.wbAuto) { prefs.wbAuto = it; pro(); build() }
+            if (!prefs.wbAuto) {
+                sf.scaled("White balance", "K", ProCaps.nearestPreset(prefs.wbKelvin).toDouble(), presets.size - 1,
+                    toPos = { it.roundToInt() }, fromPos = { it.toDouble() },
+                    format = { "${presets[it.roundToInt().coerceIn(0, presets.size - 1)].second}" },
+                    parse = { t -> t.toIntOrNull()?.let { ProCaps.nearestPreset(it).toDouble() } },
+                    decimalInput = false) { prefs.wbKelvin = presets[it.roundToInt().coerceIn(0, presets.size - 1)].second; pro() }
+            }
+            val zMin = c?.zoomMin ?: 1f; val zMax = c?.zoomMax ?: 1f
+            if (zMax > zMin + 0.01f) sf.decimal("Zoom", "×", zMin, zMax, prefs.zoom) { prefs.zoom = (it * 10).roundToInt() / 10f; pro() }
+        }
+        build()
+    }
+
+    private fun toLog(v: Double, lo: Double, hi: Double): Int = (Math.log(v.coerceIn(lo, hi) / lo) / Math.log(hi / lo) * 1000).roundToInt()
+    private fun fromLog(p: Int, lo: Double, hi: Double): Double = lo * Math.exp(Math.log(hi / lo) * p / 1000.0)
 
     /** Version and where the setup guide is. */
     private fun about() {

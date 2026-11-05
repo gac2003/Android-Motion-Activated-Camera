@@ -491,6 +491,11 @@ class MainActivity : Activity() {
             visibility = View.GONE
         }
         top.addView(liveChip, LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)).apply { leftMargin = Ui.dp(this@MainActivity, 6) })
+        // this camera's settings: everything your other phones can change from its screen
+        top.addView(iconButton(this, IconDrawable.Kind.SETTINGS, 48, 12) {
+            startActivity(Intent(this@MainActivity, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_SECTION, "camera"))
+        }.apply { contentDescription = "Camera settings"; tooltipText = "Camera settings" },
+            LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)).apply { leftMargin = Ui.dp(this@MainActivity, 4) })
         root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
 
         // bottom pro panel

@@ -599,7 +599,8 @@ open class ClipsActivity : Activity() {
         cols = if (land) landCols() else maxOf(2, (wDp / 170).toInt())
         val out = ArrayList<Row>()
         // in the Clips tab the count is above the tiles; only the badges' legend (collections) is a first row, scrolling away
-        if (!asTab || legend().isNotEmpty()) out += Row.Title
+        // landscape: the count line is the list's first row (it scrolls away instead of crowding the header)
+        if (!asTab || land || legend().isNotEmpty()) out += Row.Title
         shown = applyFilter(clips)
         updateFilterBar()
         for ((day, items) in shown.groupBy { dayStart(it.startMs) }.toSortedMap(compareByDescending { it })) {
@@ -927,8 +928,9 @@ open class ClipsActivity : Activity() {
                     visibility = if (asTab) View.GONE else View.VISIBLE
                 }
                 (v.getChildAt(1) as TextView).apply {
-                    text = if (asTab) legend().trim() else summary.text
+                    text = if (land) android.text.SpannableStringBuilder(summary.text).append(legend()) else if (asTab) legend().trim() else summary.text
                     setPadding(if (asTab) 0 else Ui.dp(this@ClipsActivity, 10), 0, 0, 0)
+                    maxLines = if (land) 2 else Int.MAX_VALUE
                 }
                 // remote folder that could not be refreshed: tap for the reason
                 v.setOnClickListener(if (remote != null && lastError != null) View.OnClickListener {
@@ -1182,10 +1184,8 @@ open class ClipsActivity : Activity() {
 
     /** The rest of the landscape header: the count (one line) and the tools as compact icon + name pills. */
     private fun fillLandHeader(h: LinearLayout) {
-        h.addView(summary.apply {
-            tag = "slides"; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
-            setPadding(Ui.dp(this@ClipsActivity, 12), 0, Ui.dp(this@ClipsActivity, 8), 0)
-        }, LinearLayout.LayoutParams(0, -2, 1f))
+        // the count line isn't here: it is the first row of the list (see buildRows)
+        h.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         (actionRow.parent as? ViewGroup)?.removeView(actionRow)
         actionRow.setPadding(0, 0, 0, 0)
         actionRow.tag = "slides"

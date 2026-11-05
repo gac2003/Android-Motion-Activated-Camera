@@ -200,9 +200,23 @@ class SearchSheet private constructor(
             flow.addView(tv)
             repaints += { Ui.setChipState(tv, if (key == null) !f.hasDate else f.datePreset == key) }
         }
+        // the calendar is big: it opens from its own chip (marked while a picked date or range is on)
+        var calOpen = false
+        val cal = calendar()
+        val calHint = Ui.label(a, "Tap a day for that day, then another day for a range. Days with clips have a dot.", 12f, Ui.GREY).apply { setPadding(0, 0, 0, d(8)) }
+        lateinit var pick: TextView
+        pick = chip("") { calOpen = !calOpen; changed() }
+        flow.addView(pick)
+        repaints += {
+            val custom = f.datePreset == null && f.hasDate
+            pick.text = if (calOpen) "Hide calendar ▴" else if (custom) f.dateText() + "  ▾" else "Pick dates…  ▾"
+            Ui.setChipState(pick, custom)
+            cal.visibility = if (calOpen) View.VISIBLE else View.GONE
+            calHint.visibility = cal.visibility
+        }
         body.addView(flow)
-        body.addView(calendar(), LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = d(12) })
-        hint(body, "Tap a day for that day, then another day for a range. Days with clips have a dot.")
+        body.addView(cal, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = d(12) })
+        body.addView(calHint)
     }
 
     private fun monthOf(ms: Long) = Calendar.getInstance().apply { timeInMillis = ms }.let { it.get(Calendar.YEAR) * 12 + it.get(Calendar.MONTH) }

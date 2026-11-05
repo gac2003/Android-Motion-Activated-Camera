@@ -221,29 +221,180 @@ class MainActivity : Activity() {
         frame.post { updateGeometry() }
     }
 
-    /** Portrait (and tablets): strip, then a full-width button. Landscape phones: one compact row. */
+    /**
+     * Portrait (and tablets): top bar, then the picture, then the control strip and a full-width Start / Stop.
+     * Landscape phones, like a phone's camera app: the status as small pills at the top left, and on the right a
+     * see-through column with the controls (scrolling) next to ⚙, a round Start / Stop in the middle and FILL / FIT.
+     */
     private fun arrangeBottom() {
         val cfg = resources.configuration
         val want = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE && cfg.smallestScreenWidthDp < 600
         if (compact == want) return
         compact = want
-        (strip.parent as? ViewGroup)?.removeView(strip)
-        (startBtn.parent as? ViewGroup)?.removeView(startBtn)
-        (stripRow.parent as? ViewGroup)?.removeView(stripRow)
         val d = { v: Int -> Ui.dp(this, v) }
+        fun detach(v: View?) { (v?.parent as? ViewGroup)?.removeView(v) }
+        listOf(strip, startBtn, stripRow, chipRow, statusTv, infoTv, liveChip, backV, gearV).forEach { detach(it) }
+        val top = topBarView as LinearLayout
         if (want) {
-            stripRow.addView(strip, LinearLayout.LayoutParams(0, -2, 1f))
-            stripRow.addView(startBtn, LinearLayout.LayoutParams(-2, -2).apply { setMargins(d(6), 0, d(12), 0) })
-            bottomBox.addView(stripRow)
-            startBtn.setPadding(d(18), d(10), d(18), d(10))
-            startBtn.textSize = 14f
+            // the top bar's pieces become pills
+            top.visibility = View.GONE
+            landTop.removeAllViews()
+            landTop.addView(backV, LinearLayout.LayoutParams(d(40), d(40)))
+            backV.background = pillBg(true); backV.setPadding(d(9), d(9), d(9), d(9))
+            statusPill.addView(statusTv, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL))
+            landTop.addView(statusPill, LinearLayout.LayoutParams(-2, d(32)).apply { leftMargin = d(6) })
+            // the eye: smaller, right beside the status
+            liveChip?.let { c ->
+                (c as? FrameLayout)?.getChildAt(0)?.layoutParams = FrameLayout.LayoutParams(d(30), d(30), Gravity.CENTER)
+                landTop.addView(c, LinearLayout.LayoutParams(d(34), d(34)).apply { leftMargin = d(4) })
+            }
+            infoPill.addView(infoTv, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL))
+            infoTv.maxLines = 1; infoTv.ellipsize = android.text.TextUtils.TruncateAt.END; infoTv.textSize = 12f
+            infoTv.maxWidth = (resources.displayMetrics.widthPixels - d(LAND_COL + 300)).coerceAtLeast(d(120))
+            landTop.addView(infoPill, LinearLayout.LayoutParams(-2, d(32)).apply { leftMargin = d(6) })
+            landTop.visibility = View.VISIBLE
+            // the controls: a scrolling column
+            chipRow.orientation = LinearLayout.VERTICAL
+            chipRow.setPadding(d(6), d(8), d(4), d(8))
+            for (i in 0 until chipRow.childCount) chipRow.getChildAt(i).layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, d(3), 0, d(3)) }
+            chipColumn.addView(chipRow)
+            gearBox.addView(gearV, FrameLayout.LayoutParams(d(44), d(44), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+            gearV.background = pillBg(true); gearV.setPadding(d(10), d(10), d(10), d(10))
+            landCol.visibility = View.VISIBLE
+            // the adjust panel floats at the bottom of the picture, left of the column
+            bottomBox.setBackgroundColor(0)
+            bottomBox.background = android.graphics.drawable.GradientDrawable().apply { setColor(0x99202328.toInt()); cornerRadius = d(16).toFloat() }
+            bottomBox.setPadding(d(4), d(6), d(4), 0)
+            bottomBox.layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(d(8), 0, d(LAND_COL + 8), d(8)) }
+            bottomBox.visibility = if (selected != null) View.VISIBLE else View.GONE
         } else {
+            landTop.visibility = View.GONE
+            landCol.visibility = View.GONE
+            top.visibility = View.VISIBLE
+            backV.background = null; gearV.background = null
+            backV.setPadding(d(12), d(12), d(12), d(12)); gearV.setPadding(d(12), d(12), d(12), d(12))
+            top.addView(backV, 0, LinearLayout.LayoutParams(d(48), d(48)).apply { rightMargin = d(4) })
+            textsV.addView(statusTv); textsV.addView(infoTv)
+            infoTv.maxLines = 3; infoTv.ellipsize = null; infoTv.textSize = 11f; infoTv.maxWidth = Int.MAX_VALUE
+            liveChip?.let { c ->
+                (c as? FrameLayout)?.getChildAt(0)?.layoutParams = FrameLayout.LayoutParams(d(36), d(36), Gravity.CENTER)
+                top.addView(c, LinearLayout.LayoutParams(d(48), d(48)).apply { leftMargin = d(6) })
+            }
+            top.addView(gearV, LinearLayout.LayoutParams(d(48), d(48)).apply { leftMargin = d(4) })
+            chipRow.orientation = LinearLayout.HORIZONTAL
+            chipRow.setPadding(d(8), 0, d(8), 0)
+            for (i in 0 until chipRow.childCount) chipRow.getChildAt(i).layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(d(3), 0, d(3), 0) }
+            strip.addView(chipRow)
+            bottomBox.setBackgroundColor(Ui.PANEL)
+            bottomBox.setPadding(0, d(6), 0, d(8))
+            bottomBox.layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM)
+            bottomBox.visibility = View.VISIBLE
             bottomBox.addView(strip)
             bottomBox.addView(startBtn, LinearLayout.LayoutParams(-1, -2).apply { setMargins(d(12), d(8), d(12), 0) })
             startBtn.setPadding(0, d(12), 0, d(12))
             startBtn.textSize = 16f
         }
+        applyFill()
         if (::statusTv.isInitialized) render(StatusBus.status)
+    }
+
+    // ------------------------------------------------------------------ landscape parts
+
+    private lateinit var backV: ImageView
+    private lateinit var gearV: ImageView
+    private lateinit var textsV: LinearLayout
+    private lateinit var landTop: LinearLayout
+    private lateinit var statusPill: FrameLayout
+    private lateinit var infoPill: FrameLayout
+    private lateinit var landCol: LinearLayout
+    private lateinit var chipColumn: ScrollView
+    private lateinit var gearBox: FrameLayout
+    private lateinit var shutter: FrameLayout
+    private lateinit var shutterCore: View
+    private lateinit var shutterLabel: TextView
+    private lateinit var fillBtn: ImageView
+    private val LAND_COL = 148
+
+    private fun pillBg(round: Boolean) = android.graphics.drawable.GradientDrawable().apply {
+        if (round) shape = android.graphics.drawable.GradientDrawable.OVAL else cornerRadius = Ui.dp(this@MainActivity, 16).toFloat()
+        setColor(0x73151719)
+    }
+
+    private fun openCameraSettings() =
+        startActivity(Intent(this, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_SECTION, "camera"))
+
+    /** Landscape: FILL = the picture fills the screen behind the controls; FIT = all of it, beside them. Remembered. */
+    private fun fill() = getSharedPreferences("nav", MODE_PRIVATE).getBoolean("camFill", true)
+
+    private fun applyFill() {
+        val land = compact == true
+        val f = fill()
+        frame.cover = land && f
+        frame.layoutParams = FrameLayout.LayoutParams(-1, -1, Gravity.CENTER).apply { if (land && !f) rightMargin = Ui.dp(this@MainActivity, LAND_COL) }
+        landCol.setBackgroundColor(if (f) 0x6B15171B else 0xFF15171B.toInt())
+        fillBtn.setImageDrawable(IconDrawable(if (f) IconDrawable.Kind.FULLSCREEN else IconDrawable.Kind.FIT_IN, if (f) Ui.ACCENT else Color.WHITE))
+        fillBtn.contentDescription = if (f) "Picture fills the screen, behind the controls. Tap to fit it beside them"
+            else "Picture fits beside the controls. Tap to fill the screen"
+        frame.post { updateGeometry() }
+    }
+
+    private fun buildLandscapeParts() {
+        val d = { v: Int -> Ui.dp(this, v) }
+        landTop = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE }
+        rootLayout.addView(landTop, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(d(8), d(8), d(LAND_COL + 8), 0) })
+        fun pill() = FrameLayout(this).apply { background = pillBg(false); setPadding(d(12), 0, d(12), 0); foregroundGravity = Gravity.CENTER_VERTICAL }
+        statusPill = pill()
+        infoPill = pill()
+        // the right column: controls | ⚙ · Start/Stop · FILL/FIT
+        landCol = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; visibility = View.GONE; isClickable = true }
+        chipColumn = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
+        landCol.addView(chipColumn, LinearLayout.LayoutParams(d(80), -1))
+        val ctrl = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(0, d(12), 0, d(12)) }
+        gearBox = FrameLayout(this)
+        ctrl.addView(gearBox, LinearLayout.LayoutParams(-1, d(64)))
+        ctrl.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
+        // a round shutter: green circle to start, red square to stop (its name under it; centred on the circle)
+        val sbox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(0, d(19), 0, 0) }
+        shutter = FrameLayout(this).apply {
+            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setStroke(d(3), Color.WHITE) }
+            isClickable = true
+            setOnClickListener { onStartStop() }
+            pressFeedback(this)
+        }
+        shutterCore = View(this)
+        shutter.addView(shutterCore, FrameLayout.LayoutParams(d(46), d(46), Gravity.CENTER))
+        sbox.addView(shutter, LinearLayout.LayoutParams(d(60), d(60)))
+        shutterLabel = Ui.label(this, "START", 11f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); letterSpacing = 0.04f; setPadding(0, d(5), 0, 0) }
+        sbox.addView(shutterLabel)
+        ctrl.addView(sbox)
+        ctrl.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
+        val fbox = FrameLayout(this)
+        fillBtn = ImageView(this).apply {
+            background = pillBg(true)
+            setPadding(d(10), d(10), d(10), d(10))
+            isClickable = true
+            setOnClickListener {
+                getSharedPreferences("nav", MODE_PRIVATE).edit().putBoolean("camFill", !fill()).apply()
+                applyFill()
+            }
+            pressFeedback(this)
+        }
+        fbox.addView(fillBtn, FrameLayout.LayoutParams(d(40), d(40), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
+        ctrl.addView(fbox, LinearLayout.LayoutParams(-1, d(64)))
+        landCol.addView(ctrl, LinearLayout.LayoutParams(0, -1, 1f))
+        rootLayout.addView(landCol, FrameLayout.LayoutParams(d(LAND_COL), -1, Gravity.END))
+    }
+
+    /** The landscape shutter shows the state: a green circle (Start) or a red square (Stop). */
+    private fun paintShutter(running: Boolean) {
+        val d = { v: Int -> Ui.dp(this, v) }
+        shutterCore.layoutParams = FrameLayout.LayoutParams(d(if (running) 22 else 46), d(if (running) 22 else 46), Gravity.CENTER)
+        shutterCore.background = android.graphics.drawable.GradientDrawable().apply {
+            if (running) cornerRadius = d(6).toFloat() else shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(if (running) Ui.RED else 0xFF2E7D32.toInt())
+        }
+        shutterLabel.text = if (running) "STOP" else "START"
+        shutter.contentDescription = if (running) "Stop monitoring" else "Start monitoring"
     }
 
     private fun hasCamera() = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
@@ -364,8 +515,8 @@ class MainActivity : Activity() {
             setOnClickListener { confirmKeep(clipId, lengthMs) }
         }
         rootLayout.addView(pill, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
-            topMargin = (topBarView?.bottom ?: 0) + Ui.dp(this@MainActivity, 8)
-            rightMargin = Ui.dp(this@MainActivity, 8)
+            topMargin = (if (compact == true) landTop.bottom else topBarView?.bottom ?: 0) + Ui.dp(this@MainActivity, 8)
+            rightMargin = Ui.dp(this@MainActivity, if (compact == true) LAND_COL + 8 else 8)
         })
         pill.alpha = 0f
         pill.animate().alpha(1f).setDuration(150).start()
@@ -401,8 +552,8 @@ class MainActivity : Activity() {
             elevation = Ui.dp(this@MainActivity, 4).toFloat()
         }
         rootLayout.addView(pill, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
-            topMargin = (topBarView?.bottom ?: 0) + Ui.dp(this@MainActivity, 8)
-            rightMargin = Ui.dp(this@MainActivity, 8)
+            topMargin = (if (compact == true) landTop.bottom else topBarView?.bottom ?: 0) + Ui.dp(this@MainActivity, 8)
+            rightMargin = Ui.dp(this@MainActivity, if (compact == true) LAND_COL + 8 else 8)
         })
         pill.alpha = 0f
         pill.animate().alpha(1f).setDuration(150).start()
@@ -468,10 +619,12 @@ class MainActivity : Activity() {
             setPadding(Ui.dp(this@MainActivity, 2), p - 4, p, p - 4)
             gravity = Gravity.CENTER_VERTICAL
         }
-        top.addView(iconButton(this, IconDrawable.Kind.BACK, 48, 12) { backHome() }.apply {
+        backV = iconButton(this, IconDrawable.Kind.BACK, 48, 12) { backHome() }.apply {
             contentDescription = "Back to Home"; tooltipText = "Home"
-        }, LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)).apply { rightMargin = Ui.dp(this@MainActivity, 4) })
+        }
+        top.addView(backV, LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)).apply { rightMargin = Ui.dp(this@MainActivity, 4) })
         val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        textsV = texts
         statusTv = Ui.label(this, "", 15f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
         infoTv = Ui.label(this, "", 11f, 0xFFB0B4BA.toInt()).apply { maxLines = 3; includeFontPadding = false }
         texts.addView(statusTv)
@@ -492,10 +645,8 @@ class MainActivity : Activity() {
         }
         top.addView(liveChip, LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)).apply { leftMargin = Ui.dp(this@MainActivity, 6) })
         // this camera's settings: everything your other phones can change from its screen
-        top.addView(iconButton(this, IconDrawable.Kind.SETTINGS, 48, 12) {
-            startActivity(Intent(this@MainActivity, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_SECTION, "camera"))
-        }.apply { contentDescription = "Camera settings"; tooltipText = "Camera settings" },
-            LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)).apply { leftMargin = Ui.dp(this@MainActivity, 4) })
+        gearV = iconButton(this, IconDrawable.Kind.SETTINGS, 48, 12) { openCameraSettings() }.apply { contentDescription = "Camera settings"; tooltipText = "Camera settings" }
+        top.addView(gearV, LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)).apply { leftMargin = Ui.dp(this@MainActivity, 4) })
         root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
 
         // bottom pro panel
@@ -537,8 +688,9 @@ class MainActivity : Activity() {
         Ui.pill(startBtn, 0xFF2E7D32.toInt())
         bottomBox = bottom
         stripRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        arrangeBottom()
         root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+        buildLandscapeParts()
+        arrangeBottom()
 
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) { if (fromUser && !updating) onSeek(p) }
@@ -568,6 +720,7 @@ class MainActivity : Activity() {
         if (selected != null && selected !in chips) {
             selected = null
             panel.visibility = View.GONE
+            if (compact == true) bottomBox.visibility = View.GONE
             updateFlags()
         }
         refreshChips()
@@ -811,6 +964,7 @@ class MainActivity : Activity() {
         val running = CameraService.monitoring
         startBtn.text = if (compact == true) (if (running) "STOP" else "START") else if (running) "STOP MONITORING" else "START MONITORING"
         Ui.pill(startBtn, if (running) Ui.RED else 0xFF2E7D32.toInt())
+        if (::shutter.isInitialized) paintShutter(running)
         val now = System.currentTimeMillis()
         statusTv.setTextColor(if (s.mode == Mode.RECORDING) Ui.RED else Color.WHITE)
         statusTv.text = when {
@@ -883,6 +1037,7 @@ class MainActivity : Activity() {
         }
         selected = if (selected == name) null else name
         panel.visibility = if (selected == null) View.GONE else View.VISIBLE
+        if (compact == true) bottomBox.visibility = panel.visibility
         updateFlags()
         if (selected != null) configurePanel()
         refreshChips()

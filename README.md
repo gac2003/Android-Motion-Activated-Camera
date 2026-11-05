@@ -62,6 +62,29 @@ reopens where you were (Home and its last tab, or Camera mode).
 | <img src="docs/screenshots/preview-focus-peaking.jpg" width="200" alt="Live preview with manual focus and green focus peaking"> | <img src="docs/screenshots/clips.jpg" width="200" alt="Clips grouped by day with thumbnails"> | <img src="docs/screenshots/player-timeline.jpg" width="200" alt="Player with the clip filmstrip timeline"> | <img src="docs/screenshots/collections.jpg" width="200" alt="Collections with Favourites"> |
 | Manual focus (green = sharp edges), ISO, shutter, WB and zoom like a Pro video mode; yellow = automatic | Day sections, sticky headers, search, multi-select | Plays clips back to back with a scrubbable filmstrip | Group clips into collections (soft links) |
 
+### Landscape
+Turn the phone sideways and every screen uses the width instead of stacking (portrait stays as it is):
+* **Tabs** become a rail on the left, spread over the height. **‹** at its top hides the tab names (**›** shows them);
+  remembered for every tab.
+* **Headers** take one row: title, switch, count and tools side by side, with no extra space above.
+* **Clips**: as many columns as fit with clips at least 150 dp wide (5 on most phones). When selecting, the actions sit
+  in the bar at the top instead of a bar over the clips.
+* **Home**: cameras three to a row on the left, recent activity on the right. **Activity**: two events per row, filters
+  in the title row. **Collections**: two per row.
+* **Settings**: categories and search on the left, the chosen category on the right (the last one is remembered).
+* **Camera mode**, like a phone's camera app: the status as small pills at the top left (with a small red eye while
+  someone watches); on the right a see-through column with the controls (scroll it), **⚙** at the top, a round
+  **Start / Stop** in the middle and **FILL / FIT** at the bottom – the picture fills the screen behind the controls or
+  fits beside them (remembered). A control's slider appears along the bottom of the picture.
+* **Player**: the video takes the whole screen; ⏮ ⏭, a shorter filmstrip, speed, skip and sound float on one row over
+  its bottom edge, and the clip count moves to the top. While playing they fade after a few seconds; tap to bring them
+  back (that tap doesn't pause).
+* **A camera's screen** (from its card): the picture on the left, status and controls on the right.
+
+### Versions
+Releases are named like the app's version: **MotionCam 1.1.0**, 1.1.1, … (tag `v1.1.0`). The major and minor numbers
+are in `version.properties`; the last number counts the builds since that version started.
+
 ## Build the APK
 
 ### Option A – download a build

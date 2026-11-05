@@ -202,7 +202,14 @@ class PlayerActivity : Activity() {
             override fun onScaleEnd(d: android.view.ScaleGestureDetector) { pinching = false; if (vScale < 1.03f) resetZoom() }
         })
         var tapSkipping = false
+        var waking = false
         video.setOnTouchListener { _, e ->
+            // landscape, controls hidden: the first tap only brings them back (like YouTube)
+            if (landP && e.actionMasked == MotionEvent.ACTION_DOWN && e.pointerCount == 1) {
+                if (chromeHidden) { setChrome(true); waking = true; return@setOnTouchListener true }
+                pokeChrome()
+            }
+            if (waking) { if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) waking = false; return@setOnTouchListener true }
             sd.onTouchEvent(e)
             // after a double-tap skip, each further quick tap on that side skips again (like YouTube)
             if (e.actionMasked == MotionEvent.ACTION_DOWN && vScale <= 1.01f) {
@@ -231,7 +238,7 @@ class PlayerActivity : Activity() {
             override fun onScrub(index: Int, posMs: Long, final: Boolean) = scrubTo(index, posMs, final)
             override fun onTapClip(index: Int) { startAt(index, 0); strip.setCurrent(index, true) }
         }
-        root.addView(strip, LinearLayout.LayoutParams(-1, Ui.dp(this, 84)))
+        rootView = root
 
         bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -258,8 +265,8 @@ class PlayerActivity : Activity() {
         muteBtn = iconButton(this, IconDrawable.Kind.VOLUME, 48, 12) { toggleMute() }
         bar.addView(muteBtn)
         info = Ui.label(this, "", 12f, Ui.GREY).apply { gravity = Gravity.END; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
-        bar.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
-        root.addView(bar)
+        menuBtnV = menuBtn
+        arrange()
         setContentView(root)
 
         val startId = intent.getLongExtra(EXTRA_START_ID, -1L)
@@ -465,6 +472,7 @@ class PlayerActivity : Activity() {
 
     private fun setPlaying(p: Boolean) {
         playing = p
+        if (landP) { if (p) pokeChrome() else setChrome(true) }
         // screen stays on only while a video is actually playing
         if (p) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -479,6 +487,72 @@ class PlayerActivity : Activity() {
         }
         if (p) { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PAUSE)); bigPlay.visibility = View.VISIBLE; bigPlay.alpha = 1f; bigPlay.animate().alpha(0f).setStartDelay(350).setDuration(250).withEndAction { bigPlay.visibility = View.GONE }.start() }
         else { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PLAY)); bigPlay.alpha = 1f; bigPlay.visibility = View.VISIBLE }
+    }
+
+    // ------------------------------------------------------------------ portrait / landscape
+
+    private lateinit var rootView: LinearLayout
+    private lateinit var menuBtnV: View
+    /** Landscape on a phone: the video fills the screen, the controls float over its bottom edge on one row. */
+    private var landP = false
+    private var chromeHidden = false
+    private val hideChrome = Runnable { if (landP && playing && !scrubbing && vScale <= 1.01f) setChrome(false) }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        arrange()
+    }
+
+    /**
+     * Portrait: the video, the filmstrip (84 dp) and a row of buttons under it.
+     * Landscape phones, like other phones' players: the video takes the whole screen; one row floats over its bottom
+     * edge on a dark gradient – ⏮ ⏭, a shorter filmstrip (56 dp), speed, skip and sound – and the clip count / time
+     * moves into the top bar. While playing, the controls fade out after a few seconds; a tap brings them back.
+     */
+    private fun arrange() {
+        val cfg = resources.configuration
+        val land = cfg.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE && cfg.smallestScreenWidthDp < 600
+        val d = { v: Int -> Ui.dp(this, v) }
+        fun detach(v: View) { (v.parent as? android.view.ViewGroup)?.removeView(v) }
+        detach(strip); detach(bar); detach(info)
+        landP = land
+        if (land) {
+            bar.addView(strip, 2, LinearLayout.LayoutParams(0, d(56), 1f).apply { setMargins(d(4), 0, d(4), 0) })
+            bar.background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xCC000000.toInt(), 0x00000000))
+            bar.setPadding(d(8), d(18), d(8), d(6))
+            video.addView(bar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+            topBar.addView(info, topBar.indexOfChild(menuBtnV), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = d(8) })
+            info.setTextColor(0xFFD0D3D8.toInt()); info.setShadowLayer(4f, 0f, 0f, Color.BLACK)
+            pokeChrome()
+        } else {
+            ui.removeCallbacks(hideChrome)
+            setChrome(true)
+            bar.background = null
+            bar.setPadding(d(12), d(6), d(12), d(12))
+            info.setTextColor(Ui.GREY); info.setShadowLayer(0f, 0f, 0f, 0)
+            bar.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+            rootView.addView(strip, LinearLayout.LayoutParams(-1, d(84)))
+            rootView.addView(bar)
+        }
+    }
+
+    /** Shows or fades out the floating controls (landscape). */
+    private fun setChrome(show: Boolean) {
+        if (show == !chromeHidden && (!show || topBar.alpha == 1f)) return
+        chromeHidden = !show
+        for (v in listOf<View>(topBar, bar)) {
+            if (v.visibility == View.GONE) continue   // zoomed in: they stay hidden
+            v.animate().cancel()
+            if (show) { v.visibility = View.VISIBLE; v.animate().alpha(1f).setDuration(150).start() }
+            else v.animate().alpha(0f).setDuration(250).withEndAction { if (chromeHidden) v.visibility = View.INVISIBLE }.start()
+        }
+        if (show) pokeChrome()
+    }
+
+    /** Any touch: the controls stay a few seconds longer. */
+    private fun pokeChrome() {
+        ui.removeCallbacks(hideChrome)
+        if (landP) ui.postDelayed(hideChrome, 3500)
     }
 
     private fun togglePlay() {
@@ -635,6 +709,7 @@ class PlayerActivity : Activity() {
         if (final) {
             ui.removeCallbacks(previewSwitch)
             previewIndex = -1
+            pokeChrome()
             scrubbing = false
             if (stripStale) { stripStale = false; strip.clips = clips }
             if (index in clips.indices && strip.current != index) strip.setCurrent(index, atMs = posMs)
@@ -676,6 +751,7 @@ class PlayerActivity : Activity() {
             topBar.visibility = v
             strip.visibility = v
             bar.visibility = v
+            if (!zoomed) { topBar.alpha = 1f; bar.alpha = 1f; chromeHidden = false }
         }
         zoomReset.visibility = if (zoomed) View.VISIBLE else View.GONE
         if (zoomed) { bigPlay.animate().cancel(); bigPlay.visibility = View.GONE }

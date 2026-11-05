@@ -115,6 +115,9 @@ class RemoteCameraActivity : Activity() {
         r = CamRemote(this, cam)
         r.busy = { draft.length() > 0 || saving }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
+        // landscape: the picture and its buttons on the left, status and controls scrolling on the right
+        val land = com.motioncam.Nav.landscape(this)
+        val right = if (land) LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) } else null
         root.addView(topBar(this, Live.phones[cam]?.name?.ifEmpty { null } ?: "Camera"))
         val frame = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         image = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
@@ -124,7 +127,8 @@ class RemoteCameraActivity : Activity() {
         }
         frame.addView(imageLabel, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START))
         val w = resources.displayMetrics.widthPixels.coerceAtMost(Ui.dp(this, 700))
-        root.addView(frame, LinearLayout.LayoutParams(-1, w * 9 / 16))
+        root.addView(frame, if (land) LinearLayout.LayoutParams(-1, 0, 1f).apply { setMargins(Ui.dp(this@RemoteCameraActivity, 8), 0, 0, 0) }
+            else LinearLayout.LayoutParams(-1, w * 9 / 16))
         liveNote = Ui.label(this, "", 12f, Ui.ACCENT).apply {
             setPadding(Ui.dp(this@RemoteCameraActivity, 12), Ui.dp(this@RemoteCameraActivity, 4), Ui.dp(this@RemoteCameraActivity, 12), 0)
             visibility = android.view.View.GONE
@@ -135,7 +139,7 @@ class RemoteCameraActivity : Activity() {
         image.contentDescription = "Camera picture (tap for full screen with controls)"
         // live view · screenshot (one high-quality picture, shown below) · activity log
         val gap = Ui.dp(this, 6)
-        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; val p = Ui.dp(this@RemoteCameraActivity, 8); setPadding(p, p, p, 0) }
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; val p = Ui.dp(this@RemoteCameraActivity, 8); setPadding(p, p, p, if (land) p else 0) }
         liveBtn = Ui.chip(this, "▶ Live view").apply { setOnClickListener { if (feed.watching) stopWatching() else startWatching() } }
         buttons.addView(liveBtn, LinearLayout.LayoutParams(0, -2, 1f))
         buttons.addView(Ui.chip(this, "Screenshot").apply {
@@ -149,11 +153,22 @@ class RemoteCameraActivity : Activity() {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(box)
         scroll = ScrollView(this).apply { addView(content) }
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        Ui.capWidth(content)
+        (right ?: root).addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        if (!land) Ui.capWidth(content)
         saveBar = saveBar()
-        root.addView(saveBar)
-        setContentView(root)
+        (right ?: root).addView(saveBar)
+        if (right != null) {
+            // the picture as large as the height allows (16:9), the rest for the controls
+            val dm = resources.displayMetrics
+            val leftW = minOf((dm.widthPixels * 0.58f).toInt(), ((dm.heightPixels - Ui.dp(this, 130)) * 16 / 9) + Ui.dp(this, 16))
+            setContentView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setBackgroundColor(Ui.BG)
+                addView(root, LinearLayout.LayoutParams(leftW, -1))
+                addView(android.view.View(this@RemoteCameraActivity).apply { setBackgroundColor(0xFF2A2D33.toInt()) }, LinearLayout.LayoutParams(Ui.dp(this@RemoteCameraActivity, 1), -1))
+                addView(right, LinearLayout.LayoutParams(0, -1, 1f))
+            })
+        } else setContentView(root)
         f = Form(this, box)
         feed = r.Feed(3 * 60_000L, { bmp, at ->
             image.setImageBitmap(bmp)

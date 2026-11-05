@@ -183,13 +183,17 @@ class Chip(ctx: Context, val name: String) {
 class AspectFrame(ctx: Context) : FrameLayout(ctx) {
     var aspect = 16f / 9f
         set(v) { if (field != v) { field = v; requestLayout() } }
+    /** Fill the space (cropping the picture's edges) instead of fitting inside it. */
+    var cover = false
+        set(v) { if (field != v) { field = v; requestLayout() } }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = View.MeasureSpec.getSize(widthMeasureSpec)
         val h = View.MeasureSpec.getSize(heightMeasureSpec)
         var cw = w
         var ch = (w / aspect).toInt()
-        if (ch > h) { ch = h; cw = (h * aspect).toInt() }
+        if (cover) { if (ch < h) { ch = h; cw = (h * aspect).toInt() } }
+        else if (ch > h) { ch = h; cw = (h * aspect).toInt() }
         super.onMeasure(
             View.MeasureSpec.makeMeasureSpec(cw, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(ch, View.MeasureSpec.EXACTLY),

@@ -77,6 +77,8 @@ open class ClipsActivity : Activity() {
     private lateinit var summary: TextView
     private lateinit var banner: TextView
     private lateinit var normalBar: View
+    /** Landscape tab screen: one header row (title or ‹ name, switch, count, tools) and the selection actions at the top. */
+    private val land by lazy { asTab && Nav.landscape(this) }
     private lateinit var pinned: LinearLayout
     private var pinnedDay = Long.MIN_VALUE
     /** Days the user collapsed (session only). */
@@ -188,7 +190,7 @@ open class ClipsActivity : Activity() {
             setOnClickListener { startActivity(Intent(this@ClipsActivity, com.motioncam.remote.RemoteFoldersActivity::class.java)) }
             pressFeedback(this)
         } else null
-        normalBar = if (asTab) tabHeader() else topBar(this, title, remoteBtn)
+        normalBar = if (land) landHeader() else if (asTab) tabHeader() else topBar(this, title, remoteBtn)
         root.addView(normalBar)
         // selection mode, like Google Photos / Files: the top bar shows what is selected (count, size, length),
         // the actions slide up in a bar at the bottom (icon + label, ⋮ More for the rest)
@@ -225,8 +227,7 @@ open class ClipsActivity : Activity() {
             isClickable = true      // taps on the bar never reach the grid underneath
         }
         fun act(kind: IconDrawable.Kind, label: String, danger: Boolean = false, click: () -> Unit) =
-            bottomBar.addView(labeledButton(this, kind, label, if (danger) Ui.RED else 0xFFFFFFFF.toInt(), click).also { pressFeedback(it) },
-                LinearLayout.LayoutParams(0, -2, 1f))
+            bottomBar.addView(labeledButton(this, kind, label, if (danger) Ui.RED else 0xFFFFFFFF.toInt(), click).also { pressFeedback(it) }, actLp())
         if (remote == null) act(IconDrawable.Kind.SHARE, "Share") { shareSelected() }
         else act(IconDrawable.Kind.DOWNLOAD, "Save") { saveToPhone(selectedClips()) }
         // in Favourites itself, Unlist does that
@@ -280,12 +281,21 @@ open class ClipsActivity : Activity() {
             }
             pm.show()
         }.also { pressFeedback(it) }
-        bottomBar.addView(more, LinearLayout.LayoutParams(0, -2, 1f))
+        bottomBar.addView(more, actLp())
+        if (land) {
+            // landscape: the actions sit in the selection bar at the top, not in a bar over the grid
+            (bottomBar.parent as? ViewGroup)?.removeView(bottomBar)
+            bottomBar.apply { setBackgroundColor(0); elevation = 0f; setPadding(0, 0, 0, 0) }
+            selBar.addView(bottomBar, selBar.childCount - 1, LinearLayout.LayoutParams(-2, -2))
+        }
         root.addView(selBar)
         // the count / size / state line lives in the list's title row (scrolls away), not in a line of its own
         summary = Ui.label(this, "", 12f, Ui.GREY)
-        if (asTab) root.addView(summary.apply { setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 2), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 2)) })
-        root.addView(actionRow)
+        if (land) fillLandHeader(normalBar as LinearLayout)
+        else {
+            if (asTab) root.addView(summary.apply { setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 2), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 2)) })
+            root.addView(actionRow)
+        }
         root.addView(buildFilterBar())
         banner = Ui.label(this, "Clips from earlier installs are hidden. Tap to show them.", 13f, Ui.ACCENT).apply {
             setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8))
@@ -307,7 +317,7 @@ open class ClipsActivity : Activity() {
             setPadding(paddingLeft, Ui.dp(this@ClipsActivity, 2), paddingRight, paddingBottom)
         }
         listBox.addView(pinned, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
-        listBox.addView(bottomBar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+        if (!land) listBox.addView(bottomBar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         if (remote != null) {
             // pull down at the top of the list to check for new clips
             swipe = androidx.swiperefreshlayout.widget.SwipeRefreshLayout(this).apply {
@@ -321,6 +331,10 @@ open class ClipsActivity : Activity() {
         } else root.addView(listBox, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         list.adapter = adapter
+        // landscape: the sidebar shrinking or growing changes the room for clips, so the number of columns too
+        if (land) list.addOnLayoutChangeListener { _, l, _, r, _, ol, _, or_, _ ->
+            if (r - l != or_ - ol) list.post { if (landCols() != cols) buildRows() }
+        }
         list.setOnScrollListener(object : AbsListView.OnScrollListener {
             override fun onScrollStateChanged(v: AbsListView?, state: Int) {}
             override fun onScroll(v: AbsListView?, first: Int, visible: Int, total: Int) = updatePinned()
@@ -582,7 +596,7 @@ open class ClipsActivity : Activity() {
 
     private fun buildRows() {
         val wDp = resources.displayMetrics.widthPixels / resources.displayMetrics.density
-        cols = maxOf(2, (wDp / 170).toInt())
+        cols = if (land) landCols() else maxOf(2, (wDp / 170).toInt())
         val out = ArrayList<Row>()
         // in the Clips tab the count is above the tiles; only the badges' legend (collections) is a first row, scrolling away
         if (!asTab || legend().isNotEmpty()) out += Row.Title
@@ -1065,6 +1079,7 @@ open class ClipsActivity : Activity() {
 
     /** Selection bars: the top one fades in, the action bar slides up from the bottom (and back down on exit). */
     private fun animateBars(show: Boolean) {
+        if (land) { bottomBar.visibility = if (show) View.VISIBLE else View.GONE; return }
         val interp = android.view.animation.DecelerateInterpolator()
         if (show) {
             selBar.alpha = 0f
@@ -1127,6 +1142,65 @@ open class ClipsActivity : Activity() {
     }
 
     /** The Clips tab's header: its title, the On this phone / Remote folders switch, and where you are inside the tab. */
+    // ------------------------------------------------------------------ landscape
+
+    /** The selection actions: evenly spread in the bottom bar (portrait), side by side in the top bar (landscape). */
+    private fun actLp() = if (land) LinearLayout.LayoutParams(Ui.dp(this, 64), -2) else LinearLayout.LayoutParams(0, -2, 1f)
+
+    /** As many columns as fit with clips at least 150 dp wide (portrait uses 170), never fewer than 3. */
+    private fun landCols(): Int {
+        val d = resources.displayMetrics.density
+        val w = (list.width.takeIf { it > 0 } ?: (resources.displayMetrics.widthPixels - (Ui.dp(this, if (Nav.railSlim(this)) 60 else 80)))) / d
+        return maxOf(3, ((w - 12 + 8) / (150 + 8)).toInt())
+    }
+
+    /** Landscape: one row with "Clips" and the switch, or "‹ name" inside a folder or collection. */
+    private fun landHeader(): View = LinearLayout(this).apply {
+        tag = "clipsHeader"
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 4), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 4))
+        minimumHeight = Ui.dp(this@ClipsActivity, 52)
+        val name = collectionId?.let { store.get(this@ClipsActivity, it)?.name } ?: remote?.name
+        if (name == null) {
+            addView(Ui.label(this@ClipsActivity, "Clips", 20f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 0, Ui.dp(this@ClipsActivity, 12), 0) })
+            addView(ClipsSwitch.view(this@ClipsActivity, false), LinearLayout.LayoutParams(Ui.dp(this@ClipsActivity, 250), -2))
+        } else addView(LinearLayout(this@ClipsActivity).apply {
+            tag = "slides"
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            contentDescription = "Back from $name"
+            setOnClickListener { finish() }
+            addView(Ui.label(this@ClipsActivity, "‹", 24f).apply { setPadding(0, 0, Ui.dp(this@ClipsActivity, 10), Ui.dp(this@ClipsActivity, 2)) })
+            addView(Ui.label(this@ClipsActivity, name, 17f).apply {
+                setTypeface(typeface, android.graphics.Typeface.BOLD); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+                maxWidth = Ui.dp(this@ClipsActivity, 220)
+            })
+        })
+    }
+
+    /** The rest of the landscape header: the count (one line) and the tools as compact icon + name pills. */
+    private fun fillLandHeader(h: LinearLayout) {
+        h.addView(summary.apply {
+            tag = "slides"; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(Ui.dp(this@ClipsActivity, 12), 0, Ui.dp(this@ClipsActivity, 8), 0)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        (actionRow.parent as? ViewGroup)?.removeView(actionRow)
+        actionRow.setPadding(0, 0, 0, 0)
+        actionRow.tag = "slides"
+        for (i in 0 until actionRow.childCount) {
+            val t = actionRow.getChildAt(i) as? LinearLayout ?: continue
+            t.orientation = LinearLayout.HORIZONTAL
+            t.gravity = Gravity.CENTER_VERTICAL
+            t.setPadding(Ui.dp(this, 10), Ui.dp(this, 7), Ui.dp(this, 12), Ui.dp(this, 7))
+            (t.getChildAt(0)?.layoutParams as? LinearLayout.LayoutParams)?.let { it.width = Ui.dp(this, 20); it.height = Ui.dp(this, 20) }
+            (t.getChildAt(1) as? TextView)?.apply { setPadding(Ui.dp(this@ClipsActivity, 6), 0, 0, 0); textSize = 12f; layoutParams = LinearLayout.LayoutParams(-2, -2) }
+            t.layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(Ui.dp(this@ClipsActivity, 3), 0, Ui.dp(this@ClipsActivity, 3), 0) }
+        }
+        h.addView(actionRow, LinearLayout.LayoutParams(-2, -2))
+    }
+
     private fun tabHeader(): View = LinearLayout(this).apply {
         tag = "clipsHeader"
         orientation = LinearLayout.VERTICAL

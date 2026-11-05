@@ -84,7 +84,17 @@ open class ActivityLogActivity : Activity() {
             addView(calBtn)
             addView(moreBtn, LinearLayout.LayoutParams(d(44), d(44)).apply { leftMargin = d(8) })
         }
-        if (asTab) {
+        val land = asTab && com.motioncam.Nav.landscape(this)
+        chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(d(if (land) 4 else 16), d(4), d(16), d(4)) }
+        val chipScroll = android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(chips) }
+        if (land) {
+            // landscape: title, filters and buttons share one row
+            val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(d(16), d(4), d(12), d(2)) }
+            head.addView(Ui.label(this, "Activity", 20f).apply { setTypeface(typeface, Typeface.BOLD); setPadding(0, 0, d(8), 0) })
+            head.addView(chipScroll, LinearLayout.LayoutParams(0, -2, 1f))
+            head.addView(actions)
+            root.addView(head)
+        } else if (asTab) {
             val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(d(16), d(16), d(16), d(6)) }
             head.addView(Ui.label(this, "Activity", 26f).apply { setTypeface(typeface, Typeface.BOLD) }, LinearLayout.LayoutParams(0, -2, 1f))
             head.addView(actions)
@@ -92,8 +102,7 @@ open class ActivityLogActivity : Activity() {
         } else {
             root.addView(topBar(this, (cam?.let { Live.phones[it]?.name?.ifEmpty { null } ?: "Camera" } ?: "All cameras") + " · activity", actions))
         }
-        chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(d(16), d(4), d(16), d(4)) }
-        root.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(chips) })
+        if (!land) root.addView(chipScroll)
         info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(d(16), 0, d(16), 0) }
         root.addView(info)
         box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(d(16), 0, d(16), d(24)) }
@@ -105,7 +114,7 @@ open class ActivityLogActivity : Activity() {
             }
         }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        Ui.capWidth(box)
+        if (!land) Ui.capWidth(box)   // landscape uses the width for two columns
         setContentView(root)
         buildChips()
         KeepActivity.load(this)
@@ -317,6 +326,9 @@ open class ActivityLogActivity : Activity() {
         var lastDay = -1L
         var block: LinearLayout? = null
         var blockCam: String? = null
+        // landscape: two events side by side in each card (newest first, left to right)
+        val twoCols = com.motioncam.Nav.landscape(this)
+        var pair: LinearLayout? = null
         for (e in list) {
             val day = startOfDay(e.t)
             if (day != lastDay) {
@@ -327,6 +339,7 @@ open class ActivityLogActivity : Activity() {
                 block = null
             }
             if (block == null || blockCam != e.cam) {
+                pair = null
                 blockCam = e.cam
                 val b = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
@@ -337,7 +350,12 @@ open class ActivityLogActivity : Activity() {
                 box.addView(b, LinearLayout.LayoutParams(-1, -2).apply { topMargin = d(8) })
                 block = b
             }
-            block.addView(eventRow(this, prefs, e, showCam = false, openCamera = all, newSince = newSince, seenFor = { c -> seenBefore[c] ?: newSince }))
+            val row = eventRow(this, prefs, e, showCam = false, openCamera = all, newSince = newSince, seenFor = { c -> seenBefore[c] ?: newSince })
+            if (!twoCols) block.addView(row)
+            else {
+                val p = pair?.takeIf { it.childCount < 2 } ?: LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f }.also { block.addView(it); pair = it }
+                p.addView(row, LinearLayout.LayoutParams(0, -2, 1f).apply { if (p.childCount == 1) leftMargin = d(16) })
+            }
         }
         val more = sources.values.any { !it.done }
         box.addView(Ui.label(this, when {

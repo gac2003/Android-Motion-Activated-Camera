@@ -40,6 +40,9 @@ class HomeActivity : Activity(), Nav.Reselect {
     private val ui = Handler(Looper.getMainLooper())
     private var feed: ActivityFeed? = null
     private var recentBox: LinearLayout? = null
+    /** Landscape: cameras on the left, recent activity in a column of its own on the right. */
+    private var side: LinearLayout? = null
+    private val land by lazy { Nav.landscape(this) }
     private val expanded = HashSet<String>()
     private val changed: () -> Unit = { renderSoon() }
     private var camState = ""
@@ -55,11 +58,26 @@ class HomeActivity : Activity(), Nav.Reselect {
         box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@HomeActivity, 16)
-            setPadding(p, p, p, p * 2)
+            setPadding(p, if (land) Ui.dp(this@HomeActivity, 4) else p, if (land) Ui.dp(this@HomeActivity, 8) else p, p * 2)
         }
         scroll = ScrollView(this).apply { setBackgroundColor(Ui.BG); addView(box) }
-        Ui.capWidth(box)
-        setContentView(Nav.wrap(this, scroll, Nav.Tab.HOME))
+        if (land) {
+            val right = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(Ui.dp(this@HomeActivity, 8), Ui.dp(this@HomeActivity, 4), Ui.dp(this@HomeActivity, 16), Ui.dp(this@HomeActivity, 24))
+            }
+            side = right
+            val two = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setBackgroundColor(Ui.BG)
+                addView(scroll, LinearLayout.LayoutParams(0, -1, 3f))
+                addView(ScrollView(this@HomeActivity).apply { addView(right) }, LinearLayout.LayoutParams(0, -1, 2f))
+            }
+            setContentView(Nav.wrap(this, two, Nav.Tab.HOME))
+        } else {
+            Ui.capWidth(box)
+            setContentView(Nav.wrap(this, scroll, Nav.Tab.HOME))
+        }
         // reopen where it was left: Camera mode, or the tab that was in front
         if (savedInstanceState == null && welcomeDone()) {
             if (Nav.lastPlace(this) == "camera") Nav.camera(this)
@@ -214,10 +232,21 @@ class HomeActivity : Activity(), Nav.Reselect {
     private fun render() {
         val y = scroll.scrollY
         box.removeAllViews()
+        side?.removeAllViews()
         recentBox = null
         if (!welcomeDone()) { welcome(); scroll.post { scroll.scrollTo(0, y) }; return }
-        box.addView(Ui.label(this, "MotionCam", 26f).apply { setTypeface(typeface, Typeface.BOLD); setPadding(0, d(8), 0, d(14)) })
-        box.addView(cameraModeRow())
+        if (land) {
+            // landscape: the title and the Camera mode row share one line
+            box.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(Ui.label(this@HomeActivity, "MotionCam", 20f).apply { setTypeface(typeface, Typeface.BOLD); setPadding(0, 0, d(14), 0) })
+                addView(cameraModeRow(), LinearLayout.LayoutParams(0, -2, 1f))
+            })
+        } else {
+            box.addView(Ui.label(this, "MotionCam", 26f).apply { setTypeface(typeface, Typeface.BOLD); setPadding(0, d(8), 0, d(14)) })
+            box.addView(cameraModeRow())
+        }
         if (!LiveConfig.configured) { scroll.post { scroll.scrollTo(0, y) }; return }
         if (!NetJoin.joined(this)) {
             val c = card()
@@ -283,7 +312,7 @@ class HomeActivity : Activity(), Nav.Reselect {
         CardPictures.follow(this, cams.map { it.id }) { renderSoon() }
         val on = cams.count { it.online }
         val off = cams.size - on
-        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM; setPadding(0, d(22), 0, d(8)) }
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM; setPadding(0, d(if (land) 14 else 22), 0, d(8)) }
         head.addView(Ui.label(this, "CAMERA OVERVIEW", 13f, Ui.ACCENT).apply { setTypeface(typeface, Typeface.BOLD); letterSpacing = 0.06f },
             LinearLayout.LayoutParams(0, -2, 1f))
         if (cams.isNotEmpty()) head.addView(Ui.label(this, "$on online" + if (off > 0) " · $off offline" else "", 13f, Ui.GREY))
@@ -310,15 +339,15 @@ class HomeActivity : Activity(), Nav.Reselect {
             }
             box.addView(w, lp(top = 4).apply { bottomMargin = d(8) })
         }
-        var row: LinearLayout? = null
-        cams.forEachIndexed { i, p ->
-            if (i % 2 == 0) {
-                row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                box.addView(row, lp(top = if (i == 0) 0 else 12))
+        // 2 cards per row; 3 in landscape
+        val per = if (land) 3 else 2
+        for ((r, group) in cams.chunked(per).withIndex()) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = per.toFloat() }
+            box.addView(row, lp(top = if (r == 0) 0 else 12))
+            group.forEachIndexed { i, p ->
+                row.addView(cameraCard(p), LinearLayout.LayoutParams(0, -2, 1f).apply { if (i > 0) leftMargin = d(12) })
             }
-            row!!.addView(cameraCard(p), LinearLayout.LayoutParams(0, -2, 1f).apply { if (i % 2 == 0) rightMargin = d(6) else leftMargin = d(6) })
         }
-        if (cams.size % 2 == 1) row?.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply { leftMargin = d(6) })
     }
 
     private fun cameraCard(p: Live.Phone): View {
@@ -374,7 +403,8 @@ class HomeActivity : Activity(), Nav.Reselect {
     }
 
     private fun recent() {
-        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, d(22), 0, d(8)) }
+        val box = side ?: box
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, d(if (land) 14 else 22), 0, d(8)) }
         head.addView(Ui.label(this, "RECENT ACTIVITY", 13f, Ui.ACCENT).apply { setTypeface(typeface, Typeface.BOLD); letterSpacing = 0.06f },
             LinearLayout.LayoutParams(0, -2, 1f))
         head.addView(Ui.label(this, "See all ›", 13f, Ui.ACCENT).apply {

@@ -69,7 +69,7 @@ open class RemoteFoldersActivity : Activity() {
             tag = "clipsHeader"
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@RemoteFoldersActivity, 16)
-            setPadding(p, p, p, Ui.dp(this@RemoteFoldersActivity, 4))
+            setPadding(p, if (com.motioncam.Nav.landscape(this@RemoteFoldersActivity)) Ui.dp(this@RemoteFoldersActivity, 8) else p, p, Ui.dp(this@RemoteFoldersActivity, 4))
             addView(com.motioncam.ClipsSwitch.header(this@RemoteFoldersActivity, remote = true))
         }) else {
             val actions = Ui.chip(this, "＋ Add").apply { setOnClickListener { addSource() } }

@@ -28,6 +28,11 @@ open class SettingsActivity : Activity() {
     private lateinit var box: LinearLayout
     private lateinit var scroll: ScrollView
     private var searchField: EditText? = null
+    /** Landscape: categories (and search) on the left, the chosen category's settings on the right. */
+    private var pane: LinearLayout? = null
+    private var paneScroll: ScrollView? = null
+    private var paneTitle: TextView? = null
+    private var paneSec: String? = null
 
     /** Live connection state the page was built with (it is changed on its own screen). */
     private var builtLiveOn: Boolean? = null
@@ -55,6 +60,7 @@ open class SettingsActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         sec = intent.getStringExtra(EXTRA_SECTION)
+        if (sec == null && Nav.landscape(this)) { twoPane(); return }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
         if (asTab || sec == null) root.addView(Ui.label(this, "Settings", 26f).apply {
             setTypeface(typeface, android.graphics.Typeface.BOLD)
@@ -262,6 +268,50 @@ open class SettingsActivity : Activity() {
         Category("reset", "APP", "Reset", IconDrawable.Kind.REFRESH, 0xFFFF8A85.toInt()) { _ -> "Restore default settings" },
     )
 
+    /** Landscape: list on the left (title, search, categories), the chosen category on the right. */
+    private fun twoPane() {
+        val d = { v: Int -> Ui.dp(this, v) }
+        val root = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(Ui.BG) }
+        val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        left.addView(Ui.label(this, "Settings", 20f).apply {
+            setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(d(16), d(8), d(16), 0)
+        })
+        left.addView(searchBar())
+        scroll = ScrollView(this)
+        box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(d(12), 0, d(12), d(16)) }
+        scroll.addView(box)
+        left.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(left, LinearLayout.LayoutParams(d(320), -1))
+        root.addView(View(this).apply { setBackgroundColor(0xFF2A2D33.toInt()) }, LinearLayout.LayoutParams(d(1), -1))
+        val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        paneTitle = Ui.label(this, "", 18f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(d(20), d(12), d(20), 0) }
+        right.addView(paneTitle)
+        pane = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(d(20), 0, d(20), d(32)) }
+        paneScroll = ScrollView(this).apply { addView(pane) }
+        right.addView(paneScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(right, LinearLayout.LayoutParams(0, -1, 1f))
+        setContentView(root)
+        // the category last shown on the right (remembered)
+        showPane(getSharedPreferences("settings_ui", 0).getString("pane", "recording") ?: "recording", null)
+    }
+
+    /** Shows a category on the right (and marks it in the list); [label] scrolls to that setting and flashes it. */
+    private fun showPane(id: String, label: String?) {
+        val p = pane ?: return
+        paneSec = id
+        getSharedPreferences("settings_ui", 0).edit().putString("pane", id).apply()
+        live.clear()
+        p.removeAllViews()
+        paneTitle?.text = if (id == "camera") "Camera settings" else catTitle(id)
+        val left = box
+        box = p; form.box = p
+        try { buildSection(id) } catch (_: Throwable) {} finally { box = left; form.box = left }
+        // the list: categories again (with this one marked), unless a search is showing
+        if (searchField?.text.isNullOrEmpty()) { box.removeAllViews(); categories() }
+        paneScroll?.scrollTo(0, 0)
+        if (label != null) highlight(label, p, paneScroll!!)
+    }
+
     /** The Settings tab: categories in groups, each with its icon and a summary of what's set. */
     private fun categories() {
         com.motioncam.live.KeepActivity.load(this) { runOnUiThread { live.forEach { try { it() } catch (_: Exception) {} } } }
@@ -293,6 +343,7 @@ open class SettingsActivity : Activity() {
         background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30FFFFFF), null,
             android.graphics.drawable.ColorDrawable(0xFFFFFFFF.toInt()))
         setOnClickListener { openCategory(c.id) }
+        if (pane != null && c.id == paneSec) setBackgroundColor(0xFF2E3238.toInt())
         addView(android.widget.FrameLayout(this@SettingsActivity).apply {
             background = android.graphics.drawable.GradientDrawable().apply { setColor(c.color); cornerRadius = d(9).toFloat() }
             addView(android.widget.ImageView(this@SettingsActivity).apply { setImageDrawable(IconDrawable(c.kind, 0xFF15171B.toInt())) },
@@ -309,6 +360,7 @@ open class SettingsActivity : Activity() {
     }
 
     private fun openCategory(id: String) {
+        if (pane != null && id != "phones" && id != "alerts") { showPane(id, null); return }
         when (id) {
             "phones" -> startActivity(Intent(this, com.motioncam.live.LiveActivity::class.java))
             "alerts" -> startActivity(Intent(this, com.motioncam.live.AlertSettingsActivity::class.java))
@@ -622,14 +674,15 @@ open class SettingsActivity : Activity() {
             "phones" -> startActivity(Intent(this, com.motioncam.live.LiveActivity::class.java))
             "alerts" -> startActivity(Intent(this, com.motioncam.live.AlertSettingsActivity::class.java))
             "clips" -> startActivity(Intent(this, com.motioncam.remote.RemoteFoldersActivity::class.java))
-            else -> startActivity(Intent(this, SettingsActivity::class.java).putExtra(EXTRA_SECTION, h.cat).apply {
+            else -> if (pane != null) showPane(h.cat, if (h.isCategory) null else h.label)
+            else startActivity(Intent(this, SettingsActivity::class.java).putExtra(EXTRA_SECTION, h.cat).apply {
                 if (!h.isCategory) putExtra(EXTRA_HIGHLIGHT, h.label)
             })
         }
     }
 
     /** Opened from search: scroll to the setting and flash it, like a phone's settings do. */
-    private fun highlight(label: String?) {
+    private fun highlight(label: String?, box: LinearLayout = this.box, scroll: ScrollView = this.scroll) {
         if (label.isNullOrEmpty()) return
         box.post {
             val target = findLabel(box, label) ?: return@post

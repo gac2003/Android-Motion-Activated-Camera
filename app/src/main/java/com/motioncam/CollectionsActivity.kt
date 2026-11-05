@@ -47,7 +47,7 @@ open class CollectionsActivity : Activity() {
             tag = "clipsHeader"
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@CollectionsActivity, 16)
-            setPadding(p, p, p, Ui.dp(this@CollectionsActivity, 4))
+            setPadding(p, if (Nav.landscape(this@CollectionsActivity)) Ui.dp(this@CollectionsActivity, 8) else p, p, Ui.dp(this@CollectionsActivity, 4))
             addView(com.motioncam.ClipsSwitch.header(this@CollectionsActivity, remote = remote != null))
             val back = backRow(this@CollectionsActivity, "Collections", remote?.name) { finish() } as LinearLayout
             back.tag = "slides"
@@ -60,7 +60,7 @@ open class CollectionsActivity : Activity() {
             setPadding(p, 0, p, p)
         }
         root.addView(ScrollView(this).apply { addView(box) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        Ui.capWidth(box)
+        if (!Nav.landscape(this)) Ui.capWidth(box)
         setContentView(root)
     }
 
@@ -118,7 +118,15 @@ open class CollectionsActivity : Activity() {
         box.removeAllViews()
         syncRow()?.let { box.addView(it) }
         protectedRow()?.let { box.addView(it) }
-        for ((c, clips) in cols) box.addView(row(c, clips))
+        if (!Nav.landscape(this)) for ((c, clips) in cols) box.addView(row(c, clips))
+        else for (pair in cols.chunked(2)) box.addView(LinearLayout(this).apply {
+            // landscape: two collections per row
+            orientation = LinearLayout.HORIZONTAL
+            weightSum = 2f
+            pair.forEachIndexed { i, (c, clips) ->
+                addView(row(c, clips), LinearLayout.LayoutParams(0, -2, 1f).apply { if (i == 1) leftMargin = Ui.dp(this@CollectionsActivity, 12) })
+            }
+        })
         box.addView(Ui.label(this, (if (remote != null) "These collections are shared: every phone signed in to this account sees and can change " +
             "them (they are stored in the folder). Clips in them are protected from the camera phone's clean-up. " else "") +
             "Collections only link to clips: a clip can be in several collections, and removing it " +

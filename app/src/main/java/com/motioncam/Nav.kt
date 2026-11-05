@@ -89,7 +89,7 @@ object Nav {
      */
     fun slideContent(a: Activity, from: Float) {
         val wrap = a.findViewById<android.view.ViewGroup>(android.R.id.content)?.getChildAt(0) as? android.view.ViewGroup ?: return
-        val content = wrap.getChildAt(0) as? android.view.ViewGroup ?: return
+        val content = content(wrap) ?: return
         val views = ArrayList<View>()
         for (i in 0 until content.childCount) {
             val v = content.getChildAt(i)
@@ -145,13 +145,121 @@ object Nav {
         a.startActivity(Intent(a, MainActivity::class.java))
     }
 
-    /** A tab screen's content with the tab bar under it. */
+    /** Landscape (phones on their side, tablets): the tab bar becomes a rail on the left and headers get compact. */
+    fun landscape(ctx: Context) = ctx.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
+    /** The rail shrunk to icons only (remembered, for every tab). */
+    fun railSlim(ctx: Context) = sp(ctx).getBoolean("railSlim", false)
+    private val rails = java.util.concurrent.CopyOnWriteArraySet<() -> Unit>()
+    private fun setRailSlim(ctx: Context, slim: Boolean) { sp(ctx).edit().putBoolean("railSlim", slim).apply(); rails.forEach { it() } }
+
+    /** A tab screen's content with the tab bar under it (portrait) or the rail beside it (landscape). */
     fun wrap(a: Activity, content: View, tab: Tab): View = LinearLayout(a).apply {
-        orientation = LinearLayout.VERTICAL
+        val side = landscape(a)
+        orientation = if (side) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
         setBackgroundColor(Ui.BG)
         (content.parent as? android.view.ViewGroup)?.removeView(content)
-        addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
-        addView(bar(a, tab).apply { tag = "tabbar" }, LinearLayout.LayoutParams(-1, -2))
+        if (side) {
+            addView(rail(a, tab).apply { tag = "tabbar" }, LinearLayout.LayoutParams(-2, -1))
+            addView(content, LinearLayout.LayoutParams(0, -1, 1f))
+        } else {
+            addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(bar(a, tab).apply { tag = "tabbar" }, LinearLayout.LayoutParams(-1, -2))
+        }
+    }
+
+    /** The tab screen's content inside [wrap] (not the tab bar / rail). */
+    fun content(wrap: android.view.ViewGroup): android.view.ViewGroup? =
+        (0 until wrap.childCount).map { wrap.getChildAt(it) }.firstOrNull { it.tag != "tabbar" } as? android.view.ViewGroup
+
+    /** Selecting clips: the bottom tab bar makes room for the selection bar (the rail stays in landscape). */
+    fun selecting(a: Activity, on: Boolean) {
+        if (landscape(a)) return
+        a.window.decorView.findViewWithTag<View>("tabbar")?.visibility = if (on) View.GONE else View.VISIBLE
+    }
+
+    private class Item(val view: LinearLayout, val icon: FrameLayout, val label: TextView)
+
+    private fun tabInfo(t: Tab) = when (t) {
+        Tab.HOME -> IconDrawable.Kind.HOME to "Home"
+        Tab.ACTIVITY -> IconDrawable.Kind.PULSE to "Activity"
+        Tab.CAMERA -> IconDrawable.Kind.VIDEOCAM to "Camera"
+        Tab.CLIPS -> IconDrawable.Kind.CLIPS to "Clips"
+        Tab.SETTINGS -> IconDrawable.Kind.SETTINGS to "Settings"
+    }
+
+    /** One tab's button (icon over label); the Activity badge and the camera dot are added by [decorate]. */
+    private fun item(a: Activity, t: Tab, current: Tab, onRail: Boolean): Item {
+        val ctx: Context = a
+        val on = t == current
+        val color = if (on) Ui.ACCENT else 0xFFC4C8CE.toInt()
+        val (kind, label) = tabInfo(t)
+        val v = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(0, Ui.dp(ctx, if (onRail) 2 else 6), 0, Ui.dp(ctx, if (onRail) 2 else 4))
+            isClickable = true
+            contentDescription = label + if (on) " (current tab)" else ""
+            val tv = android.util.TypedValue()
+            ctx.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true)
+            if (tv.resourceId != 0) setBackgroundResource(tv.resourceId)
+            setOnClickListener { if (!on) go(a, t) else onReselect(a) }
+        }
+        val iconBox = FrameLayout(ctx)
+        // on the rail the current tab's icon sits on a pill (as on a navigation rail)
+        if (onRail && on) iconBox.background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF3A3320.toInt()); cornerRadius = Ui.dp(ctx, 16).toFloat() }
+        iconBox.addView(ImageView(ctx).apply { setImageDrawable(IconDrawable(kind, color)) },
+            FrameLayout.LayoutParams(Ui.dp(ctx, 24), Ui.dp(ctx, 24), Gravity.CENTER))
+        v.addView(iconBox, LinearLayout.LayoutParams(Ui.dp(ctx, if (onRail) 52 else 44), Ui.dp(ctx, if (onRail) 32 else 26)))
+        val tl = Ui.label(ctx, label, if (onRail) 11f else 12f, color).apply {
+            gravity = Gravity.CENTER
+            if (on) setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, Ui.dp(ctx, 2), 0, 0)
+        }
+        v.addView(tl)
+        return Item(v, iconBox, tl)
+    }
+
+    /** The Activity tab's count of new events and Camera's dot (green while monitoring, red while watched), kept live. */
+    private fun decorate(a: Activity, current: Tab, items: Map<Tab, Item>, host: View) {
+        val ctx: Context = a
+        items[Tab.CAMERA]?.let { cam ->
+            val dot = View(ctx).apply { visibility = View.GONE }
+            cam.icon.addView(dot, FrameLayout.LayoutParams(Ui.dp(ctx, 9), Ui.dp(ctx, 9), Gravity.TOP or Gravity.END).apply { rightMargin = Ui.dp(ctx, 6) })
+            val update = {
+                val watched = com.motioncam.live.CameraLink.streaming
+                val on = CameraService.monitoring
+                dot.visibility = if (watched || on) View.VISIBLE else View.GONE
+                dot.background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(if (watched) Ui.RED else 0xFF4CAF50.toInt())
+                    setStroke(Ui.dp(ctx, 1), 0xFF1A1C20.toInt())
+                }
+                cam.view.contentDescription = "Camera" + when { watched -> " (monitoring, being watched)"; on -> " (monitoring)"; else -> "" }
+            }
+            val l: () -> Unit = { update() }
+            val sl: (Status) -> Unit = { host.post { update() } }
+            host.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) { com.motioncam.live.Live.listeners += l; StatusBus.add(sl); update() }
+                override fun onViewDetachedFromWindow(v: View) { com.motioncam.live.Live.listeners -= l; StatusBus.remove(sl) }
+            })
+            update()
+        }
+        items[Tab.ACTIVITY]?.let { act ->
+            val b = Ui.label(ctx, "", 11f).apply { setTypeface(typeface, Typeface.BOLD); setShadowLayer(3f, 0f, 0f, 0xFF000000.toInt()) }
+            act.icon.addView(b, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END))
+            val update = {
+                val n = com.motioncam.live.AlertInbox.newCount(ctx)
+                b.text = if (n <= 0 || current == Tab.ACTIVITY) "" else if (n > 9) "9+" else n.toString()
+                b.contentDescription = if (n > 0) "$n new" else null
+            }
+            val l: () -> Unit = { update() }
+            host.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) { com.motioncam.live.AlertInbox.listeners += l; update() }
+                override fun onViewDetachedFromWindow(v: View) { com.motioncam.live.AlertInbox.listeners -= l }
+            })
+            update()
+        }
     }
 
     /** The tab bar; the Activity tab shows how many camera events haven't been looked at yet. */
@@ -162,92 +270,58 @@ object Nav {
             setBackgroundColor(0xFF1A1C20.toInt())
             setPadding(Ui.dp(ctx, 4), Ui.dp(ctx, 4), Ui.dp(ctx, 4), Ui.dp(ctx, 8))
         }
-        var badge: TextView? = null
-        var camDot: View? = null
-        for (t in Tab.values()) {
-            val on = t == current
-            val color = if (on) Ui.ACCENT else 0xFFC4C8CE.toInt()
-            val (kind, label) = when (t) {
-                Tab.HOME -> IconDrawable.Kind.HOME to "Home"
-                Tab.ACTIVITY -> IconDrawable.Kind.PULSE to "Activity"
-                Tab.CAMERA -> IconDrawable.Kind.VIDEOCAM to "Camera"
-                Tab.CLIPS -> IconDrawable.Kind.CLIPS to "Clips"
-                Tab.SETTINGS -> IconDrawable.Kind.SETTINGS to "Settings"
-            }
-            val item = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(0, Ui.dp(ctx, 6), 0, Ui.dp(ctx, 4))
-                isClickable = true
-                contentDescription = label + if (on) " (current tab)" else ""
-                val tv = android.util.TypedValue()
-                ctx.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true)
-                if (tv.resourceId != 0) setBackgroundResource(tv.resourceId)
-                setOnClickListener { if (!on) go(a, t) else onReselect(a) }
-            }
-            val iconBox = FrameLayout(ctx)
-            iconBox.addView(ImageView(ctx).apply { setImageDrawable(IconDrawable(kind, color)) },
-                FrameLayout.LayoutParams(Ui.dp(ctx, 24), Ui.dp(ctx, 24), Gravity.CENTER))
-            if (t == Tab.CAMERA) {
-                camDot = View(ctx).apply { visibility = View.GONE }
-                iconBox.addView(camDot, FrameLayout.LayoutParams(Ui.dp(ctx, 9), Ui.dp(ctx, 9), Gravity.TOP or Gravity.END).apply {
-                    rightMargin = Ui.dp(ctx, 6) })
-            }
-            if (t == Tab.ACTIVITY) {
-                badge = Ui.label(ctx, "", 11f).apply {
-                    setTypeface(typeface, Typeface.BOLD)
-                    setShadowLayer(3f, 0f, 0f, 0xFF000000.toInt())
-                }
-                iconBox.addView(badge, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END))
-            }
-            item.addView(iconBox, LinearLayout.LayoutParams(Ui.dp(ctx, 44), Ui.dp(ctx, 26)))
-            item.addView(Ui.label(ctx, label, 12f, color).apply {
-                gravity = Gravity.CENTER
-                if (on) setTypeface(typeface, Typeface.BOLD)
-                setPadding(0, Ui.dp(ctx, 2), 0, 0)
-            })
-            bar.addView(item, LinearLayout.LayoutParams(0, -2, 1f))
-        }
-        val line = View(ctx).apply { setBackgroundColor(0xFF2A2D33.toInt()) }
+        val items = LinkedHashMap<Tab, Item>()
+        for (t in Tab.values()) items[t] = item(a, t, current, false).also { bar.addView(it.view, LinearLayout.LayoutParams(0, -2, 1f)) }
         val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        box.addView(line, LinearLayout.LayoutParams(-1, Ui.dp(ctx, 1)))
+        box.addView(View(ctx).apply { setBackgroundColor(0xFF2A2D33.toInt()) }, LinearLayout.LayoutParams(-1, Ui.dp(ctx, 1)))
         box.addView(bar)
-        val dot = camDot
-        if (dot != null) {
-            // this phone as a camera: green while monitoring, red while another phone watches it
-            val update = {
-                val watched = com.motioncam.live.CameraLink.streaming
-                val on = CameraService.monitoring
-                dot.visibility = if (watched || on) View.VISIBLE else View.GONE
-                dot.background = android.graphics.drawable.GradientDrawable().apply {
-                    shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setColor(if (watched) Ui.RED else 0xFF4CAF50.toInt())
-                    setStroke(Ui.dp(ctx, 1), 0xFF1A1C20.toInt())
-                }
-                (dot.parent?.parent as? View)?.contentDescription = "Camera" + when { watched -> " (monitoring, being watched)"; on -> " (monitoring)"; else -> "" }
-            }
-            val l: () -> Unit = { update() }
-            val sl: (Status) -> Unit = { box.post { update() } }
-            box.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-                override fun onViewAttachedToWindow(v: View) { com.motioncam.live.Live.listeners += l; StatusBus.add(sl); update() }
-                override fun onViewDetachedFromWindow(v: View) { com.motioncam.live.Live.listeners -= l; StatusBus.remove(sl) }
-            })
-            update()
+        decorate(a, current, items, box)
+        return box
+    }
+
+    /**
+     * Landscape: the tabs as a rail on the left, spread over the height. ‹ at the top shrinks it to icons only (› brings
+     * the labels back); remembered for every tab.
+     */
+    fun rail(a: Activity, current: Tab): View {
+        val ctx: Context = a
+        val col = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setBackgroundColor(0xFF1A1C20.toInt())
+            setPadding(0, Ui.dp(ctx, 4), 0, Ui.dp(ctx, 8))
         }
-        val b = badge
-        if (b != null) {
-            val update = {
-                val n = com.motioncam.live.AlertInbox.newCount(ctx)
-                b.text = if (n <= 0 || current == Tab.ACTIVITY) "" else if (n > 9) "9+" else n.toString()
-                b.contentDescription = if (n > 0) "$n new" else null
-            }
-            val l: () -> Unit = { update() }
-            box.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-                override fun onViewAttachedToWindow(v: View) { com.motioncam.live.AlertInbox.listeners += l; update() }
-                override fun onViewDetachedFromWindow(v: View) { com.motioncam.live.AlertInbox.listeners -= l }
-            })
-            update()
+        val toggle = Ui.label(ctx, "", 22f, 0xFF9AA0A6.toInt()).apply {
+            gravity = Gravity.CENTER
+            isClickable = true
+            val tv = android.util.TypedValue()
+            ctx.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true)
+            if (tv.resourceId != 0) setBackgroundResource(tv.resourceId)
+            setOnClickListener { setRailSlim(ctx, !railSlim(ctx)) }
         }
+        col.addView(toggle, LinearLayout.LayoutParams(Ui.dp(ctx, 44), Ui.dp(ctx, 40)))
+        val items = LinkedHashMap<Tab, Item>()
+        for (t in Tab.values()) items[t] = item(a, t, current, true).also {
+            // spread evenly over the height
+            col.addView(it.view, LinearLayout.LayoutParams(-1, 0, 1f))
+        }
+        val box = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        box.addView(col, LinearLayout.LayoutParams(-2, -1))
+        box.addView(View(ctx).apply { setBackgroundColor(0xFF2A2D33.toInt()) }, LinearLayout.LayoutParams(Ui.dp(ctx, 1), -1))
+        val apply = {
+            val slim = railSlim(ctx)
+            col.layoutParams = col.layoutParams.apply { width = Ui.dp(ctx, if (slim) 60 else 80) }
+            toggle.text = if (slim) "›" else "‹"
+            toggle.contentDescription = if (slim) "Show tab names" else "Hide tab names"
+            for (it in items.values) it.label.visibility = if (slim) View.GONE else View.VISIBLE
+            col.requestLayout()
+        }
+        box.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) { rails += apply; apply() }
+            override fun onViewDetachedFromWindow(v: View) { rails -= apply }
+        })
+        apply()
+        decorate(a, current, items, box)
         return box
     }
 
@@ -273,8 +347,9 @@ object ClipsSwitch {
     fun header(a: Activity, remote: Boolean): View = LinearLayout(a).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        addView(Ui.label(a, "Clips", 26f).apply { setTypeface(typeface, Typeface.BOLD); setPadding(0, 0, Ui.dp(a, 12), 0) })
-        addView(view(a, remote), LinearLayout.LayoutParams(0, -2, 1f))
+        val land = Nav.landscape(a)
+        addView(Ui.label(a, "Clips", if (land) 20f else 26f).apply { setTypeface(typeface, Typeface.BOLD); setPadding(0, 0, Ui.dp(a, 12), 0) })
+        addView(view(a, remote), if (land) LinearLayout.LayoutParams(Ui.dp(a, 250), -2) else LinearLayout.LayoutParams(0, -2, 1f))
     }
 
     fun view(a: Activity, remote: Boolean): View {

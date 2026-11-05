@@ -65,11 +65,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="build-${GITHUB_RUN_NUMBER}"
-          NOTES="Automatic build ${GITHUB_RUN_NUMBER} of commit ${GITHUB_SHA::7}: $(git log -1 --pretty=%s)
+          # the same version as the app: <major.minor> from version.properties, patch = builds since it started
+          MM=$(grep '^major_minor=' version.properties | cut -d= -f2 | tr -d '[:space:]')
+          BASE=$(grep '^base_run=' version.properties | cut -d= -f2 | tr -d '[:space:]')
+          PATCH=$(( GITHUB_RUN_NUMBER - BASE )); if [ "$PATCH" -lt 0 ]; then PATCH=0; fi
+          VERSION="$MM.$PATCH"
+          TAG="v$VERSION"
+          NOTES="MotionCam $VERSION (build ${GITHUB_RUN_NUMBER}, commit ${GITHUB_SHA::7}): $(git log -1 --pretty=%s)
 
           **Install:** download MotionCam.apk below on your Android phone (Android 11+), open it and allow installing from your browser/file manager. Updates install over the previous version and keep your settings."
-          gh release create "$TAG" MotionCam.apk --title "MotionCam 1.0.${GITHUB_RUN_NUMBER}" --notes "$NOTES" --target "$GITHUB_SHA" --latest
-          # keep only the 5 newest automatic builds
-          gh release list --limit 100 --json tagName -q '.[].tagName' | grep '^build-' | sort -t- -k2 -n -r | tail -n +6 \
+          gh release create "$TAG" MotionCam.apk --title "MotionCam $VERSION" --notes "$NOTES" --target "$GITHUB_SHA" --latest
+          # keep only the 5 newest automatic builds (v1.1.x, and the older build-N ones)
+          gh release list --limit 100 --json tagName,createdAt -q 'sort_by(.createdAt) | reverse | .[].tagName' \
+            | grep -E '^(v[0-9]+\.[0-9]+\.[0-9]+|build-[0-9]+)$' | tail -n +6 \
             | xargs -r -I{} gh release delete {} --yes --cleanup-tag

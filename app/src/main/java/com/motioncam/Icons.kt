@@ -13,7 +13,7 @@ import android.widget.ImageView
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
     enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, SCREEN, VIDEOCAM, NETWORK, LIVE, CLOSE, SHARE, TRASH, ADD_TO, REMOVE, SELECT_ALL, FULLSCREEN, CLOUD_UP,
-        HOME, PULSE, EYE, LOCK, STAR, STAR_ON, PLAY_LINE, CLOCK, COLLECTIONS, CHECK, SEARCH, TAG, MOVE }
+        HOME, PULSE, EYE, LOCK, STAR, STAR_ON, PLAY_LINE, CLOCK, COLLECTIONS, CHECK, SEARCH, TAG, MOVE, FIT_IN }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -284,6 +284,15 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 stroke.strokeWidth = 2f
                 c.drawRoundRect(RectF(3f, 8f, 17f, 20f), 2f, 2f, stroke)
                 path.moveTo(7f, 4.5f); path.lineTo(19f, 4.5f); path.cubicTo(20.1f, 4.5f, 21f, 5.4f, 21f, 6.5f); path.lineTo(21f, 16f)
+                c.drawPath(path, stroke)
+            }
+            Kind.FIT_IN -> {
+                // four corner brackets pointing inwards = "fit inside"
+                stroke.strokeWidth = 2.2f
+                path.moveTo(9f, 4f); path.lineTo(9f, 9f); path.lineTo(4f, 9f)
+                path.moveTo(20f, 9f); path.lineTo(15f, 9f); path.lineTo(15f, 4f)
+                path.moveTo(15f, 20f); path.lineTo(15f, 15f); path.lineTo(20f, 15f)
+                path.moveTo(4f, 15f); path.lineTo(9f, 15f); path.lineTo(9f, 20f)
                 c.drawPath(path, stroke)
             }
             Kind.SEARCH -> {

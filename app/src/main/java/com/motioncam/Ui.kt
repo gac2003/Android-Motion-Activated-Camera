@@ -148,6 +148,22 @@ class Chip(ctx: Context, val name: String) {
 
     private var lastSelected: Boolean? = null
     private var lastColor = 0
+    private var marked = false
+
+    /** A small yellow dot in the corner: this value was changed here but not sent yet. */
+    fun mark(on: Boolean) {
+        if (marked == on) return
+        marked = on
+        view.foreground = if (!on) null else android.graphics.drawable.LayerDrawable(arrayOf(GradientDrawable().apply {
+            shape = GradientDrawable.OVAL; setColor(Ui.ACCENT)
+        })).apply {
+            val d = Ui.dp(view.context, 6)
+            setLayerGravity(0, Gravity.TOP or Gravity.END)
+            setLayerSize(0, d, d)
+            setLayerInset(0, 0, Ui.dp(view.context, 4), Ui.dp(view.context, 5), 0)
+        }
+        view.contentDescription = name + if (on) " (changed, not sent yet)" else ""
+    }
 
     fun set(v: String, auto: Boolean, selected: Boolean, enabled: Boolean = true) {
         if (value.text != v) value.text = v

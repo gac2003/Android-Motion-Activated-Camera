@@ -119,7 +119,7 @@ class RemoteCameraActivity : Activity() {
         val frame = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         image = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
         frame.addView(image, FrameLayout.LayoutParams(-1, -1))
-        imageLabel = Ui.label(this, "Tap Live view or Screenshot to see the camera", 12f).apply {
+        imageLabel = Ui.label(this, "Paused · tap Live view or Screenshot to see the camera", 12f).apply {
             setBackgroundColor(0x99000000.toInt()); setPadding(Ui.dp(this@RemoteCameraActivity, 8), Ui.dp(this@RemoteCameraActivity, 3), Ui.dp(this@RemoteCameraActivity, 8), Ui.dp(this@RemoteCameraActivity, 3))
         }
         frame.addView(imageLabel, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START))
@@ -157,7 +157,7 @@ class RemoteCameraActivity : Activity() {
         f = Form(this, box)
         feed = r.Feed(3 * 60_000L, { bmp, at ->
             image.setImageBitmap(bmp)
-            imageLabel.text = "Live (every 2 s) · " + Fmt.t(prefs, at)
+            imageLabel.text = "● LIVE · frame sent " + Fmt.t(prefs, at)
             liveNote.visibility = android.view.View.GONE
         }) { msg ->
             imageLabel.text = msg
@@ -166,7 +166,7 @@ class RemoteCameraActivity : Activity() {
         // the last picture seen of this camera stays on screen (with its time) until a new one arrives
         CamRemote.lastFrames[cam]?.let { (bmp, at) ->
             image.setImageBitmap(bmp)
-            imageLabel.text = "Last picture · " + Fmt.t(prefs, at) + " — tap Live view for a new one"
+            imageLabel.text = "Paused · frame sent " + Fmt.t(prefs, at) + " — tap Live view for a new one"
         }
     }
 

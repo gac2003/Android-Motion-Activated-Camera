@@ -296,7 +296,7 @@ class RemoteLiveActivity : Activity() {
             !r.online() -> "offline"
             !feed.watching -> "paused"
             lastFrameAt <= 0 -> "connecting…"
-            else -> "● LIVE · " + Fmt.t(prefs, lastFrameAt)
+            else -> "● LIVE · frame sent " + Fmt.t(prefs, lastFrameAt)
         }
         liveTv.text = text
         liveTv.setTextColor(if (feed.watching && lastFrameAt > 0 && System.currentTimeMillis() - lastFrameAt < 8000) Ui.RED else Ui.GREY)
@@ -347,7 +347,6 @@ class RemoteLiveActivity : Activity() {
         parts += s.optString("lens").substringBefore(" [").removePrefix("Rear ").replace(" · multi-cam", "").replaceFirstChar { it.uppercase() }
         parts += s.optString("format")
         parts += "%.0f°C".format(s.optDouble("tempC"))
-        if (s.optInt("battery", -1) >= 0) parts += com.motioncam.BatteryDrawable.text(infoTv, s.optInt("battery"), s.optBoolean("charging"))
         s.optLong("lastMotion").takeIf { it > 0 }?.let { parts += "motion " + Fmt.t(prefs, it, seconds = false) }
         infoTv.text = android.text.SpannableStringBuilder().apply {
             parts.filter { it.isNotBlank() }.forEachIndexed { i, x -> if (i > 0) append(" · "); append(x) }
@@ -404,7 +403,13 @@ class RemoteLiveActivity : Activity() {
         if (st.optBoolean("wbAuto", true)) set("WB", lv.optInt("kelvin").takeIf { it > 0 }?.let { "${it}K" } ?: "AUTO", true)
         else set("WB", "${ProCaps.wbPresets[ProCaps.nearestPreset(st.optInt("wbKelvin", 5200))].second}K", false)
         set("ZOOM", "%.1fx".format(st.optDouble("zoom", 1.0)), false)
+        // values changed here but not sent yet: a dot on their control (Save sends them)
+        for ((n, keys) in CHIP_KEYS) chips[n]?.mark(keys.any { draft.has(it) })
     }
+
+    private val CHIP_KEYS = mapOf("LENS" to listOf("camera"), "FORMAT" to listOf("resHeight", "fps"),
+        "EV" to listOf("evIndex", "exposureAuto"), "ISO" to listOf("iso", "exposureAuto"), "SPEED" to listOf("shutterNs", "exposureAuto"),
+        "FOCUS" to listOf("focusPos", "focusAuto"), "WB" to listOf("wbKelvin", "wbAuto"), "ZOOM" to listOf("zoom"))
 
     private fun lensLabel(st: JSONObject, c: JSONObject): String {
         val lenses = c.optJSONArray("lenses")

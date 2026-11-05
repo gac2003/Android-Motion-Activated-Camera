@@ -404,7 +404,8 @@ class HomeActivity : Activity(), Nav.Reselect {
             return
         }
         val since = AlertInbox.seenAt(this, null)
-        for (e in list) c.addView(ActivityLogActivity.eventRow(this, prefs, e, showCam = true, seconds = false, newSince = since))
+        for (e in list) c.addView(ActivityLogActivity.eventRow(this, prefs, e, showCam = true, seconds = false, newSince = since,
+            seenFor = { cam -> AlertInbox.seenAt(this, cam) }))
     }
 
     /** Compact "time ago": 45s, 12m, 3h, 2d. */

@@ -125,10 +125,14 @@ open class ActivityLogActivity : Activity() {
 
     /** Entries after this are marked new (when activity was last looked at, before this visit). */
     private var newSince = Long.MAX_VALUE
+    /** Per camera, when its activity was last looked at (before this visit): its entries after that are marked new. */
+    private val seenBefore = HashMap<String, Long>()
 
     override fun onResume() {
         super.onResume()
         newSince = AlertInbox.seenAt(this, cam)
+        seenBefore.clear()
+        for (c in (Live.phones.keys + Live.cams.keys + listOfNotNull(cam))) seenBefore[c] = AlertInbox.seenAt(this, c)
         AlertInbox.markSeen(this, cam)
         if (cam == null) { Live.viewerActive = true; Live.refresh(this) }
         // activity deleted meanwhile: start again from the top
@@ -333,7 +337,7 @@ open class ActivityLogActivity : Activity() {
                 box.addView(b, LinearLayout.LayoutParams(-1, -2).apply { topMargin = d(8) })
                 block = b
             }
-            block.addView(eventRow(this, prefs, e, showCam = false, openCamera = all, newSince = newSince))
+            block.addView(eventRow(this, prefs, e, showCam = false, openCamera = all, newSince = newSince, seenFor = { c -> seenBefore[c] ?: newSince }))
         }
         val more = sources.values.any { !it.done }
         box.addView(Ui.label(this, when {
@@ -435,7 +439,7 @@ open class ActivityLogActivity : Activity() {
          * a clip opens the camera (when [openCamera]). [showCam]: the camera's name in the row.
          */
         fun eventRow(a: Activity, prefs: Prefs, e: ActivityEvent, showCam: Boolean, openCamera: Boolean = true, seconds: Boolean = true,
-                     newSince: Long = Long.MAX_VALUE): View {
+                     newSince: Long = Long.MAX_VALUE, seenFor: ((String) -> Long)? = null): View {
             val ctx: Context = a
             val r = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -447,7 +451,9 @@ open class ActivityLogActivity : Activity() {
             }
             val bad = e.type in setOf("hot", "safety_stop", "pin_locked")
             // new since activity was last looked at: a yellow dot before the time
-            val isNew = e.t > newSince
+            // new = after its camera's activity was last looked at (the same rule as the number on the Activity tab,
+            // which doesn't count a clip saved without a motion before it)
+            val isNew = e.type != "clip" && e.t > (seenFor?.invoke(e.cam) ?: newSince)
             r.addView(Ui.label(ctx, (if (isNew) "● " else "") + Fmt.t(prefs, e.t, seconds = seconds), 13f,
                 if (bad) 0xFFFF8A85.toInt() else if (isNew) Ui.ACCENT else Ui.GREY).apply {
                 minWidth = Ui.dp(ctx, if (seconds) 100 else 76)

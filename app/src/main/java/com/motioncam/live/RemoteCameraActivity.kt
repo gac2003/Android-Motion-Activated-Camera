@@ -87,19 +87,23 @@ class RemoteCameraActivity : Activity() {
             visibility = android.view.View.GONE
         }
         root.addView(liveNote)
+        // row 1: watching (live view, full screen) and the Activity log; row 2: the high-quality frame on its own
+        val gap = Ui.dp(this, 6)
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; val p = Ui.dp(this@RemoteCameraActivity, 8); setPadding(p, p, p, 0) }
         liveBtn = Ui.chip(this, "▶ Live view").apply { setOnClickListener { if (feed.watching) stopWatching() else startWatching() } }
-        buttons.addView(liveBtn)
+        buttons.addView(liveBtn, LinearLayout.LayoutParams(0, -2, 1f))
         buttons.addView(Ui.chip(this, "⛶ Full screen").apply {
             contentDescription = "Full-screen live view with camera controls"
             setOnClickListener { startActivity(Intent(this@RemoteCameraActivity, RemoteLiveActivity::class.java).putExtra(Alerts.EXTRA_CAM, cam)) }
-        }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(this@RemoteCameraActivity, 6) })
-        buttons.addView(Ui.chip(this, "High-quality frame").apply { setOnClickListener { requestFrame() } },
-            LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(this@RemoteCameraActivity, 6) })
+        }, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = gap })
         buttons.addView(Ui.chip(this, "Activity").apply {
             setOnClickListener { startActivity(Intent(this@RemoteCameraActivity, ActivityLogActivity::class.java).putExtra(Alerts.EXTRA_CAM, cam)) }
-        }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(this@RemoteCameraActivity, 6) })
-        root.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(buttons) })
+        }, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = gap })
+        root.addView(buttons)
+        root.addView(Ui.chip(this, "High-quality frame").apply {
+            contentDescription = "Ask the camera for one high-quality picture (shown below)"
+            setOnClickListener { requestFrame() }
+        }, LinearLayout.LayoutParams(-1, -2).apply { val p = Ui.dp(this@RemoteCameraActivity, 8); setMargins(p, gap, p, 0) })
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; val p = Ui.dp(this@RemoteCameraActivity, 16); setPadding(p, 0, p, p * 2) }
         hqBox = hqPanel()
         content.addView(hqBox)

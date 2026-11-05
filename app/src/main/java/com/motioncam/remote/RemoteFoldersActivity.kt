@@ -42,6 +42,7 @@ import com.motioncam.topBar
 open class RemoteFoldersActivity : Activity() {
     companion object {
         private const val REQ_GOOGLE = 911
+        private const val REQ_PICK_ACCOUNT = 912
         /** Opened to set up backup (from Settings or "backup is off" prompts): shows the choices when nothing is backed up yet. */
         const val EXTRA_BACKUP = "backup"
     }
@@ -316,27 +317,60 @@ open class RemoteFoldersActivity : Activity() {
      */
     private fun addSource() {
         val list = ArrayList<com.motioncam.Opt>()
-        list += com.motioncam.Opt("Google Drive", "Your Google account — the same one on every phone that should see the clips", IconDrawable.Kind.CLOUD) { googleSignIn() }
+        list += com.motioncam.Opt("Google Drive", "A Google account — the same one on every phone that should see the clips", IconDrawable.Kind.CLOUD) { googleAccount() }
         list += com.motioncam.Opt("Dropbox", "Your Dropbox (an app folder)", IconDrawable.Kind.CLOUD) { dropboxAccount { t, w -> dropboxOwn(t, w) } }
         list += com.motioncam.Opt("Dropbox viewer link", "Someone else's folder they shared with a link (view only)", IconDrawable.Kind.CLOUD) {
             dropboxAccount { t, w -> dropboxLink(t, w) }
         }
         if (prefs.remoteFtp) {
-            list += com.motioncam.Opt("FTP / FTPS server", "Your own server; clips download before playing", IconDrawable.Kind.FOLDER) { serverForm(CloudKind.FTP) }
-            list += com.motioncam.Opt("SFTP server", "Your own server over SSH", IconDrawable.Kind.FOLDER) { serverForm(CloudKind.SFTP) }
+            list += com.motioncam.Opt("FTP / FTPS server", "Your own server; clips download before playing", IconDrawable.Kind.FOLDER) { serverChoice(CloudKind.FTP) }
+            list += com.motioncam.Opt("SFTP server", "Your own server over SSH", IconDrawable.Kind.FOLDER) { serverChoice(CloudKind.SFTP) }
         }
         com.motioncam.OptionSheet.show(this, "Add remote folder", list,
-            subtitle = "Next: create a new folder or open an existing one, then choose whether this phone backs up to it.")
+            subtitle = "Next: the account, then a folder (an existing one or a new one), then whether this phone backs up to it.")
     }
 
     // ---- Google Drive
 
-    private fun googleSignIn() {
-        GoogleAuth.start(this, REQ_GOOGLE, { t -> afterGoogle(t) }, { toast("Google sign-in failed: $it") })
+    /** The Google accounts this phone's folders already use, or another one (each folder can be on a different account). */
+    private fun googleAccount() {
+        val known = FolderDests.googleAccounts(this)
+        if (known.isEmpty()) { addGoogleAccount(); return }
+        val opts = known.map { acc ->
+            com.motioncam.Opt(acc, "Used by your folders on this phone", IconDrawable.Kind.CLOUD, section = "Your accounts") { useGoogle(acc) }
+        } + com.motioncam.Opt("Add another account", "Choose any Google account on this phone (or add one)", IconDrawable.Kind.ADD_TO, section = "Other") { addGoogleAccount() }
+        com.motioncam.OptionSheet.show(this, "Google account", opts, subtitle = "MotionCam only sees the folders and clips it created in each account.")
+    }
+
+    /** An account already used: no sign-in needed (only if Google asks to confirm again). */
+    private fun useGoogle(account: String) {
+        toast("Connecting to $account…")
+        Thread {
+            try { val t = GoogleAuth.token(this, account); afterGoogle(t) }
+            catch (e: Exception) {
+                runOnUiThread { GoogleAuth.start(this, REQ_GOOGLE, { t -> afterGoogle(t) }, { toast("Google sign-in failed: $it") }, account = account) }
+            }
+        }.start()
+    }
+
+    /** Android's account chooser (it can also add an account), then Google's consent for that account. */
+    private fun addGoogleAccount() {
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(android.accounts.AccountManager.newChooseAccountIntent(null, null, arrayOf("com.google"), null, null, null, null), REQ_PICK_ACCOUNT)
+        } catch (e: Exception) {
+            GoogleAuth.start(this, REQ_GOOGLE, { t -> afterGoogle(t) }, { toast("Google sign-in failed: $it") })
+        }
     }
 
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == REQ_PICK_ACCOUNT) {
+            val acc = data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)
+            if (resultCode == RESULT_OK && acc != null)
+                GoogleAuth.start(this, REQ_GOOGLE, { t -> afterGoogle(t) }, { toast("Google sign-in failed: $it") }, account = acc)
+            return
+        }
         if (requestCode == REQ_GOOGLE) {
             val t = if (resultCode == RESULT_OK) GoogleAuth.result(this, data) else null
             if (t != null) afterGoogle(t) else toast("Google sign-in was cancelled")
@@ -350,7 +384,7 @@ open class RemoteFoldersActivity : Activity() {
             try {
                 val email = DriveProvider({ token }, {}).test()
                 val draft = RemoteSource(RemoteSources.newId(), "", CloudKind.DRIVE, RemoteSources.MODE_OWN, "", "", email)
-                runOnUiThread { browse(draft, null, emptyList()) }
+                runOnUiThread { pickFolder(draft) }
             } catch (e: Exception) { runOnUiThread { toast("Google Drive: ${e.message}") } }
         }.start()
     }
@@ -362,14 +396,11 @@ open class RemoteFoldersActivity : Activity() {
         if (!DropboxProvider.configured) { android.app.AlertDialog.Builder(this).setTitle("Dropbox isn't set up in this build")
                 .setMessage("This copy of MotionCam was built without a Dropbox app key. Whoever builds it can add their own " +
                     "(free, a few minutes): see SETUP.md in the project.").setPositiveButton("OK", null).show(); return }
-        val cfg = CloudConfig(this, CloudKind.DROPBOX)
-        val existing = cfg.refreshToken
-        if (existing != null) {
-            com.motioncam.OptionSheet.show(this, "Dropbox account", listOf(
-                com.motioncam.Opt(cfg.account ?: "The account connected for backup", "Already connected on this phone") { then(existing, cfg.account ?: "Dropbox") },
-                com.motioncam.Opt("Another Dropbox account", "Opens the Dropbox sign-in page") { dropboxSignIn(then) },
-            ))
-        } else dropboxSignIn(then)
+        val known = FolderDests.dropboxAccounts(this)
+        if (known.isEmpty()) { dropboxSignIn(then); return }
+        com.motioncam.OptionSheet.show(this, "Dropbox account", known.map { acc ->
+            com.motioncam.Opt(acc.who, "Used by your folders on this phone", IconDrawable.Kind.CLOUD, section = "Your accounts") { then(acc.refresh, acc.who) }
+        } + com.motioncam.Opt("Another Dropbox account", "Opens the Dropbox sign-in page", IconDrawable.Kind.ADD_TO, section = "Other") { dropboxSignIn(then) })
     }
 
     private fun dropboxSignIn(then: (String, String) -> Unit) {
@@ -393,7 +424,7 @@ open class RemoteFoldersActivity : Activity() {
     private fun dropboxOwn(refresh: String, who: String) {
         val draft = RemoteSource(RemoteSources.newId(), "", CloudKind.DROPBOX, RemoteSources.MODE_OWN, "", "", who)
         draft.refreshToken = refresh
-        browse(draft, null, emptyList())
+        pickFolder(draft)
     }
 
     private fun dropboxLink(refresh: String, who: String) {
@@ -427,6 +458,25 @@ open class RemoteFoldersActivity : Activity() {
     }
 
     // ---- FTP / SFTP
+
+    /** A server this phone's folders already use (same login, another folder), or a new one. */
+    private fun serverChoice(kind: CloudKind) {
+        val known = FolderDests.servers(this, kind)
+        if (known.isEmpty()) { serverForm(kind); return }
+        com.motioncam.OptionSheet.show(this, kind.label, known.map { s ->
+            com.motioncam.Opt("${s.user}@${s.host}", "Port ${s.port} · used by your folders on this phone", IconDrawable.Kind.FOLDER, section = "Your servers") { connectServer(s) }
+        } + com.motioncam.Opt("Another server", "Enter its address and login", IconDrawable.Kind.ADD_TO, section = "Other") { serverForm(kind) })
+    }
+
+    private fun connectServer(draft: RemoteSource) {
+        toast("Connecting to ${draft.host}…")
+        Thread {
+            try {
+                RemoteSources.reader(this, draft).use { it.test() }
+                runOnUiThread { pickFolder(draft) }
+            } catch (e: Exception) { runOnUiThread { toast("Could not connect: ${e.message}") } }
+        }.start()
+    }
 
     private fun serverForm(kind: CloudKind) {
         val ctx = this
@@ -466,7 +516,7 @@ open class RemoteFoldersActivity : Activity() {
                         RemoteSources.reader(this, draft).use { it.test() }
                         runOnUiThread {
                             if (kind == CloudKind.SFTP && draft.hostKey != null) toast("Server key ${draft.hostKey} will be remembered")
-                            browse(draft, null, emptyList())
+                            pickFolder(draft)
                         }
                     } catch (e: Exception) { runOnUiThread { toast("Could not connect: ${e.message}") } }
                 }.start()
@@ -474,49 +524,10 @@ open class RemoteFoldersActivity : Activity() {
             .setNegativeButton("Cancel", null).show()
     }
 
-    // ---- folder browser (shared by every service)
+    // ---- choosing the folder (shared by every service)
 
-    private fun browse(draft: RemoteSource, parent: RemoteFolder?, trail: List<RemoteFolder>) {
-        toast("Loading folders…")
-        Thread {
-            try {
-                val (folders, clipCount) = RemoteSources.reader(this, draft).use { r ->
-                    val fs = r.listFolders(parent?.id)
-                    Pair(fs.filter { !it.name.startsWith(".") }, parent?.let { p -> r.list(p.id).count { isOurClip(it.name) } } ?: 0)
-                }
-                runOnUiThread {
-                    val items = ArrayList<String>()
-                    if (parent != null) items += "✓ Use \"${parent.name}\"  ($clipCount MotionCam clip${if (clipCount == 1) "" else "s"})"
-                    if (parent != null) items += "⬆ Up"
-                    folders.forEach { items += "▸ ${it.name}" }
-                    val head = items.size - folders.size
-                    val title = parent?.name ?: "Choose a folder"
-                    val list = ArrayList<com.motioncam.Opt>()
-                    list += com.motioncam.Opt("New folder here", if (parent == null) "Start a new folder for MotionCam clips" else "Inside \"${parent.name}\"",
-                        IconDrawable.Kind.ADD_TO, section = "Create") {
-                        askText("New folder name", "MotionCam") { n ->
-                            val name = n.trim().ifEmpty { "MotionCam" }
-                            Thread {
-                                try {
-                                    val f = RemoteSources.reader(this, draft).use { it.createFolder(parent?.id, name) }
-                                    runOnUiThread { confirmAdd(withFolder(draft, f), f.name, 0) }
-                                } catch (e: Exception) { runOnUiThread { toast("Could not create the folder: ${e.message}") } }
-                            }.start()
-                        }
-                    }
-                    if (parent != null) {
-                        list += com.motioncam.Opt("Use “${parent.name}”", "$clipCount MotionCam clip${if (clipCount == 1) "" else "s"} in it", checked = true,
-                            section = "This folder") { confirmAdd(withFolder(draft, parent), parent.name, clipCount) }
-                        list += com.motioncam.Opt("Up one level", icon = IconDrawable.Kind.BACK, section = "This folder") { browse(draft, trail.lastOrNull(), trail.dropLast(1)) }
-                    }
-                    for (fo in folders) list += com.motioncam.Opt(fo.name, icon = IconDrawable.Kind.FOLDER, section = if (parent != null) "Folders inside" else "Existing folders") {
-                        browse(draft, fo, if (parent != null) trail + parent else trail)
-                    }
-                    com.motioncam.OptionSheet.show(this, title, list, subtitle = if (parent == null && draft.kind == CloudKind.DRIVE)
-                        "MotionCam only sees folders it created in ${draft.account}." else null)
-                }
-            } catch (e: Exception) { runOnUiThread { toast("Could not list folders: ${e.message}") } }
-        }.start()
+    private fun pickFolder(draft: RemoteSource) {
+        FolderPicker(this, draft) { f, clips -> confirmAdd(withFolder(draft, f), f.name, clips) }.show()
     }
 
     private fun withFolder(draft: RemoteSource, f: RemoteFolder) = RemoteSource(draft.id, "", draft.kind, draft.mode, f.id, f.name,

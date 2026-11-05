@@ -42,4 +42,36 @@ object FolderDests {
         s.mode != RemoteSources.MODE_LINK && destsOf(ctx, s).isEmpty() &&
             (com.motioncam.Prefs(ctx).remoteFtp || (s.kind != CloudKind.FTP && s.kind != CloudKind.SFTP))
     }
+
+    // ---- accounts already used by this phone's folders (to pick one when adding another folder)
+
+    /** Google accounts of Drive folders and backup destinations. */
+    fun googleAccounts(ctx: Context): List<String> =
+        (RemoteSources.all(ctx).filter { it.kind == CloudKind.DRIVE }.mapNotNull { it.account } +
+            Dest.all(ctx).filter { it.kind == CloudKind.DRIVE }.mapNotNull { CloudConfig(ctx, it).takeIf { c -> c.isConfigured }?.account })
+            .filter { it.isNotBlank() }.distinct()
+
+    class DropboxAccount(val who: String, val refresh: String)
+
+    /** Dropbox accounts (with their sign-in) of folders and backup destinations. */
+    fun dropboxAccounts(ctx: Context): List<DropboxAccount> {
+        val out = ArrayList<DropboxAccount>()
+        for (s in RemoteSources.all(ctx)) if (s.kind == CloudKind.DROPBOX) s.refreshToken?.let { out += DropboxAccount(s.account ?: "Dropbox", it) }
+        for (d in Dest.all(ctx)) if (d.kind == CloudKind.DROPBOX) CloudConfig(ctx, d).let { c -> c.refreshToken?.let { out += DropboxAccount(c.account ?: "Dropbox", it) } }
+        return out.distinctBy { it.who }
+    }
+
+    /** FTP / SFTP logins of folders and backup destinations, as a starting point for a new folder on the same server. */
+    fun servers(ctx: Context, kind: CloudKind): List<RemoteSource> {
+        val out = ArrayList<RemoteSource>()
+        for (s in RemoteSources.all(ctx)) if (s.kind == kind) out += RemoteSource(RemoteSources.newId(), "", kind, RemoteSources.MODE_OWN, "", "", null,
+            host = s.host, port = s.port, user = s.user, tls = s.tls, useKey = s.useKey, hostKey = s.hostKey).also {
+            it.password = s.password; it.privateKey = s.privateKey; it.passphrase = s.passphrase }
+        for (d in Dest.all(ctx)) if (d.kind == kind) CloudConfig(ctx, d).takeIf { it.isConfigured }?.let { c ->
+            out += RemoteSource(RemoteSources.newId(), "", kind, RemoteSources.MODE_OWN, "", "", null,
+                host = c.host ?: "", port = c.port, user = c.user ?: "", tls = c.tls, useKey = c.useKey, hostKey = c.hostKey).also {
+                it.password = c.password; it.privateKey = c.privateKey; it.passphrase = c.passphrase }
+        }
+        return out.filter { it.host.isNotEmpty() }.distinctBy { "${it.user}@${it.host}:${it.port}" }
+    }
 }

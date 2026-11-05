@@ -37,8 +37,16 @@ class DriveProvider(private val accessToken: () -> String, private val invalidat
     }
 
     override fun listFolders(parent: String?): List<RemoteFolder> {
-        val q = "mimeType='$folderMime' and trashed=false" + (parent?.let { " and '$it' in parents" } ?: "")
-        return pages(q, "files(id,name)").map { RemoteFolder(it.getString("id"), it.getString("name")) }.sortedBy { it.name.lowercase() }
+        if (parent != null) return pages("mimeType='$folderMime' and trashed=false and '$parent' in parents", "files(id,name)")
+            .map { RemoteFolder(it.getString("id"), it.getString("name")) }.sortedBy { it.name.lowercase() }
+        // the top: MotionCam only sees the folders it created, at any depth — show those not inside another of them
+        // (not e.g. a collection's folder inside the hidden .collections folder)
+        val all = pages("mimeType='$folderMime' and trashed=false", "files(id,name,parents)")
+        val ids = all.map { it.getString("id") }.toHashSet()
+        return all.filter { o ->
+            val ps = o.optJSONArray("parents")
+            ps == null || (0 until ps.length()).none { ps.optString(it) in ids }
+        }.map { RemoteFolder(it.getString("id"), it.getString("name")) }.sortedBy { it.name.lowercase() }
     }
 
     override fun createFolder(parent: String?, name: String): RemoteFolder {

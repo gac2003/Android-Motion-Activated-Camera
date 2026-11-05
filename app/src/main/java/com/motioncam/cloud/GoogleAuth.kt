@@ -32,8 +32,8 @@ object GoogleAuth {
     }
 
     /** Interactive sign-in from a screen. [onToken] gets an access token; a consent screen may be shown first. */
-    fun start(a: Activity, requestCode: Int, onToken: (String) -> Unit, onError: (String) -> Unit, scope: String = SCOPE) {
-        Identity.getAuthorizationClient(a).authorize(request(null, scope))
+    fun start(a: Activity, requestCode: Int, onToken: (String) -> Unit, onError: (String) -> Unit, scope: String = SCOPE, account: String? = null) {
+        Identity.getAuthorizationClient(a).authorize(request(account, scope))
             .addOnSuccessListener { r ->
                 val pi = r.pendingIntent
                 if (r.hasResolution() && pi != null) {

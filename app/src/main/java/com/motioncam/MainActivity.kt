@@ -126,12 +126,20 @@ class MainActivity : Activity() {
         ui.post(ticker)
         ShortClipBus.listener = { id, len -> ui.post { offerUndo(id, len) } }
         com.motioncam.live.RemoteSettings.listeners += remoteChanged
-        // unread camera alerts: the Cameras icon turns yellow
+        // unread camera alerts: the Cameras icon turns yellow (also when an alert arrives while this screen is open)
+        com.motioncam.live.AlertInbox.listeners += inboxChanged
+        tintLiveIcon()
+    }
+
+    private val inboxChanged: () -> Unit = { tintLiveIcon() }
+
+    private fun tintLiveIcon() {
         (liveChip as? ImageView)?.setImageDrawable(IconDrawable(IconDrawable.Kind.LIVE,
             if (prefs.liveOn && com.motioncam.live.AlertInbox.unread(this) > 0) Ui.ACCENT else 0xFFFFFFFF.toInt()))
     }
 
     override fun onPause() {
+        com.motioncam.live.AlertInbox.listeners -= inboxChanged
         com.motioncam.live.RemoteSettings.listeners -= remoteChanged
         ShortClipBus.listener = null
         finishDiscard()   // leaving the screen: the decision stands

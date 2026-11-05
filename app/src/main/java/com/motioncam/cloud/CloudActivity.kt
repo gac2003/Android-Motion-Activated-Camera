@@ -56,7 +56,15 @@ class CloudActivity : Activity() {
         build()
     }
 
-    override fun onResume() { super.onResume(); ui.post(ticker) }
+    private var resumedOnce = false
+
+    /** Back from the queue, protected clips or a sign-in page: show the current state (account, errors, collections). */
+    override fun onResume() {
+        super.onResume()
+        if (resumedOnce) build()
+        resumedOnce = true
+        ui.post(ticker)
+    }
     override fun onPause() { ui.removeCallbacks(ticker); super.onPause() }
 
     private fun build() {

@@ -54,6 +54,14 @@ class ProtectedActivity : Activity() {
     private var rows: List<Row> = emptyList()
     private val selected = LinkedHashSet<String>()
     private var writable = true
+    private var resumedOnce = false
+
+    /** Back from the player (where a protection can be removed or a clip deleted): reload the list. */
+    override fun onResume() {
+        super.onResume()
+        if (resumedOnce) load()
+        resumedOnce = true
+    }
     private lateinit var summary: TextView
     private lateinit var tabs: LinearLayout
     private lateinit var filters: LinearLayout

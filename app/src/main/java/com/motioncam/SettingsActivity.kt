@@ -21,10 +21,23 @@ class SettingsActivity : Activity() {
     /** Live connection state the page was built with (it is changed on its own screen). */
     private var builtLiveOn: Boolean? = null
 
+    /** Lines that show changing state (cloud status, queue, unread alerts, cache): refreshed while the page is open. */
+    private val live = ArrayList<() -> Unit>()
+    private val ui = android.os.Handler(android.os.Looper.getMainLooper())
+    private val ticker = object : Runnable {
+        override fun run() { live.forEach { try { it() } catch (_: Exception) {} }; ui.postDelayed(this, 2000) }
+    }
+    private val inboxChanged: () -> Unit = { live.forEach { try { it() } catch (_: Exception) {} } }
+    /** Settings changed from another phone while this page is open: show them. */
+    private val remoteChanged: () -> Unit = { runOnUiThread { recreate() } }
+
     override fun onResume() {
         super.onResume()
         if (builtLiveOn != null && builtLiveOn != prefs.liveOn) recreate()   // show the new on/off state
         builtLiveOn = prefs.liveOn
+        ui.post(ticker)
+        com.motioncam.live.AlertInbox.listeners += inboxChanged
+        com.motioncam.live.RemoteSettings.listeners += remoteChanged
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -142,6 +155,11 @@ class SettingsActivity : Activity() {
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
         if (prefs.liveOn) box.addView(Ui.chip(this, "Alerts & notifications").apply {
             setOnClickListener { startActivity(Intent(this@SettingsActivity, com.motioncam.live.AlertSettingsActivity::class.java)) }
+            val chip = this
+            live += {
+                val n = com.motioncam.live.AlertInbox.unread(this@SettingsActivity)
+                chip.text = "Alerts & notifications" + if (n > 0) "  ·  $n unread" else ""
+            }
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
 
         title("Cloud backup", Prefs.CLOUD_KEYS)
@@ -151,6 +169,8 @@ class SettingsActivity : Activity() {
             val st = com.motioncam.cloud.CloudSync.status(this, k)
             box.addView(Ui.chip(this, "${k.label}\n$st").apply {
                 gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                val chip = this
+                live += { val t = "${k.label}\n" + com.motioncam.cloud.CloudSync.status(this@SettingsActivity, k); if (chip.text != t) chip.text = t }
                 setOnClickListener {
                     startActivity(Intent(this@SettingsActivity, com.motioncam.cloud.CloudActivity::class.java)
                         .putExtra(com.motioncam.cloud.CloudActivity.EXTRA_KIND, k.key))
@@ -159,6 +179,12 @@ class SettingsActivity : Activity() {
         }
         val q = com.motioncam.cloud.CloudSync.counts(this, null)
         box.addView(Ui.chip(this, "Upload queue  ·  ${q.queued} waiting" + if (q.failed > 0) " · ${q.failed} failed" else "").apply {
+            val chip = this
+            live += {
+                val c = com.motioncam.cloud.CloudSync.counts(this@SettingsActivity, null)
+                val t = "Upload queue  ·  ${c.queued} waiting" + if (c.failed > 0) " · ${c.failed} failed" else ""
+                if (chip.text != t) chip.text = t
+            }
             setOnClickListener { startActivity(Intent(this@SettingsActivity, com.motioncam.cloud.UploadQueueActivity::class.java)) }
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
         toggle("Upload only on Wi-Fi (not mobile data)", prefs.cloudWifiOnly) { prefs.cloudWifiOnly = it; com.motioncam.cloud.CloudSync.kick(this) }
@@ -183,6 +209,8 @@ class SettingsActivity : Activity() {
             "the folder is checked, so your collection keeps them.")
         val cacheMb = com.motioncam.remote.StreamCache.cacheBytes(this) / 1_000_000
         box.addView(Ui.chip(this, "Clear downloaded remote clips  ·  $cacheMb MB").apply {
+            val chip = this
+            live += { chip.text = "Clear downloaded remote clips  ·  ${com.motioncam.remote.StreamCache.cacheBytes(this@SettingsActivity) / 1_000_000} MB" }
             setOnClickListener {
                 com.motioncam.remote.StreamCache.clearAll(this@SettingsActivity)
                 Toast.makeText(this@SettingsActivity, "Cleared", Toast.LENGTH_SHORT).show()
@@ -218,6 +246,9 @@ class SettingsActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        ui.removeCallbacks(ticker)
+        com.motioncam.live.AlertInbox.listeners -= inboxChanged
+        com.motioncam.live.RemoteSettings.listeners -= remoteChanged
         currentFocus?.clearFocus()   // commits a value still being typed
         EngineHost.peek()?.applyConfig()
         CameraService.instance?.reloadServer()

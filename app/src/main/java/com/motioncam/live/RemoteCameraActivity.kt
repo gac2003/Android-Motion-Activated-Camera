@@ -45,6 +45,46 @@ class RemoteCameraActivity : Activity() {
     private lateinit var liveBtn: TextView
     private lateinit var f: Form
     private val ui = Handler(Looper.getMainLooper())
+
+    // ------------------------------------------------------------------ recent activity (under the status)
+
+    private var recent: List<ActivityEvent> = emptyList()
+    private var recentLoaded = false
+    private var recentBox: LinearLayout? = null
+    private var recentL: com.google.firebase.database.ValueEventListener? = null
+
+    /** The camera's events, followed live (the last 20, enough for the latest 3 entries once paired). */
+    private fun followRecent() {
+        recentL = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(s: com.google.firebase.database.DataSnapshot) {
+                recent = s.children.mapNotNull { e ->
+                    val t = (e.child("t").value as? Number)?.toLong() ?: return@mapNotNull null
+                    val d = LiveNet.open(this@RemoteCameraActivity, e.child("d").value as? String) ?: return@mapNotNull null
+                    try { ActivityEvent(cam, t - Live.serverOffset, JSONObject(d)) } catch (_: Exception) { null }
+                }
+                recentLoaded = true
+                fillRecent()
+            }
+            override fun onCancelled(e: com.google.firebase.database.DatabaseError) {}
+        }.also { Live.ref(this, "cams/$cam/events")?.orderByChild("t")?.limitToLast(20)?.addValueEventListener(it) }
+    }
+
+    private fun unfollowRecent() { recentL?.let { Live.ref(this, "cams/$cam/events")?.removeEventListener(it) }; recentL = null }
+
+    private fun fillRecent() {
+        val box = recentBox ?: return
+        if (isFinishing) return
+        box.removeAllViews()
+        val list = ActivityTypes.pair(recent.filter { it.type != "clip_up" && it.type != "remote_taken" }).take(3)
+        if (list.isEmpty()) {
+            box.addView(Ui.label(this, if (recentLoaded) "Nothing in the last 7 days." else "Loading…", 13f, Ui.GREY).apply {
+                setPadding(0, Ui.dp(this@RemoteCameraActivity, 4), 0, Ui.dp(this@RemoteCameraActivity, 4))
+            })
+            return
+        }
+        val p = Prefs(this)
+        for (e in list) box.addView(ActivityLogActivity.eventRow(this, p, e, showCam = false, openCamera = false))
+    }
     private lateinit var r: CamRemote
     private lateinit var feed: CamRemote.Feed
     private var lastSettings = ""
@@ -99,9 +139,6 @@ class RemoteCameraActivity : Activity() {
         buttons.addView(Ui.chip(this, "Screenshot").apply {
             contentDescription = "Ask the camera for one high-quality picture (shown below)"
             setOnClickListener { requestFrame() }
-        }, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = gap })
-        buttons.addView(Ui.chip(this, "Activity").apply {
-            setOnClickListener { startActivity(Intent(this@RemoteCameraActivity, ActivityLogActivity::class.java).putExtra(Alerts.EXTRA_CAM, cam)) }
         }, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = gap })
         root.addView(buttons)
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; val p = Ui.dp(this@RemoteCameraActivity, 16); setPadding(p, 0, p, p * 2) }
@@ -281,6 +318,7 @@ class RemoteCameraActivity : Activity() {
         super.onResume()
         Live.listeners += refresh
         Live.eventListeners += events
+        followRecent()
         Live.viewerActive = true
         Live.refresh(this)
         lastSettings = ""
@@ -291,6 +329,7 @@ class RemoteCameraActivity : Activity() {
     override fun onPause() {
         Live.listeners -= refresh
         Live.eventListeners -= events
+        unfollowRecent()
         r.leave()   // gives the remote back
         ui.removeCallbacks(liveTick)
         if (::feed.isInitialized) stopWatching()
@@ -428,6 +467,15 @@ class RemoteCameraActivity : Activity() {
 
         // another phone is changing this camera: one line, controls locked until it's done (a few seconds)
         r.lockText()?.let { f.line(it, 13f, Ui.ACCENT) }
+
+        // this camera's latest events (motion with its clip as one entry), live; the rest in its Activity
+        f.title("Recent activity")
+        recentBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        f.box.addView(recentBox)
+        fillRecent()
+        f.button("See all activity ›", full = false) {
+            startActivity(Intent(this, ActivityLogActivity::class.java).putExtra(Alerts.EXTRA_CAM, cam))
+        }
 
         f.title("Monitoring")
         val stopChip = f.chip("Stop monitoring") {

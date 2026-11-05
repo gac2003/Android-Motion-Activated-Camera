@@ -286,7 +286,7 @@ object RemoteRepo {
 
     /**
      * Someone removed the cloud protection of clips that are in this phone's collections for the folder: keep a
-     * copy on this phone (Settings → Remote folders), so the collection still has them if the cloud copy goes.
+     * copy on this phone (Remote Folders → options), so the collection still has them if the cloud copy goes.
      */
     fun keepOverridden(ctx: Context, sourceId: String, names: Set<String>) {
         if (!com.motioncam.Prefs(ctx).remoteKeepCopy) return

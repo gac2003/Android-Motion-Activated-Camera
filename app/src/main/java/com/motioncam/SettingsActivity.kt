@@ -162,62 +162,27 @@ class SettingsActivity : Activity() {
             }
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
 
-        title("Cloud backup", Prefs.CLOUD_KEYS)
-        note("Copies every new clip to the cloud or your own server, so footage survives if the phone is damaged or stolen. " +
-            "Uploads wait and resume automatically if the internet drops.")
-        for (k in com.motioncam.cloud.CloudKind.values()) {
-            val st = com.motioncam.cloud.CloudSync.status(this, k)
-            box.addView(Ui.chip(this, "${k.label}\n$st").apply {
-                gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                val chip = this
-                live += { val t = "${k.label}\n" + com.motioncam.cloud.CloudSync.status(this@SettingsActivity, k); if (chip.text != t) chip.text = t }
-                setOnClickListener {
-                    startActivity(Intent(this@SettingsActivity, com.motioncam.cloud.CloudActivity::class.java)
-                        .putExtra(com.motioncam.cloud.CloudActivity.EXTRA_KIND, k.key))
-                }
-            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
-        }
-        val q = com.motioncam.cloud.CloudSync.counts(this, null)
-        box.addView(Ui.chip(this, "Upload queue  ·  ${q.queued} waiting" + if (q.failed > 0) " · ${q.failed} failed" else "").apply {
+        // backup of this phone's clips, upload rules and other phones' folders now live together in Clips → Remote Folders
+        title("Cloud backup & remote folders", Prefs.CLOUD_KEYS + Prefs.REMOTE_FOLDER_KEYS)
+        note("Backing up this phone's clips (Google Drive, Dropbox, FTP, SFTP), the upload queue and upload rules, and viewing " +
+            "other phones' backups are all in one place: Clips → Remote Folders.")
+        box.addView(Ui.chip(this, "").apply {
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
             val chip = this
-            live += {
-                val c = com.motioncam.cloud.CloudSync.counts(this@SettingsActivity, null)
-                val t = "Upload queue  ·  ${c.queued} waiting" + if (c.failed > 0) " · ${c.failed} failed" else ""
+            val update = {
+                val on = com.motioncam.cloud.CloudSync.enabledKinds(this@SettingsActivity)
+                val q = com.motioncam.cloud.CloudSync.counts(this@SettingsActivity, null)
+                val t = "Open backup & Remote Folders\n" + (if (on.isEmpty()) "Backup is off" else "Backing up to " + on.joinToString { it.label }) +
+                    (if (q.queued > 0) " · ${q.queued} waiting" else "") + (if (q.failed > 0) " · ${q.failed} failed" else "")
                 if (chip.text != t) chip.text = t
             }
-            setOnClickListener { startActivity(Intent(this@SettingsActivity, com.motioncam.cloud.UploadQueueActivity::class.java)) }
-        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
-        toggle("Upload only on Wi-Fi (not mobile data)", prefs.cloudWifiOnly) { prefs.cloudWifiOnly = it; com.motioncam.cloud.CloudSync.kick(this) }
-        toggle("Upload only while charging", prefs.cloudChargingOnly) { prefs.cloudChargingOnly = it; com.motioncam.cloud.CloudSync.kick(this) }
-        choice("Upload quality", listOf("Original (largest, best quality)", "720p (about 1/3 the size)", "480p (smallest)"), prefs.cloudQuality) {
-            prefs.cloudQuality = it
-        }
-        note("Smaller copies are made on the phone before uploading (uses some extra power; original stays on the phone).")
-        toggle("Delete the phone copy after it is backed up everywhere (clips in collections are kept)", prefs.cloudDeleteLocal) { prefs.cloudDeleteLocal = it }
-        toggle("Upload thumbnails for other devices", prefs.cloudThumbs) { prefs.cloudThumbs = it; com.motioncam.cloud.CloudSync.kick(this) }
-        note("A small peak-motion picture (about 20 KB) per clip, in a \".thumbnails\" subfolder, so another device viewing " +
-            "this folder under Clips → Remote folders sees the right frame and clip length without downloading videos.")
-
-        title("Remote folders", Prefs.REMOTE_FOLDER_KEYS)
-        note("View clips another phone backed up (Clips → cloud icon). Read-only: nothing in those folders is ever changed.")
-        toggle("Allow FTP / SFTP servers as remote folders", prefs.remoteFtp) { prefs.remoteFtp = it }
-        note("When off, FTP/SFTP folders are hidden and cannot be added. Clips from servers are downloaded fully before " +
-            "they play (cloud folders stream).")
-        toggle("Keep a copy on this phone when a clip in my collections loses its cloud protection", prefs.remoteKeepCopy) { prefs.remoteKeepCopy = it }
-        note("Clips you favourite or add to a collection in a remote folder are protected from the camera phone's clean-up. " +
-            "Anyone signed in to the account can remove that protection; this saves such clips to this phone the next time " +
-            "the folder is checked, so your collection keeps them.")
-        val cacheMb = com.motioncam.remote.StreamCache.cacheBytes(this) / 1_000_000
-        box.addView(Ui.chip(this, "Clear downloaded remote clips  ·  $cacheMb MB").apply {
-            val chip = this
-            live += { chip.text = "Clear downloaded remote clips  ·  ${com.motioncam.remote.StreamCache.cacheBytes(this@SettingsActivity) / 1_000_000} MB" }
+            update()
+            live += update
             setOnClickListener {
-                com.motioncam.remote.StreamCache.clearAll(this@SettingsActivity)
-                Toast.makeText(this@SettingsActivity, "Cleared", Toast.LENGTH_SHORT).show()
-                recreate()
+                startActivity(Intent(this@SettingsActivity, com.motioncam.remote.RemoteFoldersActivity::class.java)
+                    .putExtra(com.motioncam.remote.RemoteFoldersActivity.EXTRA_BACKUP, true))
             }
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
-        note("Played remote clips are kept (up to 1.5 GB) so replaying and scrubbing are instant. Android may also clear them when storage is low.")
 
         title("Reset", null)
         box.addView(Ui.chip(this, "Reset ALL settings to default").apply {
@@ -268,7 +233,7 @@ class SettingsActivity : Activity() {
             row.addView(Ui.label(this, "Reset", 12f, Ui.GREY).apply {
                 setPadding(Ui.dp(this@SettingsActivity, 12), Ui.dp(this@SettingsActivity, 4), 0, Ui.dp(this@SettingsActivity, 4))
                 setOnClickListener { confirmReset("Reset \"$s\"?", "Settings in this section go back to their defaults." + when (s) {
-                    "Cloud backup" -> "\n\nAlso each destination's clean-up rules (when full, size cap, delete after N days, protected " +
+                    "Cloud backup & remote folders" -> "\n\nAlso each destination's clean-up rules (when full, size cap, delete after N days, protected " +
                         "collections) and paused uploads resume. Accounts, folders and whether backup is on are kept."
                     "Live connection" -> "\n\nThe live connection is turned off and this phone becomes viewer-only; alert settings and " +
                         "muted cameras are reset. Your sign-in / network code and PINs are kept."

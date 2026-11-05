@@ -83,8 +83,12 @@ Long-press any control button on the main screen to choose which buttons are sho
 * Raise *Motion must last at least* (e.g. 500 ms) to ignore brief flashes.
 
 ## Cloud backup (optional)
-Settings → **Cloud backup** copies every new clip to **Google Drive**, **Dropbox**, an **FTP/FTPS** server or an
-**SFTP** server, so footage survives if the phone is damaged or stolen.
+Clips → **Remote Folders** → **Back up this phone** (also reachable from Settings) copies every new clip to
+**Google Drive**, **Dropbox**, an **FTP/FTPS** server or an **SFTP** server, so footage survives if the phone is
+damaged or stolen. The same screen has the upload queue and rules (Wi-Fi only, while charging, quality, delete the
+phone copy, thumbnails) next to the other phones' folders you view.
+
+* **Back up older clips**: select them in Clips and tap **Back up** (or *Back up all* in a collection).
 
 * **Connect**: Google Drive uses the phone's Google account picker; Dropbox opens a sign-in page; FTP/SFTP take the
   server address and login (stored encrypted on the phone).
@@ -102,7 +106,7 @@ Settings → **Cloud backup** copies every new clip to **Google Drive**, **Dropb
 ### Protected in cloud
 Clips can be **protected** so the camera phone's clean-up never deletes their cloud copy – from **any** phone signed
 in to the account:
-* **Automatically**: clips in the camera phone's protected collections (Cloud backup → *Choose protected
+* **Automatically**: clips in the camera phone's protected collections (Back up this phone → a destination → *Choose protected
   collections*, Favourites by default), and clips you favourite or add to a collection while viewing the folder
   as a remote folder on another phone.
 * **By hand**: select clips (or use the player's ⋮ menu) → *Protect in cloud* / *Remove cloud protection*; whole
@@ -128,9 +132,9 @@ are always kept. Dropbox viewer links are fully read-only.
   to (＋ Add → Google Drive) and pick the folder. Other Google accounts aren't supported, because MotionCam's
   `drive.file` access only sees files MotionCam itself created in the signed-in account.
 * **Dropbox, same account**: ＋ Add → "my own backups".
-* **Dropbox, another account**: on the recording phone, Cloud backup → Dropbox → **Create viewer link**, send it,
+* **Dropbox, another account**: on the recording phone, Remote Folders → Back up this phone → Dropbox → **Create viewer link**, send it,
   and paste it on the viewing device (＋ Add → "a viewer link"). Anyone with the link can view; **Revoke link** stops it.
-* **FTP / SFTP**: enter the server login (a read-only account is best). Can be turned off in Settings → Remote folders.
+* **FTP / SFTP**: enter the server login (a read-only account is best). Can be turned off under Remote folder options.
 * **Shared collections**: a remote folder's Favourites and collections are the same on every phone signed in to the
   account (stored in a hidden `.collections` folder); any phone can create, rename, delete and fill them. Changes
   show at once, are queued when offline and sync automatically. Clips in them are protected from clean-up.

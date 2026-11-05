@@ -194,6 +194,8 @@ class ClipsActivity : Activity() {
                 LinearLayout.LayoutParams(0, -2, 1f))
         if (remote == null) act(IconDrawable.Kind.SHARE, "Share") { shareSelected() }
         else act(IconDrawable.Kind.DOWNLOAD, "Save") { saveToPhone(selectedClips()) }
+        // this phone's clips: upload the selection to the backup destinations (the counterpart of Save in remote folders)
+        if (remote == null) act(IconDrawable.Kind.CLOUD, "Back up") { CollectionActions.backUpAll(this, selectedClips()) { exitSelection() } }
         if (canEditShared()) act(IconDrawable.Kind.ADD_TO, "Add to") { addSelectedTo() }
         when {
             collectionId != null && canEditShared() -> act(IconDrawable.Kind.REMOVE, "Remove") { removeSelectedFromCollection() }

@@ -60,6 +60,7 @@ class PlayerActivity : Activity() {
     }
 
     private lateinit var prefs: Prefs
+    private lateinit var tagLine: TextView
     private var clips: MutableList<Clip> = mutableListOf()   // oldest first
     private lateinit var video: FrameLayout
     private lateinit var a: Slot
@@ -152,7 +153,9 @@ class PlayerActivity : Activity() {
         }
         topBar.addView(iconButton(this, IconDrawable.Kind.BACK) { finish() })
         stamp = Ui.label(this, "", 15f).apply { setShadowLayer(4f, 0f, 0f, Color.BLACK); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
-        topBar.addView(stamp, LinearLayout.LayoutParams(0, -2, 1f))
+        // the clip's tags under the time (Search can find clips by them)
+        tagLine = Ui.label(this, "", 12f, Ui.ACCENT).apply { setShadowLayer(4f, 0f, 0f, Color.BLACK); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; visibility = View.GONE }
+        topBar.addView(LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(stamp); addView(tagLine) }, LinearLayout.LayoutParams(0, -2, 1f))
         lateinit var menuBtn: View
         menuBtn = iconButton(this, IconDrawable.Kind.MORE) { showMenu(menuBtn) }
         topBar.addView(menuBtn)
@@ -740,7 +743,9 @@ class PlayerActivity : Activity() {
         if (remote?.mode != com.motioncam.remote.RemoteSources.MODE_LINK) {   // viewer links can't change shared collections
             pm.menu.add(0, 4, 0, if (fav) "Remove from Favourites" else "Add to Favourites")
             pm.menu.add(0, 5, 1, "Add to collection…")
+            pm.menu.add(0, 11, 1, "Tags…")
         }
+        remote?.let { r -> pm.menu.add(0, 12, 2, if (CloudDelete.canDelete(r)) "Move or copy to…" else "Copy to…") }
         val spaces = com.motioncam.cloud.CloudProtect.spaces(this, remote)
         val canMark = com.motioncam.cloud.CloudProtect.canChange(this, remote)
         val isProt = com.motioncam.cloud.MarkSync.isProtected(spaces, c.name)
@@ -761,6 +766,11 @@ class PlayerActivity : Activity() {
                     Toast.makeText(this, if (fav) "Removed from Favourites" else "Added to Favourites", Toast.LENGTH_SHORT).show()
                 }
                 5 -> CollectionPicker.show(this, listOf(c.id), store) {}
+                11 -> TagSheet.show(this, remote?.id, listOf(c), clips)
+                12 -> remote?.let { r ->
+                    // moved: it's no longer in this folder
+                    MoveSheet.show(this, r, listOf(c)) { if (com.motioncam.remote.RemoteRepo.entry(c.id) == null) removeFromTimeline(c) }
+                }
                 6 -> saveCurrent(c)
                 8 -> remote?.let { r -> CloudDelete.confirm(this, r, listOf(c)) { removeFromTimeline(c) } }
                 7 -> if (isProt) com.motioncam.cloud.CloudProtect.confirmRemove(this, remote, listOf(c.name))
@@ -836,6 +846,8 @@ class PlayerActivity : Activity() {
         val pos = if (holdMs >= 0) holdMs.toInt() else curPos()
         strip.setPosition(pos.toLong())
         stamp.text = stampFmt.format(Date(clips[i].startMs + pos))
+        val tags = TagStore.tagsOf(this, remote?.id, clips[i]).joinToString("  ") { "#$it" }
+        if (tagLine.text.toString() != tags) { tagLine.text = tags; tagLine.visibility = if (tags.isEmpty()) View.GONE else View.VISIBLE }
         val c = clips[i]
         info.text = "${i + 1}/${clips.size} · ${fmtDur(pos.toLong())}/${fmtDur(c.durationMs)}"   // compact: shares the bar
     }

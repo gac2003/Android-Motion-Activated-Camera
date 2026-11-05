@@ -303,6 +303,7 @@ object SharedSync {
             synchronized(this) { state(ctx, id).lastError = e.message ?: e.javaClass.simpleName; save(ctx, id) }
         }
         com.motioncam.cloud.MarkSync.schedule(ctx, com.motioncam.cloud.MarkSync.remoteKey(id))
+        try { com.motioncam.TagStore.sync(ctx, src) } catch (_: Exception) {}   // the folder's tags ride along
         for (l in listeners) try { l(id) } catch (_: Exception) {}
         com.motioncam.live.Live.publishDevice(ctx)   // other phones see this phone's unsent changes / conflicts
         state(ctx, id).conflicts.size.let { n -> if (n > 0) com.motioncam.live.Alerts.syncConflict(ctx, src.name, n) }

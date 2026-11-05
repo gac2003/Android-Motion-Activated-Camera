@@ -79,6 +79,8 @@ class RemoteReader(private val p: CloudProvider) : java.io.Closeable {
     fun delete(folder: String, file: RemoteFile) = p.delete(folder, file)
     /** Shared collections of the folder (read-only for a Dropbox viewer link). */
     fun collectionFiles(folder: String) = com.motioncam.cloud.CollectionFiles(p, folder, writable = p !is DropboxLinkProvider)
+    /** The folder's clip tags (read-only for a Dropbox viewer link). */
+    fun tagFiles(folder: String) = com.motioncam.cloud.TagFiles(p, folder, writable = p !is DropboxLinkProvider)
     /** Creates a folder (only when adding a folder: "New folder here"; refused by a viewer link). */
     fun createFolder(parent: String?, name: String): RemoteFolder = p.createFolder(parent, name)
     /** Dropbox link only: the shared folder's name. */
@@ -163,6 +165,12 @@ object RemoteSources {
 
     /** A new connection to the source (one per caller; FTP/SFTP connections are not shared between threads). */
     fun reader(ctx: Context, s: RemoteSource): RemoteReader = RemoteReader(provider(ctx.applicationContext, s))
+
+    /** A full connection to the source, for copying or moving clips into it (refused for a viewer link). */
+    fun writer(ctx: Context, s: RemoteSource): CloudProvider {
+        if (s.mode == MODE_LINK) throw CloudException("A viewer link can't receive clips", CloudException.Kind.OTHER)
+        return provider(ctx.applicationContext, s)
+    }
 
     private fun provider(ctx: Context, s: RemoteSource): CloudProvider = when (s.kind) {
         CloudKind.DRIVE -> DriveProvider({ GoogleAuth.token(ctx, s.account) }, { GoogleAuth.invalidate(ctx, it) })

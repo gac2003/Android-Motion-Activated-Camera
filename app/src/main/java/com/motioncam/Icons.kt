@@ -13,7 +13,7 @@ import android.widget.ImageView
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
     enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, SCREEN, VIDEOCAM, NETWORK, LIVE, CLOSE, SHARE, TRASH, ADD_TO, REMOVE, SELECT_ALL, FULLSCREEN, CLOUD_UP,
-        HOME, PULSE, EYE, LOCK, STAR, STAR_ON, PLAY_LINE, CLOCK, COLLECTIONS, CHECK }
+        HOME, PULSE, EYE, LOCK, STAR, STAR_ON, PLAY_LINE, CLOCK, COLLECTIONS, CHECK, SEARCH, TAG, MOVE }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -284,6 +284,29 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 stroke.strokeWidth = 2f
                 c.drawRoundRect(RectF(3f, 8f, 17f, 20f), 2f, 2f, stroke)
                 path.moveTo(7f, 4.5f); path.lineTo(19f, 4.5f); path.cubicTo(20.1f, 4.5f, 21f, 5.4f, 21f, 6.5f); path.lineTo(21f, 16f)
+                c.drawPath(path, stroke)
+            }
+            Kind.SEARCH -> {
+                stroke.strokeWidth = 2.2f
+                c.drawCircle(10.5f, 10.5f, 6.5f, stroke)
+                c.drawLine(15.3f, 15.3f, 20.5f, 20.5f, stroke)
+            }
+            Kind.TAG -> {
+                // a price tag with its hole
+                stroke.strokeWidth = 2f
+                path.moveTo(3.5f, 4.5f); path.lineTo(3.5f, 11.5f); path.lineTo(12.5f, 20.5f); path.lineTo(20.5f, 12.5f)
+                path.lineTo(11.5f, 3.5f); path.lineTo(4.5f, 3.5f); path.close()
+                c.drawPath(path, stroke)
+                c.drawCircle(8f, 8f, 1.6f, fill)
+            }
+            Kind.MOVE -> {
+                // a folder with an arrow going into it
+                stroke.strokeWidth = 2f
+                path.moveTo(3f, 7f); path.lineTo(3f, 19f); path.lineTo(21f, 19f); path.lineTo(21f, 8.5f); path.lineTo(12f, 8.5f)
+                path.lineTo(10f, 5.5f); path.lineTo(3f, 5.5f); path.close()
+                c.drawPath(path, stroke)
+                path.reset()
+                path.moveTo(8f, 14f); path.lineTo(15.5f, 14f); path.moveTo(13f, 11.5f); path.lineTo(15.5f, 14f); path.lineTo(13f, 16.5f)
                 c.drawPath(path, stroke)
             }
             Kind.CHECK -> {

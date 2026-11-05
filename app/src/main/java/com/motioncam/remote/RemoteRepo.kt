@@ -306,6 +306,8 @@ object RemoteRepo {
                 if (cancelled()) return res
                 val newId = ClipStore.importCopy(ctx, file, e.name, c.startMs)
                 thumbJpeg(ctx, c.id)?.let { ClipThumbs.adopt(ctx, newId, it) }
+                // its tags come along (the copy is this phone's clip now, with its own tags)
+                com.motioncam.TagStore.setLocal(ctx, newId, com.motioncam.TagStore.tagsOf(ctx, e.src.id, c))
                 existing += e.name
                 res.saved++
             } catch (ex: Exception) {
@@ -350,10 +352,13 @@ object RemoteRepo {
         val space = com.motioncam.cloud.MarkSync.remoteKey(src.id)
         val fresh = com.motioncam.cloud.MarkSync.syncNow(ctx, space)
         val prot = fresh.marks.values.filter { it.protected }.map { it.clip }.toSet()
+        val untagged = ArrayList<Clip>()
         RemoteSources.reader(ctx, src).use { r ->
             val thumbFolder = try { r.listFolders(src.folderId).firstOrNull { it.name == THUMB_FOLDER } } catch (e: Exception) { null }
             val marks = r.markStore(src.folderId)
             val shared = r.collectionFiles(src.folderId)
+            val tags = r.tagFiles(src.folderId)
+            val tagMap = try { tags.map() } catch (_: Exception) { emptyMap() }
             clips.forEachIndexed { i, c ->
                 progress(i, clips.size)
                 val e = entries[c.id] ?: run { res.failed++; return@forEachIndexed }
@@ -363,6 +368,7 @@ object RemoteRepo {
                     if (e.thumb != null && thumbFolder != null) try { r.delete(thumbFolder.id, e.thumb) } catch (_: Exception) {}
                     try { marks.forget(e.name) } catch (_: Exception) {}
                     try { shared.forgetClip(e.name) } catch (_: Exception) {}
+                    tagMap[e.name]?.let { ts -> for (t in ts) try { tags.remove(e.name, t) } catch (_: Exception) {}; untagged += c }
                     // this phone's copies of it
                     File(File(cacheDir(ctx, src.id), "clips"), e.name).delete()
                     thumbFile(ctx, e).delete()
@@ -373,6 +379,7 @@ object RemoteRepo {
             }
         }
         progress(clips.size, clips.size)
+        com.motioncam.TagStore.forget(ctx, src.id, untagged)
         lists.remove(src.id)
         try { refresh(ctx, src) } catch (_: Exception) {}
         SharedSync.schedule(ctx, src.id, 0)

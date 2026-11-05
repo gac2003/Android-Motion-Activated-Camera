@@ -64,6 +64,13 @@ open class ClipsActivity : Activity() {
     private lateinit var selAllBtn: TextView
 
     private var clips: List<Clip> = emptyList()
+    /** The clips Search lets through (all of [clips] without a filter). */
+    private var shown: List<Clip> = emptyList()
+    private var filter = ClipFilter()
+    private val filterKey get() = (remote?.id ?: "local") + (collectionId?.let { "/$it" } ?: "")
+    private lateinit var filterBar: LinearLayout
+    private lateinit var filterParts: LinearLayout
+    private var searchTile: LinearLayout? = null
     private var rows: List<Row> = emptyList()
     private var cols = 3
     private lateinit var list: ListView
@@ -130,6 +137,7 @@ open class ClipsActivity : Activity() {
             remote = RemoteSources.get(this, rid) ?: run { finish(); return }
             store = Collections.forRemote(rid)
         }
+        filter = ClipFilter.load(this, filterKey)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
         // actions as a labelled row under the title, so the title keeps the whole top bar
         actionRow = LinearLayout(this).apply {
@@ -157,7 +165,9 @@ open class ClipsActivity : Activity() {
             if (collectionId != null && remote == null) add(IconDrawable.Kind.CLOUD, "Back up all") {
                 CollectionActions.backUpAll(this@ClipsActivity, clips)
             }
-            add(IconDrawable.Kind.CALENDAR, "Calendar") { showCalendar() }
+            // Search: date, tags, collections, length, size (the calendar is its date filter)
+            add(IconDrawable.Kind.SEARCH, "Search") { openSearch() }
+            searchTile = getChildAt(childCount - 1) as? LinearLayout
             add(IconDrawable.Kind.PLAY_LINE, "Timeline") {
                 // newest day, from its first clip
                 val h = rows.firstOrNull { it is Row.Header } as Row.Header?
@@ -198,7 +208,7 @@ open class ClipsActivity : Activity() {
         selBar.addView(selTexts, LinearLayout.LayoutParams(0, -2, 1f))
         selAllBtn = Ui.chip(this, "Select all").apply {
             setOnClickListener {
-                if (selected.size == clips.size) selected.clear() else clips.forEach { selected += it.id }
+                if (selected.size == shown.size) selected.clear() else shown.forEach { selected += it.id }
                 if (selected.isEmpty()) exitSelection() else updateSelection()
             }
             pressFeedback(this)
@@ -237,6 +247,8 @@ open class ClipsActivity : Activity() {
         more = labeledButton(this, IconDrawable.Kind.MORE, "More") {
             val pm = PopupMenu(this, more)
             if (remote == null && canEditShared()) pm.menu.add(0, 10, 49, "Add to collection…")
+            if (canEditShared()) pm.menu.add(0, 11, 48, "Tags…")
+            remote?.let { pm.menu.add(0, 12, 48, if (CloudDelete.canDelete(it)) "Move or copy to…" else "Copy to…") }
             if (collectionId != null && remote == null) pm.menu.add(0, 2, 51, "Delete from phone")
             if (remote == null) {
                 pm.menu.add(0, 8, 50, "Open in another app").isEnabled = selected.size == 1
@@ -261,6 +273,8 @@ open class ClipsActivity : Activity() {
                     }
                     9 -> FileReveal.show(this, selectedClips().singleOrNull())
                     10 -> addSelectedTo()
+                    11 -> TagSheet.show(this, sourceId, selectedClips(), clips) { exitSelection() }
+                    12 -> remote?.let { r -> MoveSheet.show(this, r, selectedClips().filter { it.id !in missingIds }) { exitSelection(); reload() } }
                 }
                 true
             }
@@ -272,6 +286,7 @@ open class ClipsActivity : Activity() {
         summary = Ui.label(this, "", 12f, Ui.GREY)
         if (asTab) root.addView(summary.apply { setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 2), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 2)) })
         root.addView(actionRow)
+        root.addView(buildFilterBar())
         banner = Ui.label(this, "Clips from earlier installs are hidden. Tap to show them.", 13f, Ui.ACCENT).apply {
             setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8))
             setBackgroundColor(0xFF2A2416.toInt())
@@ -320,6 +335,8 @@ open class ClipsActivity : Activity() {
         // protection badges: redraw after this device's marks were synced in the background
         com.motioncam.cloud.MarkSync.onSynced = { _ -> runOnUiThread { adapter.notifyDataSetChanged(); if (remote == null) reload() } }
         remote?.let { com.motioncam.remote.SharedSync.listeners += sharedSynced }
+        TagStore.listeners += tagsChanged
+        remote?.let { TagStore.syncAsync(this, it, maxAgeMs = 2 * 60_000L) }
         if (remote == null) com.motioncam.cloud.MarkSync.scheduleLocal(this)
         // remote folder: check for new clips now (if the list is a few minutes old) and every 5 minutes
         if (remote != null) {
@@ -332,6 +349,7 @@ open class ClipsActivity : Activity() {
 
     override fun onPause() {
         com.motioncam.remote.SharedSync.listeners -= sharedSynced
+        TagStore.listeners -= tagsChanged
         com.motioncam.cloud.MarkSync.onSynced = null
         ui.removeCallbacks(autoRefresh)
         super.onPause()
@@ -356,7 +374,10 @@ open class ClipsActivity : Activity() {
         Thread {
             var all = ClipStore.list(this)
             // only prune collections when every clip is visible (otherwise hidden clips would be dropped)
-            if (canSeeAll() || android.os.Build.VERSION.SDK_INT < 30) Collections.prune(this, all.map { it.id }.toSet())
+            if (canSeeAll() || android.os.Build.VERSION.SDK_INT < 30) {
+                Collections.prune(this, all.map { it.id }.toSet())
+                if (collectionId == null) TagStore.prune(this, all.map { it.id }.toSet())
+            }
             val cid = collectionId
             if (cid != null) {
                 val ids = Collections.get(this, cid)?.clipIds ?: emptySet<Long>()
@@ -373,6 +394,7 @@ open class ClipsActivity : Activity() {
                 setSummary(when {
                     all.isEmpty() && collectionId != null -> "No clips in this collection yet. In Clips, hold a clip to select it, then Add to…"
                     all.isEmpty() -> "No clips yet"
+                    filter.active -> filteredLine(all.size)
                     else -> "${all.size} clip${if (all.size == 1) "" else "s"} · ${sizeText(total)}" + if (asTab) "" else legend()
                 })
             }
@@ -484,7 +506,7 @@ open class ClipsActivity : Activity() {
                 refreshing = false
                 swipe?.isRefreshing = false
                 if (isFinishing) return@runOnUiThread
-                result.onSuccess { lastError = null; showRemote(it) }
+                result.onSuccess { lastError = null; showRemote(it); TagStore.syncAsync(this, src) }
                 result.onFailure { e ->
                     lastError = e.message ?: e.javaClass.simpleName
                     showRemote(clips.takeIf { collectionId == null } ?: RemoteRepo.cached(this, src))
@@ -537,7 +559,7 @@ open class ClipsActivity : Activity() {
             all.isEmpty() && lastError == null && (refreshing || src.lastRefresh == 0L) -> "Loading…"
             all.isEmpty() && cid != null -> "No clips in this collection yet. Hold a clip to select it, then Add to…"
             all.isEmpty() -> if (lastError != null) "Could not load this folder (tap for details)" else "No MotionCam clips in this folder yet$ago"
-            else -> "${all.size - missing} clips · ${sizeText(total)}" + ago +
+            else -> (if (filter.active) filteredLine(all.size - missing) else "${all.size - missing} clips · ${sizeText(total)}") + ago +
                 (if (missing > 0) " · $missing missing from the cloud" else "") +
                 (if (lastError != null) " · offline, showing the last list (tap for details)" else "") + if (asTab) "" else legend()
         })
@@ -564,13 +586,15 @@ open class ClipsActivity : Activity() {
         val out = ArrayList<Row>()
         // in the Clips tab the count is above the tiles; only the badges' legend (collections) is a first row, scrolling away
         if (!asTab || legend().isNotEmpty()) out += Row.Title
-        for ((day, items) in clips.groupBy { dayStart(it.startMs) }.toSortedMap(compareByDescending { it })) {
+        shown = applyFilter(clips)
+        updateFilterBar()
+        for ((day, items) in shown.groupBy { dayStart(it.startMs) }.toSortedMap(compareByDescending { it })) {
             out += Row.Header(day, items)
             if (day !in collapsed) items.chunked(cols).forEach { out += Row.Items(it) }
         }
         rows = out
         display = out.filterIsInstance<Row.Items>().flatMap { it.clips }
-        selected.retainAll(clips.map { it.id }.toSet())
+        selected.retainAll(shown.map { it.id }.toSet())
         if (selecting && selected.isEmpty()) exitSelection() else updateSelection()
         list.post { updatePinned() }
     }
@@ -738,68 +762,106 @@ open class ClipsActivity : Activity() {
         pinned.translationY = dy
     }
 
-    // ------------------------------------------------------------------ calendar
+    // ------------------------------------------------------------------ search
 
-    /** Month calendar where only days that have clips are highlighted and tappable. */
-    private fun showCalendar() {
-        if (clips.isEmpty()) { Toast.makeText(this, "No clips yet", Toast.LENGTH_SHORT).show(); return }
-        val counts = clips.groupingBy { dayStart(it.startMs) }.eachCount()
-        fun monthOf(ms: Long) = Calendar.getInstance().apply { timeInMillis = ms; set(Calendar.DAY_OF_MONTH, 1) }.let { it.get(Calendar.YEAR) * 12 + it.get(Calendar.MONTH) }
-        val months = counts.keys.map { monthOf(it) }.toSortedSet()
-        val start = if (pinnedDay != Long.MIN_VALUE) monthOf(pinnedDay) else months.last()
-        var month = if (start in months) start else months.last()
-        val ctx = this
-        val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; val p = Ui.dp(ctx, 12); setPadding(p, p, p, 0) }
-        val head = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val prev = Ui.label(ctx, "‹", 26f).apply { setPadding(Ui.dp(ctx, 12), 0, Ui.dp(ctx, 12), 0) }
-        val next = Ui.label(ctx, "›", 26f).apply { setPadding(Ui.dp(ctx, 12), 0, Ui.dp(ctx, 12), 0) }
-        val title = Ui.label(ctx, "", 17f).apply { gravity = Gravity.CENTER }
-        head.addView(prev); head.addView(title, LinearLayout.LayoutParams(0, -2, 1f)); head.addView(next)
-        box.addView(head)
-        val grid = GridLayout(ctx).apply { columnCount = 7 }
-        // the month in the middle of the window; days as large as the window allows (up to 48 dp)
-        box.addView(grid, LinearLayout.LayoutParams(-2, -2).apply { topMargin = Ui.dp(ctx, 8); gravity = Gravity.CENTER_HORIZONTAL })
-        lateinit var dialog: AlertDialog
-        val winW = minOf(resources.displayMetrics.widthPixels, Ui.dp(ctx, 560))
-        val cell = ((winW - Ui.dp(ctx, 96)) / 7).coerceIn(Ui.dp(ctx, 36), Ui.dp(ctx, 48))
-        fun render() {
-            grid.removeAllViews()
-            val cal = Calendar.getInstance().apply { clear(); set(month / 12, month % 12, 1) }
-            title.text = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(cal.time)
-            prev.alpha = if (months.headSet(month).isEmpty()) 0.25f else 1f
-            next.alpha = if (months.tailSet(month + 1).isEmpty()) 0.25f else 1f
-            // weekday names, starting on the locale's first day of the week
-            val fdw = cal.firstDayOfWeek
-            val names = java.text.DateFormatSymbols.getInstance().shortWeekdays
-            for (i in 0 until 7) {
-                grid.addView(Ui.label(ctx, names[(fdw - 1 + i) % 7 + 1].take(2), 12f, Ui.GREY).apply { gravity = Gravity.CENTER },
-                    GridLayout.LayoutParams().apply { width = cell; height = Ui.dp(ctx, 26) })
-            }
-            val lead = (cal.get(Calendar.DAY_OF_WEEK) - fdw + 7) % 7
-            repeat(lead) { grid.addView(View(ctx), GridLayout.LayoutParams().apply { width = cell; height = cell }) }
-            val today = dayStart(System.currentTimeMillis())
-            for (d in 1..cal.getActualMaximum(Calendar.DAY_OF_MONTH)) {
-                cal.set(Calendar.DAY_OF_MONTH, d)
-                val day = dayStart(cal.timeInMillis)
-                val n = counts[day] ?: 0
-                val tv = Ui.label(ctx, "$d", 14f, if (n > 0) Color.BLACK else 0xFF55595F.toInt()).apply {
-                    gravity = Gravity.CENTER
-                    if (n > 0) {
-                        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Ui.ACCENT) }
-                        setOnClickListener { dialog.dismiss(); collapsed.remove(day); buildRows(); scrollToDay(day) }
-                    } else if (day == today) {
-                        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setStroke(Ui.dp(ctx, 1), Ui.GREY) }
-                    }
-                }
-                grid.addView(tv, GridLayout.LayoutParams().apply { width = cell - Ui.dp(ctx, 4); height = cell - Ui.dp(ctx, 4); setMargins(Ui.dp(ctx, 2), Ui.dp(ctx, 2), Ui.dp(ctx, 2), Ui.dp(ctx, 2)) })
+    /** Collections of this view (for Search), with their clips. */
+    private fun colInfos(): List<SearchSheet.ColInfo> =
+        store.all(this).filter { it.id != collectionId }.map { SearchSheet.ColInfo(it.id, it.name, it.clipIds.toSet()) }
+
+    private fun applyFilter(all: List<Clip>): List<Clip> {
+        if (!filter.active) return all
+        val cols = if (filter.hasCols) colInfos().associate { it.id to it.ids } else emptyMap()
+        // a collection that was deleted meanwhile can't match (and is dropped from the filter)
+        if (filter.hasCols && (filter.colsIn + filter.colsOut).any { it !in cols }) {
+            filter.colsIn.retainAll(cols.keys); filter.colsOut.retainAll(cols.keys)
+            ClipFilter.save(this, filterKey, filter)
+            if (!filter.active) return all
+        }
+        val src = sourceId
+        return all.filter { c -> filter.matches(c, TagStore.tagsOf(this, src, c)) { id -> cols[id]?.contains(c.id) == true } }
+    }
+
+    private fun openSearch() {
+        val all = clips.filter { it.id !in missingIds }
+        val where = when {
+            collectionId != null -> (store.get(this, collectionId!!)?.name ?: "Collection") + (remote?.let { " · ${it.name}" } ?: "")
+            remote != null -> remote!!.name
+            else -> "Clips on this phone"
+        }
+        SearchSheet.show(this, where, filter, all, { TagStore.tagsOf(this, sourceId, it) }, colInfos()) { f ->
+            setFilter(f)
+            list.setSelection(0)
+        }
+    }
+
+    private fun setFilter(f: ClipFilter) {
+        filter = f
+        ClipFilter.save(this, filterKey, f)
+        reload()
+    }
+
+    /** "Showing 12 of 340 clips · 410 MB" while Search filters the list. */
+    private fun filteredLine(total: Int): String =
+        if (shown.isEmpty()) "No clips match the search (of $total)"
+        else "Showing ${shown.size} of $total clip${if (total == 1) "" else "s"} · ${sizeText(shown.sumOf { it.size })}"
+
+    /** The bar above the clips while they're filtered: what is filtered (tap ✕ to drop a part) and Clear. */
+    private fun buildFilterBar(): View {
+        filterBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF2A2416.toInt())
+            setPadding(Ui.dp(this@ClipsActivity, 10), Ui.dp(this@ClipsActivity, 6), Ui.dp(this@ClipsActivity, 4), Ui.dp(this@ClipsActivity, 6))
+            visibility = View.GONE
+        }
+        filterBar.addView(ImageView(this).apply {
+            setImageDrawable(IconDrawable(IconDrawable.Kind.SEARCH, Ui.ACCENT))
+            contentDescription = "Change the search"
+            setOnClickListener { openSearch() }
+        }, LinearLayout.LayoutParams(Ui.dp(this, 20), Ui.dp(this, 20)).apply { rightMargin = Ui.dp(this@ClipsActivity, 8) })
+        filterParts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        filterBar.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(filterParts) },
+            LinearLayout.LayoutParams(0, -2, 1f))
+        filterBar.addView(Ui.label(this, "Clear", 14f, Ui.ACCENT).apply {
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(Ui.dp(this@ClipsActivity, 12), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 12), Ui.dp(this@ClipsActivity, 8))
+            contentDescription = "Clear the search and show all clips"
+            setOnClickListener { setFilter(ClipFilter()) }
+            pressFeedback(this)
+        })
+        return filterBar
+    }
+
+    private fun updateFilterBar() {
+        val on = filter.active
+        filterBar.visibility = if (on) View.VISIBLE else View.GONE
+        filterParts.removeAllViews()
+        if (on) {
+            val names = store.all(this).associate { it.id to it.name }
+            for (part in filter.parts { names[it] }) {
+                filterParts.addView(Ui.chip(this, part.text + "  ✕").apply {
+                    Ui.setChipState(this, true)
+                    maxLines = 1
+                    minWidth = 0
+                    contentDescription = "Remove filter: ${part.text}"
+                    setOnClickListener { setFilter(filter.copy().also { part.remove(it) }) }
+                }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = Ui.dp(this@ClipsActivity, 6) })
             }
         }
-        prev.setOnClickListener { months.headSet(month).lastOrNull()?.let { month = it; render() } }
-        next.setOnClickListener { months.tailSet(month + 1).firstOrNull()?.let { month = it; render() } }
-        render()
-        dialog = AlertDialog.Builder(ctx).setView(box).setNegativeButton("Close", null).create()
-        dialog.show()
+        // the Search tile shows that clips are filtered, and by how many kinds of filters
+        searchTile?.let { t ->
+            val tint = if (on) Ui.ACCENT else 0xFFFFFFFF.toInt()
+            (t.getChildAt(0) as? ImageView)?.setImageDrawable(IconDrawable(IconDrawable.Kind.SEARCH, tint))
+            (t.getChildAt(1) as? TextView)?.apply {
+                text = if (on) "Search · ${filter.count}" else "Search"
+                setTextColor(if (on) Ui.ACCENT else 0xFFD0D3D8.toInt())
+            }
+            t.contentDescription = if (on) "Search, ${filter.count} filter${if (filter.count == 1) "" else "s"} on" else "Search"
+        }
     }
+
+    /** Tags changed (here, or synced from another phone): a tag filter shows the new result. */
+    private val tagsChanged: (String?) -> Unit = { scope -> if (scope == sourceId && filter.hasTags && !isFinishing) reload() }
 
     /**
      * Best thumbnail (frame with the action) when ready; until then a quick placeholder frame from just after
@@ -988,7 +1050,7 @@ open class ClipsActivity : Activity() {
         if (switching) { onSelecting(selecting); animateBars(selecting) }
         val sel = selectedClips().filter { it.id !in missingIds }
         selTitle.text = "${selected.size} selected"
-        selAllBtn.text = if (selected.size == clips.size && clips.isNotEmpty()) "Select none" else "Select all"
+        selAllBtn.text = if (selected.size == shown.size && shown.isNotEmpty()) "Select none" else "Select all"
         favBtn?.let { b ->
             val allFav = selected.isNotEmpty() && selected.all { it in favIds }
             (b.getChildAt(0) as? ImageView)?.setImageDrawable(IconDrawable(if (allFav) IconDrawable.Kind.STAR_ON else IconDrawable.Kind.STAR))

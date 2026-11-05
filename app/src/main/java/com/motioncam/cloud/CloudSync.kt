@@ -636,6 +636,7 @@ object CloudSync {
             // already in the cloud folder (e.g. uploaded before a reinstall)? then don't upload it again
             val existing = listing(cfg, p, folder)[clip.name]
             if (existing != null && existing.size > 0) {
+                uploadTags(ctx, p, folder, clip)
                 done(ctx, job, cfg, clip, existing, uploadThumb(ctx, cfg, p, folder, clip))
                 return true
             }
@@ -651,6 +652,7 @@ object CloudSync {
                     job.progress = (sent * 100 / src.size.coerceAtLeast(1)).toInt().coerceIn(0, 100)
                 })
             job.phase = "Thumbnail"
+            uploadTags(ctx, p, folder, clip)
             done(ctx, job, cfg, clip, rf, uploadThumb(ctx, cfg, p, folder, clip))
             synchronized(lock) { freeSpace[cfg.dest]?.let { fs -> fs.free = fs.free?.minus(rf.size) } }
             return true
@@ -796,6 +798,13 @@ object CloudSync {
      * viewing this folder as a remote folder see the right frame without downloading the video. The clip's
      * length is part of the name. Best effort: returns false if it could not be done now.
      */
+    /** A clip's tags go into the folder with it, so they show (and can be searched) on every phone viewing it. */
+    private fun uploadTags(ctx: Context, p: CloudProvider, folder: String, clip: Clip) {
+        val t = com.motioncam.TagStore.tagsOf(ctx, null, clip)
+        if (t.isEmpty()) return
+        try { com.motioncam.TagStore.writeTo(ctx, p, folder, mapOf(clip.name to t)) } catch (_: Exception) {}
+    }
+
     private fun uploadThumb(ctx: Context, cfg: CloudConfig, p: CloudProvider, folder: String, clip: Clip): Boolean {
         if (!Prefs(ctx).cloudThumbs) return false
         return try {

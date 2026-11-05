@@ -47,7 +47,7 @@ reopens where you were (Home and its last tab, or Camera mode).
   exactly what you choose: when, which phones, which kinds.
 * **Camera** (the middle tab): this phone as a camera, full screen – the live preview, Pro controls and Start/Stop.
   A red eye shows while your other phones watch it; tap it to see who. The tab's dot: green while monitoring, red while watched.
-* **Clips**: *On this phone* or *Remote folders*; Collections · Calendar · Timeline; each clip's time and length with its
+* **Clips**: *On this phone* or *Remote folders*; Collections · Search · Timeline; each clip's time and length with its
   marks – protected, backed up, favourite.
 * **Settings**: categories (Camera & recording, Motion detection, Your phones, Alerts & activity, Remote folders & backup,
   Storage & protection, Player, Web viewer, Display, About & help, Reset).
@@ -55,7 +55,7 @@ reopens where you were (Home and its last tab, or Camera mode).
 | Pro controls & focus peaking | Clips gallery | Timeline player | Collections |
 |:---:|:---:|:---:|:---:|
 | <img src="docs/screenshots/preview-focus-peaking.jpg" width="200" alt="Live preview with manual focus and green focus peaking"> | <img src="docs/screenshots/clips.jpg" width="200" alt="Clips grouped by day with thumbnails"> | <img src="docs/screenshots/player-timeline.jpg" width="200" alt="Player with the clip filmstrip timeline"> | <img src="docs/screenshots/collections.jpg" width="200" alt="Collections with Favourites"> |
-| Manual focus (green = sharp edges), ISO, shutter, WB and zoom like a Pro video mode; yellow = automatic | Day sections, sticky headers, calendar, multi-select | Plays clips back to back with a scrubbable filmstrip | Group clips into collections (soft links) |
+| Manual focus (green = sharp edges), ISO, shutter, WB and zoom like a Pro video mode; yellow = automatic | Day sections, sticky headers, search, multi-select | Plays clips back to back with a scrubbable filmstrip | Group clips into collections (soft links) |
 
 ## Build the APK
 
@@ -163,7 +163,7 @@ when) so they can be selected and **protected again** in one go.
 
 ## Remote folders (view another phone's backups)
 Clips → **Remote folders** opens backup folders from other devices in the normal gallery and timeline player: day
-sections, calendar, **shared collections**, filmstrip and back-to-back playback.
+sections, Search, **shared collections**, tags, filmstrip and back-to-back playback.
 Clips are never uploaded or renamed there. **Delete from cloud** (selection, day menu or player ⋮; same confirmation as
 on the phone) deletes clips that are not protected, with their thumbnail, marks and collection entries; protected clips
 are always kept. Dropbox viewer links are fully read-only.
@@ -193,6 +193,35 @@ are always kept. Dropbox viewer links are fully read-only.
   phone's automatic clean-up (age limit, size cap, low storage), nor when the folder deletes its copy. They aren't backed up
   by themselves, but **Back up to…** shows the folder they came from (ticked while they are still in it) and can put them
   in any other folder, or take them out of one.
+
+
+## Search and tags
+* **Search** (the tile next to Collections) opens a full screen of filters; the button at the bottom says how many
+  clips match ("Show 12 clips"), ✕ closes without changing anything.
+  * **Date**: Today, Yesterday, Last 7 / 30 days, or the calendar – tap a day, then another day for a range. Days with
+    clips have a dot.
+  * **Tags** and **Collections**: tap once to include ✓, again to exclude ✕, once more to clear. *Any* / *All* says
+    whether a clip needs one or every included tag (collection). Excluded ones always hide a clip. With many tags, type
+    to find one; the most used come first.
+  * **Length** and **File size**: quick ranges, or type a minimum and/or maximum.
+  * **Show clips that match all filters / any filter**: how the different kinds combine (all by default).
+* While clips are filtered, a yellow bar above them lists each filter (tap one to drop it) with **Clear**, the count
+  reads "Showing 12 of 340 clips", and the tile reads "Search · 2". Days without matching clips are hidden.
+* Each view keeps its own search (this phone, each remote folder, each collection), also when you switch between
+  *On this phone* and *Remote folders* or close the app.
+* **Tags…** (select clips → More, or ⋮ while playing): tick tags on or off, type to find one or make a new one. The
+  player shows a clip's tags under its time.
+  * A remote folder's tags are stored **in the folder** (tiny files in a hidden `.tags` subfolder), so every phone
+    viewing it sees and searches the same tags; changes made offline are sent later. Viewer links are read-only.
+  * This phone's clips have their own tags on the phone. Tags travel with a clip: **Save to phone**, **Back up to…**,
+    and **Move / Copy** keep them. Deleting a clip from the cloud removes its tags there.
+
+## Move or copy between remote folders
+Select clips in a remote folder → More → **Move or copy to…** (or ⋮ while playing), pick another remote folder – also
+on another service (Drive ⇄ Dropbox ⇄ your own server). Each clip is downloaded to this phone, uploaded there with its
+thumbnail and tags, and for **Move** then deleted from the first folder for every phone (after a confirmation;
+protected clips are copied but stay). Clips already there (same name and size) aren't uploaded again. Collections and
+protection stay with the first folder. A viewer link's clips can only be copied.
 
 ## Your phones (live connection)
 Settings → **Your phones** links your phones through Firebase (Google's realtime database, free tier). Phones only

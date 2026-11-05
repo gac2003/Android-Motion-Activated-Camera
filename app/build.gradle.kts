@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -8,10 +10,10 @@ plugins {
  * credentials.properties in the project folder (local builds; never committed). See SETUP.md.
  * Anything missing simply turns that feature off in the build ("not set up in this build").
  */
-val credentials = java.util.Properties().apply {
+val credentials = Properties().apply {
     rootProject.file("credentials.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
-fun cred(name: String): String = (System.getenv(name)?.takeIf { it.isNotBlank() } ?: credentials.getProperty(name) ?: "").trim()
+fun cred(name: String): String = (System.getenv(name)?.takeIf { it.isNotBlank() } ?: credentials.getProperty(name).orEmpty()).trim()
 fun str(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {

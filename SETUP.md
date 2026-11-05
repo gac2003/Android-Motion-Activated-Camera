@@ -104,7 +104,7 @@ limit is reached, Firebase pauses the database until the next month.
   (or `assembleRelease` with the signing environment variables from step 2).
 * GitHub: push to your fork; the *Build APK* workflow produces `MotionCam.apk`.
 
-Check: Settings → Live connection should not say "not set up in this build"; Remote Folders → Dropbox should open
+Check: Settings → Live connection should not say "not set up in this build"; Remote Folders → ＋ Add → Back up this phone to… → Dropbox should open
 Dropbox's sign-in page.
 
 ## Changing credentials later

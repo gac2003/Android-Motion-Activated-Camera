@@ -79,7 +79,7 @@ class OpenClipActivity : Activity() {
         if (folders == null || folders.length() == 0) {
             f.line("This clip is only on the camera phone.")
             f.note("The camera doesn't back up its clips to the cloud, so other phones can't play them. Turn on Cloud backup " +
-                "on the camera phone (Clips → Remote Folders → Back up this phone), then add that folder here in Clips → Remote Folders.")
+                "on the camera phone (Clips → Remote Folders → ＋ Add → Back up this phone to…), then add that folder here in Clips → Remote Folders.")
             camButtons(); return
         }
         val list = sources()

@@ -79,7 +79,7 @@ class ProtectedActivity : Activity() {
         prefs = Prefs(this)
         spaces = intent.getStringExtra(EXTRA_SPACE)?.let { listOf(it) } ?: MarkSync.localSpaces(this)
         if (spaces.isEmpty()) {
-            Toast.makeText(this, "Set up cloud backup first (Clips → Remote Folders → Back up this phone)", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Set up cloud backup first (Clips → Remote Folders → ＋ Add → Back up this phone to…)", Toast.LENGTH_LONG).show()
             finish(); return
         }
         space = spaces.first()

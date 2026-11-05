@@ -608,7 +608,7 @@ object CloudSync {
             job.error = e.message
             when (e.kind) {
                 CloudException.Kind.AUTH -> {
-                    cfg.blocked = "Sign-in problem — reconnect in Clips → Remote Folders → Back up this phone"
+                    cfg.blocked = "Sign-in problem — reconnect in Clips → Remote Folders → the folder's ⋮ → Backup settings"
                     job.nextAt = now + 30 * 60_000L
                     notify(ctx, cfg.kind, "${cfg.kind.label}: sign-in needed", e.message ?: "")
                 }

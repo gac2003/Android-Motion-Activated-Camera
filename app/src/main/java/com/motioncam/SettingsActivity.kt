@@ -163,16 +163,16 @@ class SettingsActivity : Activity() {
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
 
         // backup of this phone's clips, upload rules and other phones' folders now live together in Clips → Remote Folders
-        title("Cloud backup & remote folders", Prefs.CLOUD_KEYS + Prefs.REMOTE_FOLDER_KEYS)
-        note("Backing up this phone's clips (Google Drive, Dropbox, FTP, SFTP), the upload queue and upload rules, and viewing " +
-            "other phones' backups are all in one place: Clips → Remote Folders.")
+        title("Remote folders (cloud backup)", Prefs.CLOUD_KEYS + Prefs.REMOTE_FOLDER_KEYS)
+        note("Cloud folders of clips (Google Drive, Dropbox, FTP, SFTP): the one this phone backs up to and other phones' " +
+            "folders, with the upload queue and upload rules, are all in Clips → Remote Folders.")
         box.addView(Ui.chip(this, "").apply {
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             val chip = this
             val update = {
                 val on = com.motioncam.cloud.CloudSync.enabledKinds(this@SettingsActivity)
                 val q = com.motioncam.cloud.CloudSync.counts(this@SettingsActivity, null)
-                val t = "Open backup & Remote Folders\n" + (if (on.isEmpty()) "Backup is off" else "Backing up to " + on.joinToString { it.label }) +
+                val t = "Open Remote Folders\n" + (if (on.isEmpty()) "Backup is off" else "Backing up to " + on.joinToString { it.label }) +
                     (if (q.queued > 0) " · ${q.queued} waiting" else "") + (if (q.failed > 0) " · ${q.failed} failed" else "")
                 if (chip.text != t) chip.text = t
             }
@@ -233,7 +233,7 @@ class SettingsActivity : Activity() {
             row.addView(Ui.label(this, "Reset", 12f, Ui.GREY).apply {
                 setPadding(Ui.dp(this@SettingsActivity, 12), Ui.dp(this@SettingsActivity, 4), 0, Ui.dp(this@SettingsActivity, 4))
                 setOnClickListener { confirmReset("Reset \"$s\"?", "Settings in this section go back to their defaults." + when (s) {
-                    "Cloud backup & remote folders" -> "\n\nAlso each destination's clean-up rules (when full, size cap, delete after N days, protected " +
+                    "Remote folders (cloud backup)" -> "\n\nAlso each destination's clean-up rules (when full, size cap, delete after N days, protected " +
                         "collections) and paused uploads resume. Accounts, folders and whether backup is on are kept."
                     "Live connection" -> "\n\nThe live connection is turned off and this phone becomes viewer-only; alert settings and " +
                         "muted cameras are reset. Your sign-in / network code and PINs are kept."

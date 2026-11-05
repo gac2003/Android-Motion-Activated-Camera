@@ -76,10 +76,14 @@ Turn the phone sideways and every screen uses the width instead of stacking (por
   someone watches); on the right a see-through column with the controls (scroll it), **⚙** at the top, a round
   **Start / Stop** in the middle and **FILL / FIT** at the bottom – the picture fills the screen behind the controls or
   fits beside them (remembered). A control's slider appears along the bottom of the picture.
-* **Player**: the video takes the whole screen; ⏮ ⏭, a shorter filmstrip, speed, skip and sound float on one row over
-  its bottom edge, and the clip count moves to the top. While playing they fade after a few seconds; tap to bring them
-  back (that tap doesn't pause).
+* **Player**: the video keeps clear of the controls, which take one row under it: ⏮ ⏭, a shorter filmstrip, speed,
+  skip and sound; the clip count moves to the top.
 * **A camera's screen** (from its card): the picture on the left, status and controls on the right.
+
+### Full-screen player
+The small **⛶** at the video's bottom right (portrait or landscape) goes full screen, like Samsung's player: the
+picture takes the whole screen (the phone's bars hide), the controls float over it with a small **play / pause pill**
+at the bottom, a tap shows or hides them (they fade by themselves while playing), and ⛶ or Back leaves.
 
 ### Versions
 Releases are named like the app's version: **MotionCam 1.1.0**, 1.1.1, … (tag `v1.1.0`). The major and minor numbers

@@ -175,6 +175,8 @@ class PlayerActivity : Activity() {
                 return true
             }
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                // full screen: a tap shows / hides the controls (play / pause is the pill at the bottom)
+                if (full) { setChrome(chromeHidden); return true }
                 // touch protection: a stray tap just after skipping never pauses / plays
                 if (System.currentTimeMillis() - lastSkipAt < SKIP_GUARD_MS) return true
                 togglePlay()
@@ -202,14 +204,8 @@ class PlayerActivity : Activity() {
             override fun onScaleEnd(d: android.view.ScaleGestureDetector) { pinching = false; if (vScale < 1.03f) resetZoom() }
         })
         var tapSkipping = false
-        var waking = false
         video.setOnTouchListener { _, e ->
-            // landscape, controls hidden: the first tap only brings them back (like YouTube)
-            if (landP && e.actionMasked == MotionEvent.ACTION_DOWN && e.pointerCount == 1) {
-                if (chromeHidden) { setChrome(true); waking = true; return@setOnTouchListener true }
-                pokeChrome()
-            }
-            if (waking) { if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) waking = false; return@setOnTouchListener true }
+            if (full && e.actionMasked == MotionEvent.ACTION_DOWN && !chromeHidden) pokeChrome()
             sd.onTouchEvent(e)
             // after a double-tap skip, each further quick tap on that side skips again (like YouTube)
             if (e.actionMasked == MotionEvent.ACTION_DOWN && vScale <= 1.01f) {
@@ -472,7 +468,17 @@ class PlayerActivity : Activity() {
 
     private fun setPlaying(p: Boolean) {
         playing = p
-        if (landP) { if (p) pokeChrome() else setChrome(true) }
+        if (::playPill.isInitialized) {
+            playPill.setImageDrawable(IconDrawable(if (p) IconDrawable.Kind.PAUSE else IconDrawable.Kind.PLAY))
+            playPill.contentDescription = if (p) "Pause" else "Play"
+        }
+        if (full) {
+            // full screen: the pill shows play / pause, no big button over the picture
+            if (p) pokeChrome() else setChrome(true)
+            bigPlay.animate().cancel(); bigPlay.visibility = View.GONE
+            if (p) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            return
+        }
         // screen stays on only while a video is actually playing
         if (p) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -489,59 +495,122 @@ class PlayerActivity : Activity() {
         else { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PLAY)); bigPlay.alpha = 1f; bigPlay.visibility = View.VISIBLE }
     }
 
-    // ------------------------------------------------------------------ portrait / landscape
+    // ------------------------------------------------------------------ portrait / landscape / full screen
 
     private lateinit var rootView: LinearLayout
     private lateinit var menuBtnV: View
-    /** Landscape on a phone: the video fills the screen, the controls float over its bottom edge on one row. */
-    private var landP = false
+    /** The filmstrip and the button row (with the play pill in full screen). */
+    private lateinit var ctrls: LinearLayout
+    private lateinit var playPill: android.widget.ImageView
+    private lateinit var fsBtn: android.widget.ImageView
+    /** Full screen (like Samsung's player): the picture uses the whole screen, the controls float over it. */
+    private var full = false
     private var chromeHidden = false
-    private val hideChrome = Runnable { if (landP && playing && !scrubbing && vScale <= 1.01f) setChrome(false) }
+    private val hideChrome = Runnable { if (full && playing && !scrubbing && vScale <= 1.01f) setChrome(false) }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         arrange()
         Ui.statusBarForOrientation(this)
+        if (full) immersive(true)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (full) { setFull(false); return }
+        @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
+    private fun setFull(on: Boolean) {
+        full = on
+        immersive(on)
+        arrange()
+        if (on) { bigPlay.animate().cancel(); bigPlay.visibility = View.GONE; pokeChrome() }
+        else if (!playing) { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PLAY)); bigPlay.alpha = 1f; bigPlay.visibility = View.VISIBLE }
+    }
+
+    /** Full screen hides the phone's status and navigation bars (a swipe shows them briefly). */
+    private fun immersive(on: Boolean) {
+        val c = window.insetsController ?: return
+        if (on) {
+            c.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            c.hide(android.view.WindowInsets.Type.systemBars())
+        } else {
+            c.show(android.view.WindowInsets.Type.navigationBars())
+            Ui.statusBarForOrientation(this)
+        }
     }
 
     /**
-     * Portrait: the video, the filmstrip (84 dp) and a row of buttons under it.
-     * Landscape phones, like other phones' players: the video takes the whole screen; one row floats over its bottom
-     * edge on a dark gradient – ⏮ ⏭, a shorter filmstrip (56 dp), speed, skip and sound – and the clip count / time
-     * moves into the top bar. While playing, the controls fade out after a few seconds; a tap brings them back.
+     * Portrait: the video, then the filmstrip (84 dp) and a row of buttons. Landscape phones: the video, then ONE row –
+     * ⏮ ⏭, a shorter filmstrip (56 dp), speed, skip, sound – with the clip count in the top bar. The video always keeps
+     * clear of them. A small ⛶ at the video's bottom right goes full screen: there the picture takes the whole screen,
+     * the controls float over it on a dark gradient with a play / pause pill, a tap shows or hides them (they fade by
+     * themselves while playing), and ⛶ (or Back) leaves.
      */
     private fun arrange() {
         val cfg = resources.configuration
         val land = cfg.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE && cfg.smallestScreenWidthDp < 600
         val d = { v: Int -> Ui.dp(this, v) }
         fun detach(v: View) { (v.parent as? android.view.ViewGroup)?.removeView(v) }
-        detach(strip); detach(bar); detach(info)
-        landP = land
+        if (!::ctrls.isInitialized) {
+            ctrls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            playPill = android.widget.ImageView(this).apply {
+                setImageDrawable(IconDrawable(if (playing) IconDrawable.Kind.PAUSE else IconDrawable.Kind.PLAY))
+                background = GradientDrawable().apply { cornerRadius = d(20).toFloat(); setColor(0x99202328.toInt()) }
+                setPadding(d(16), d(8), d(16), d(8))
+                setOnClickListener { togglePlay(); pokeChrome() }
+            }
+            fsBtn = android.widget.ImageView(this).apply {
+                setPadding(d(7), d(7), d(7), d(7))
+                setOnClickListener { setFull(!full) }
+            }
+        }
+        listOf(strip, bar, info, playPill, fsBtn, ctrls).forEach { detach(it) }
+        ctrls.removeAllViews()
+        // the row: on its own under the filmstrip (portrait) or with the filmstrip in it (landscape)
         if (land) {
             bar.addView(strip, 2, LinearLayout.LayoutParams(0, d(56), 1f).apply { setMargins(d(4), 0, d(4), 0) })
-            bar.background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xCC000000.toInt(), 0x00000000))
-            bar.setPadding(d(8), d(18), d(8), d(6))
-            video.addView(bar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+            bar.setPadding(d(8), d(4), d(8), d(4))
             topBar.addView(info, topBar.indexOfChild(menuBtnV), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = d(8) })
             info.setTextColor(0xFFD0D3D8.toInt()); info.setShadowLayer(4f, 0f, 0f, Color.BLACK)
-            pokeChrome()
         } else {
-            ui.removeCallbacks(hideChrome)
-            setChrome(true)
-            bar.background = null
             bar.setPadding(d(12), d(6), d(12), d(12))
-            info.setTextColor(Ui.GREY); info.setShadowLayer(0f, 0f, 0f, 0)
+            info.setTextColor(if (full) 0xFFD0D3D8.toInt() else Ui.GREY); info.setShadowLayer(if (full) 4f else 0f, 0f, 0f, Color.BLACK)
             bar.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
-            rootView.addView(strip, LinearLayout.LayoutParams(-1, d(84)))
-            rootView.addView(bar)
+        }
+        if (full) {
+            ctrls.addView(playPill, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = d(6) })
+            if (!land) ctrls.addView(strip, LinearLayout.LayoutParams(-1, d(72)))
+            ctrls.addView(bar)
+            bar.addView(fsBtn, LinearLayout.LayoutParams(d(40), d(40)))
+            fsBtn.setImageDrawable(IconDrawable(IconDrawable.Kind.FIT_IN))
+            fsBtn.background = null
+            fsBtn.contentDescription = "Leave full screen"
+            ctrls.background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xD9000000.toInt(), 0x00000000))
+            ctrls.setPadding(0, d(24), 0, 0)
+            video.addView(ctrls, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+        } else {
+            setChrome(true)
+            ui.removeCallbacks(hideChrome)
+            if (!land) ctrls.addView(strip, LinearLayout.LayoutParams(-1, d(84)))
+            ctrls.addView(bar)
+            ctrls.background = null
+            ctrls.setPadding(0, 0, 0, 0)
+            rootView.addView(ctrls, LinearLayout.LayoutParams(-1, -2))
+            // a small ⛶ in the video's corner, clear of the controls
+            fsBtn.setImageDrawable(IconDrawable(IconDrawable.Kind.FULLSCREEN))
+            fsBtn.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x66000000) }
+            fsBtn.contentDescription = "Full screen"
+            video.addView(fsBtn, FrameLayout.LayoutParams(d(34), d(34), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, d(8), d(8)) })
         }
     }
 
-    /** Shows or fades out the floating controls (landscape). */
+    /** Shows or fades out the floating controls (full screen). */
     private fun setChrome(show: Boolean) {
         if (show == !chromeHidden && (!show || topBar.alpha == 1f)) return
         chromeHidden = !show
-        for (v in listOf<View>(topBar, bar)) {
+        for (v in listOf<View>(topBar, ctrls)) {
             if (v.visibility == View.GONE) continue   // zoomed in: they stay hidden
             v.animate().cancel()
             if (show) { v.visibility = View.VISIBLE; v.animate().alpha(1f).setDuration(150).start() }
@@ -553,7 +622,7 @@ class PlayerActivity : Activity() {
     /** Any touch: the controls stay a few seconds longer. */
     private fun pokeChrome() {
         ui.removeCallbacks(hideChrome)
-        if (landP) ui.postDelayed(hideChrome, 3500)
+        if (full) ui.postDelayed(hideChrome, 3500)
     }
 
     private fun togglePlay() {
@@ -752,11 +821,12 @@ class PlayerActivity : Activity() {
             topBar.visibility = v
             strip.visibility = v
             bar.visibility = v
-            if (!zoomed) { topBar.alpha = 1f; bar.alpha = 1f; chromeHidden = false }
+            if (::fsBtn.isInitialized) { fsBtn.visibility = v; playPill.visibility = v }
+            if (!zoomed) { topBar.alpha = 1f; ctrls.alpha = 1f; ctrls.visibility = View.VISIBLE; chromeHidden = false }
         }
         zoomReset.visibility = if (zoomed) View.VISIBLE else View.GONE
         if (zoomed) { bigPlay.animate().cancel(); bigPlay.visibility = View.GONE }
-        else if (!playing) { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PLAY)); bigPlay.alpha = 1f; bigPlay.visibility = View.VISIBLE }
+        else if (!playing && !full) { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PLAY)); bigPlay.alpha = 1f; bigPlay.visibility = View.VISIBLE }
     }
 
     private fun resetZoom() {

@@ -95,14 +95,22 @@ class SearchSheet private constructor(
         root.addView(ScrollView(a).apply { addView(body); isFillViewport = true }, LinearLayout.LayoutParams(-1, 0, 1f))
 
         // bottom: how many clips the filter shows, and showing them
-        val bottom = LinearLayout(a).apply { setPadding(d(16), d(10), d(16), d(16)); setBackgroundColor(0xFF1A1C20.toInt()) }
-        showBtn = Ui.label(a, "", 16f, Color.BLACK).apply {
-            gravity = Gravity.CENTER; setPadding(0, d(14), 0, d(14)); setTypeface(typeface, Typeface.BOLD)
+        // landscape: a slim bar with the button at the end (the usual place for a sheet's main action when wide)
+        val land = a.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val bottom = LinearLayout(a).apply {
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            if (land) setPadding(d(16), d(6), d(16), d(6)) else setPadding(d(16), d(10), d(16), d(16))
+            setBackgroundColor(0xFF1A1C20.toInt())
+        }
+        showBtn = Ui.label(a, "", if (land) 14f else 16f, Color.BLACK).apply {
+            gravity = Gravity.CENTER
+            if (land) setPadding(d(24), d(9), d(24), d(9)) else setPadding(0, d(14), 0, d(14))
+            setTypeface(typeface, Typeface.BOLD)
             background = GradientDrawable().apply { cornerRadius = d(26).toFloat(); setColor(Ui.ACCENT) }
             isClickable = true
             setOnClickListener { onApply(f); dialog.dismiss() }
         }
-        bottom.addView(showBtn, LinearLayout.LayoutParams(-1, -2))
+        bottom.addView(showBtn, if (land) LinearLayout.LayoutParams(-2, -2).also { showBtn.minWidth = d(220) } else LinearLayout.LayoutParams(-1, -2))
         root.addView(bottom)
 
         dialog.setContentView(root)
@@ -365,24 +373,61 @@ class SearchSheet private constructor(
         body.addView(row)
     }
 
+    /** A find box for long lists (tags, collections). */
+    private fun findBox(body: LinearLayout, hint: String, onQuery: (String) -> Unit) {
+        val search = EditText(a).apply {
+            this.hint = hint
+            setTextColor(Color.WHITE); setHintTextColor(0xFF6A6F76.toInt()); isSingleLine = true
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
+            val icon = IconDrawable(IconDrawable.Kind.SEARCH, Ui.GREY).apply { setBounds(0, 0, d(20), d(20)) }
+            setCompoundDrawablesRelative(icon, null, null, null); compoundDrawablePadding = d(8)
+            setPadding(d(12), d(10), d(12), d(10))
+            background = GradientDrawable().apply { cornerRadius = d(12).toFloat(); setColor(0xFF1E2126.toInt()) }
+        }
+        body.addView(search, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = d(10) })
+        search.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, af: Int) {}
+            override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: Editable?) { onQuery(s?.toString()?.trim() ?: "") }
+        })
+    }
+
     private fun colSection(body: LinearLayout) {
         val sub = header(body, "Collections", segmented(listOf("Any", "All"), { if (f.colsAll) 1 else 0 }) { f.colsAll = it == 1 })
         repaints += { setSub(sub, if (f.colsIn.size > 1) (if (f.colsAll) "Clips in all the ✓ collections" else "Clips in any ✓ collection") else null) }
         if (cols.isEmpty()) { hint(body, "No collections here yet."); return }
+        // like tags: many collections get a find box; chosen ones first, then the fullest, the rest behind "Show all"
+        var query = ""
+        var showAll = false
+        if (cols.size > 12) findBox(body, "Find among ${cols.size} collections") { query = it; changed() }
+        val counts = cols.associate { c -> c.id to clips.count { it.id in c.ids } }
+        val ordered = cols.sortedWith(compareBy({ -(counts[it.id] ?: 0) }, { it.name.lowercase() }))
         val flow = FlowLayout(a)
         body.addView(flow)
-        for (c in cols) {
-            val n = clips.count { it.id in c.ids }
-            val tv = chip(c.name) {
-                when (c.id) {
-                    in f.colsIn -> { f.colsIn.remove(c.id); f.colsOut.add(c.id) }
-                    in f.colsOut -> f.colsOut.remove(c.id)
-                    else -> f.colsIn.add(c.id)
+        val more = Ui.label(a, "", 14f, Ui.ACCENT).apply { setPadding(0, d(10), 0, d(4)); isClickable = true; setOnClickListener { showAll = !showAll; changed() } }
+        body.addView(more)
+        repaints += {
+            flow.removeAllViews()
+            val matching = ordered.filter { query.isEmpty() || it.name.contains(query, true) }
+            val chosen = matching.filter { it.id in f.colsIn || it.id in f.colsOut }
+            val rest = matching.filter { it.id !in f.colsIn && it.id !in f.colsOut }
+            val limit = if (showAll || query.isNotEmpty()) Int.MAX_VALUE else maxOf(0, SHOWN_TAGS - chosen.size)
+            for (c in chosen + rest.take(limit)) {
+                val tv = chip(c.name) {
+                    when (c.id) {
+                        in f.colsIn -> { f.colsIn.remove(c.id); f.colsOut.add(c.id) }
+                        in f.colsOut -> f.colsOut.remove(c.id)
+                        else -> f.colsIn.add(c.id)
+                    }
+                    changed()
                 }
-                changed()
+                paintTri(tv, when (c.id) { in f.colsIn -> 1; in f.colsOut -> 2; else -> 0 }, c.name, counts[c.id])
+                flow.addView(tv)
             }
-            flow.addView(tv)
-            repaints += { paintTri(tv, when (c.id) { in f.colsIn -> 1; in f.colsOut -> 2; else -> 0 }, c.name, n) }
+            if (matching.isEmpty()) flow.addView(Ui.label(a, "No collection matches \"$query\"", 13f, Ui.GREY))
+            val hidden = rest.size - minOf(rest.size, limit)
+            more.visibility = if (query.isEmpty() && (hidden > 0 || showAll) && cols.size > SHOWN_TAGS) View.VISIBLE else View.GONE
+            more.text = if (showAll) "Show fewer" else "Show all ${cols.size} collections"
         }
     }
 

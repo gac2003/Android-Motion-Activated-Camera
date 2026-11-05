@@ -408,8 +408,9 @@ class MainActivity : Activity() {
         texts.addView(infoTv)
         top.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
         // app-bar actions as icons (name on long-press), so the status text keeps the room it needs
-        // 48 dp touch targets (Android's recommended size) with a gap between them, so they are hard to mis-press
-        fun action(kind: IconDrawable.Kind, name: String, click: () -> Unit) = iconButton(this, kind, 48, 12) { click() }.apply {
+        // 48 dp touch targets (Android's recommended size) with a gap between them, so they are hard to mis-press;
+        // 28 dp icons (less padding inside the same 48 dp) so they read well without making the bar taller
+        fun action(kind: IconDrawable.Kind, name: String, click: () -> Unit) = iconButton(this, kind, 48, 10) { click() }.apply {
             contentDescription = name
             tooltipText = name
         }

@@ -655,19 +655,19 @@ object CameraLink {
                 if (holder() == by) { holderId = null; holderUntil = 0; main.post { publishStatus(ctx) } }
                 reply(true, "Remote given back")
             }
-            "pause" -> { EngineHost.peek()?.setMonitoring(false); event(ctx, "monitor_paused", "Monitoring paused by $who"); reply(true, "Monitoring paused") }
-            "resume" -> { EngineHost.peek()?.setMonitoring(true); reply(true, "Monitoring resumed") }
+            "pause" -> { EngineHost.peek()?.setMonitoring(false); event(ctx, "monitor_paused", "Monitoring stopped by $who · camera still on"); reply(true, "Monitoring stopped · the camera stays on") }
+            "resume" -> { EngineHost.peek()?.setMonitoring(true); reply(true, "Monitoring started") }
             "start" -> when {
                 CameraService.inStandby -> {
                     reply(true, "Starting monitoring…"); main.post { CameraService.instance?.startMonitoring() }
                 }
-                CameraService.monitoring && EngineHost.peek()?.monitoring == false -> { EngineHost.peek()?.setMonitoring(true); reply(true, "Monitoring resumed") }
+                CameraService.monitoring && EngineHost.peek()?.monitoring == false -> { EngineHost.peek()?.setMonitoring(true); reply(true, "Monitoring started") }
                 CameraService.monitoring -> reply(true, "Already monitoring")
                 else -> reply(false, "The camera phone is not in standby")
             }
             "stop" -> {
-                event(ctx, "monitor_off", "Monitoring stopped by $who")
-                reply(true, if (CameraService.standbyAllowed(ctx)) "Stopped · standby (you can start it again from here)" else "Stopping")
+                event(ctx, "monitor_off", "Camera shut off by $who")
+                reply(true, if (CameraService.standbyAllowed(ctx)) "Camera shut off · standby (Start monitoring turns it back on)" else "Shutting off the camera")
                 main.post { CameraService.stop(ctx) }
             }
             "set" -> {

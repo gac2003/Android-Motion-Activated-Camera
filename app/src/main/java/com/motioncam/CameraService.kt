@@ -183,7 +183,7 @@ class CameraService : Service() {
      */
     fun stopMonitoring(manual: Boolean) {
         if (!standbyAllowed(this)) { exit(manual); return }
-        if (manual && engine != null) com.motioncam.live.CameraLink.event(this, "monitor_off", "Monitoring stopped (standby: can be started again remotely)")
+        if (manual && engine != null) com.motioncam.live.CameraLink.event(this, "monitor_off", "Stopped on the camera phone · standby (Start monitoring from your other phones turns it back on)")
         releaseEngine(manual)
         lastNotifText = ""
         showStandby()
@@ -207,7 +207,7 @@ class CameraService : Service() {
     private fun exit(manual: Boolean = false) {
         if (exiting) return
         exiting = true
-        if (manual && engine != null) com.motioncam.live.CameraLink.event(this, "monitor_off", "Monitoring stopped on the camera phone")
+        if (manual && engine != null) com.motioncam.live.CameraLink.event(this, "monitor_off", "Stopped on the camera phone · offline until started there")
         releaseEngine(manual)
         com.motioncam.live.CameraLink.stop(this)
         StatusBus.remove(statusListener)

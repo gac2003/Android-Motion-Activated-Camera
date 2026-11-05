@@ -481,18 +481,26 @@ class RemoteCameraActivity : Activity() {
         }
 
         f.title("Monitoring")
-        val stopChip = f.chip("Stop monitoring") {
+        // Stop monitoring = no motion detection or recording, the camera stays on and reachable (what you want most of the
+        // time); Shut off camera = the camera closes (standby, or offline when standby is off), confirmed first
+        val shutChip = f.chip("Shut off camera") {
             val standbyOn = s.optBoolean("standbyOn")
-            AlertDialog.Builder(this).setTitle("Stop monitoring?")
-                .setMessage(if (standbyOn) "The camera closes and the phone goes to standby: it stays connected, and you can start monitoring again from here."
-                    else "The camera phone stops completely and goes offline. It can only be started again on the phone itself " +
-                        "(or turn on Standby in its Settings › Your phones). Use Pause to keep it reachable.")
-                .setPositiveButton("Stop") { _, _ -> send("stop") }.setNegativeButton("Cancel", null).show()
+            AlertDialog.Builder(this).setTitle("Shut off the camera?")
+                .setMessage(if (standbyOn) "The camera closes and the phone goes to standby: it stays connected, and Start monitoring here turns it back on."
+                    else "MotionCam closes on that phone and it goes offline. It can only be turned back on at the phone itself " +
+                        "(or turn on Standby in its Settings › Your phones).\n\nTo just stop recording for a while, use Stop monitoring: " +
+                        "the camera stays on and you can start it again from here.")
+                .setPositiveButton("Shut off") { _, _ -> send("stop") }.setNegativeButton("Cancel", null).show()
+        }.apply {
+            setTextColor(0xFFFF8A85.toInt())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = Ui.dp(this@RemoteCameraActivity, 10).toFloat(); setColor(0x22E53935); setStroke(Ui.dp(this@RemoteCameraActivity, 1), Ui.RED)
+            }
         }
         when {
             s.optBoolean("standby") -> f.row(f.chip("▶ Start monitoring") { send("start") }.apply { Ui.setChipState(this, true) })
-            s.optBoolean("monitoring") -> f.row(f.chip("Pause monitoring") { send("pause") }, stopChip)
-            else -> f.row(f.chip("Resume monitoring") { send("resume") }, stopChip)
+            s.optBoolean("monitoring") -> f.row(f.chip("Stop monitoring") { send("pause") }, shutChip)
+            else -> f.row(f.chip("▶ Start monitoring") { send("resume") }.apply { Ui.setChipState(this, true) }, shutChip)
         }.also { row -> if (!enabled) for (i in 0 until row.childCount) row.getChildAt(i).apply { isEnabled = false; alpha = 0.4f } }
 
         // never show (or send) defaults: the controls appear only once the camera has said what its settings are

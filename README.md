@@ -271,8 +271,10 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
 * **Remote camera** (tap its card; it opens paused with its last picture and when it was sent): low-rate live view (a frame every 2 s, only while watched, stops after 3 min), a **high-quality
   frame** (*Screenshot*, shown under the live view; tap for full screen, save it to Pictures/MotionCam); tap the live
   picture for the full-screen view, the camera
-  controls (lens, exposure, ISO, shutter, focus, white balance, zoom), recording and motion settings, start / pause /
-  resume / stop monitoring, and under the status the camera's **recent activity** (latest 3, live) with **See all
+  controls (lens, exposure, ISO, shutter, focus, white balance, zoom), recording and motion settings, **Stop monitoring**
+  / **Start monitoring** (no motion detection or recording; the camera stays on and reachable, so it can be started again
+  from any phone) and a red **Shut off camera** (the camera closes: standby if that phone allows it, otherwise offline
+  until started on the phone itself; confirmed first), and under the status the camera's **recent activity** (latest 3, live) with **See all
   activity** for its full log. Settings changed remotely are drafts until you
   tap **Save** (or **Cancel**) in the bar that stays at the bottom of the screen; leaving with unsaved changes asks first.
 * **Live view in standby** too: the camera opens while someone watches and closes again after. When no new picture
@@ -282,7 +284,7 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
   camera screen (unsaved changes to the same settings are kept for you to Save or Cancel) and in the Activity log.
 * **Full screen** live view: laid out like the camera screen – the picture fills the screen, status on top, and the same
   control buttons (lens, format, EV, ISO, shutter, focus, white balance, zoom) with their slider and AUTO, plus Start /
-  Stop monitoring, and when the frame shown was sent. Changes are lined up (shown at once on the buttons, with a yellow dot
+  Stop monitoring (the camera stays on; Shut off camera is on the camera's screen), and when the frame shown was sent. Changes are lined up (shown at once on the buttons, with a yellow dot
   until sent) and sent together with **Save** (or dropped with **Cancel**), since a remote change shows in the picture a
   few seconds later. Tap the value to type an exact number;
   tap the picture to hide the controls; works in landscape.

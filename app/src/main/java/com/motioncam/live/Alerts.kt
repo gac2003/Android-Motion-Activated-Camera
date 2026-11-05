@@ -181,7 +181,9 @@ object Alerts {
             "hot" -> if (p.alertHot) gate(ctx, cam, false)?.let { s -> post(ctx, cam, "hot", CH_STATUS, "Camera too hot · $name", d.optString("text"), s) }
             "unplugged" -> if (p.alertCharger) gate(ctx, cam, false)?.let { s -> post(ctx, cam, "power", CH_STATUS, "Charger unplugged · $name", d.optString("text"), s) }
             "monitor_off", "monitor_paused", "safety_stop" ->
-                if (p.alertMonitoring) gate(ctx, cam, false)?.let { s -> post(ctx, cam, "monitor", CH_STATUS, "Monitoring stopped · $name", d.optString("text"), s) }
+                if (p.alertMonitoring) gate(ctx, cam, false)?.let { s ->
+                    post(ctx, cam, "monitor", CH_STATUS, (if (type == "monitor_off") "Camera shut off · " else "Monitoring stopped · ") + name, d.optString("text"), s)
+                }
             "monitor_on" -> cancel(ctx, cam, "monitor")
             "remote_taken" -> if (p.alertRemote) {
                 val me = com.motioncam.cloud.Device.id(ctx)
@@ -222,7 +224,8 @@ object Alerts {
             val (kind, title, ok) = when (d.optString("type")) {
                 "hot" -> Triple("hot", "Camera too hot · $name", p.alertHot)
                 "unplugged" -> Triple("power", "Charger unplugged · $name", p.alertCharger)
-                "monitor_off", "monitor_paused", "safety_stop" -> Triple("monitor", "Monitoring stopped · $name", p.alertMonitoring)
+                "monitor_off" -> Triple("monitor", "Camera shut off · $name", p.alertMonitoring)
+                "monitor_paused", "safety_stop" -> Triple("monitor", "Monitoring stopped · $name", p.alertMonitoring)
                 else -> Triple("", "", false)
             }
             if (ok) out += Triple(at(t), kind, title to (d.optString("text") + " (" + tm(t) + ")"))

@@ -361,7 +361,7 @@ class RemoteLiveActivity : Activity() {
             s == null || !r.online() -> "OFFLINE" to 0xFF4A4E55.toInt()
             s.optBoolean("monitoring") -> "STOP MONITORING" to Ui.RED
             s.optBoolean("standby") -> "START MONITORING" to 0xFF2E7D32.toInt()
-            else -> "RESUME MONITORING" to 0xFF2E7D32.toInt()
+            else -> "START MONITORING" to 0xFF2E7D32.toInt()
         }
         startBtn.text = if (compact == true) text.substringBefore(" ") else text
         Ui.pill(startBtn, color)
@@ -372,10 +372,8 @@ class RemoteLiveActivity : Activity() {
         if (!r.online()) { Toast.makeText(this, "The camera is offline", Toast.LENGTH_SHORT).show(); return }
         if (r.lockedOut()) { r.touch(); return }
         when {
-            s.optBoolean("monitoring") -> AlertDialog.Builder(this).setTitle("Stop monitoring?")
-                .setMessage(if (s.optBoolean("standbyOn")) "The camera closes and the phone goes to standby: you can start monitoring again from here."
-                    else "The camera phone stops completely and goes offline. It can only be started again on the phone itself.")
-                .setPositiveButton("Stop") { _, _ -> r.send("stop") }.setNegativeButton("Cancel", null).show()
+            // stops detection and recording; the camera stays on (Shut off camera is on the camera's screen)
+            s.optBoolean("monitoring") -> r.send("pause")
             s.optBoolean("standby") -> r.send("start")
             else -> r.send("resume")
         }

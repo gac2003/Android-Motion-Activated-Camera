@@ -9,7 +9,7 @@ import com.motioncam.remote.RemoteRepo
 object CollectionActions {
     private fun plural(n: Int) = "$n clip${if (n == 1) "" else "s"}"
 
-    /** Downloads remote clips into this phone's Clips, with progress (copies are never uploaded to backup). */
+    /** Downloads remote clips into this phone's Clips, with progress (copies are kept until deleted; backed up only where chosen). */
     fun saveToPhone(a: Activity, list: List<Clip>, done: () -> Unit = {}) {
         if (list.isEmpty()) return
         val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -28,7 +28,7 @@ object CollectionActions {
                 if (r.skipped > 0) parts += "${r.skipped} already on this phone (skipped)."
                 if (r.failed > 0) parts += "${r.failed} failed" + (r.lastError?.let { ": $it" } ?: ".")
                 if (cancelled.get()) parts += "Stopped."
-                parts += "Saved copies are never uploaded to cloud backup and are not removed by automatic clean-up."
+                parts += "Saved copies stay on this phone until you delete them, also if the folder deletes its copy. They aren't backed up by themselves; Back up to… can put them in any folder."
                 if (!a.isFinishing) AlertDialog.Builder(a).setTitle("Save to phone").setMessage(parts.joinToString("\n\n")).setPositiveButton("OK", null).show()
                 done()
             }

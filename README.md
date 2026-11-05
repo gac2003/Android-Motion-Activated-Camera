@@ -185,8 +185,10 @@ are always kept. Dropbox viewer links are fully read-only.
   * Collections of the phone's own clips stay local. Older per-phone remote collections are moved to the shared ones
     (same names merged).
 * Clips stream when played (FTP/SFTP download first) and are cached (up to 1.5 GB) so replaying is instant.
-  **Save to phone** copies clips into this phone's Clips; those copies are never uploaded to cloud backup and are
-  never deleted by the phone's automatic clean-up (age limit, size cap, low storage) – only when you delete them.
+  **Save to phone** copies clips into this phone's Clips; those copies stay until you delete them – never removed by the
+  phone's automatic clean-up (age limit, size cap, low storage), nor when the folder deletes its copy. They aren't backed up
+  by themselves, but **Back up to…** shows the folder they came from (ticked while they are still in it) and can put them
+  in any other folder, or take them out of one.
 
 ## Your phones (live connection)
 Settings → **Your phones** links your phones through Firebase (Google's realtime database, free tier). Phones only

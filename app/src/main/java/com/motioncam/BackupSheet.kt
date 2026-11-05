@@ -18,10 +18,11 @@ import com.motioncam.remote.FolderDests
 import com.motioncam.remote.RemoteSource
 
 /**
- * "Back up to…": which backup folders these phone clips are in, as checkboxes. Tick a folder to back them up there
- * (it doesn't have to back up new clips by itself); untick one to take them out of it again, which deletes their cloud
- * copies there and is confirmed first. For a mixed selection a box shows "–" (some are there); tapping it goes to all,
- * then none, then back to as it was.
+ * "Back up to…": which folders these phone clips are in, as checkboxes — backup folders and remote folders (a copy
+ * saved from a remote folder shows that folder ticked). Tick a folder to back them up there (it doesn't have to back up
+ * new clips by itself); untick one to take them out of it again, which deletes their cloud copies there (protected ones
+ * are kept) and is confirmed first. The clips on this phone are always kept. For a mixed selection a box shows "–"
+ * (some are there); tapping it goes to all, then none, then back to as it was.
  */
 object BackupSheet {
     private enum class State { ALL, SOME, NONE }
@@ -33,25 +34,33 @@ object BackupSheet {
     }
 
     fun show(a: Activity, clips: List<Clip>, done: () -> Unit = {}) {
-        val list = clips.filter { !ClipStore.isSavedCopy(a, it.id) }
-        val skipped = clips.size - list.size
-        if (list.isEmpty()) {
-            if (skipped > 0) Toast.makeText(a, "Copies saved from a remote folder are never backed up", Toast.LENGTH_LONG).show()
-            return
-        }
-        val ids = list.map { it.id }
-        val n = ids.size
+        val list = clips
+        if (list.isEmpty()) return
+        val skipped = 0
+        val n = list.size
+        Toast.makeText(a, "Checking your folders…", Toast.LENGTH_SHORT).show()
         Thread {
-            val pres = CloudSync.presence(a, ids)
+            val unreadable = java.util.Collections.synchronizedSet(HashSet<Dest>())
+            val pres = CloudSync.presence(a, list, unreadable)
             val rows = ArrayList<Row>()
             for ((d, p) in pres) {
                 val c = CloudConfig(a, d)
                 val inN = p.first + p.second
                 rows += Row(d, null, c.folderName ?: d.label,
-                    d.label + (c.account?.let { " · $it" } ?: c.host?.let { " · $it" } ?: "") + if (c.enabled) " · backs up new clips" else "",
+                    d.label + (c.account?.let { " · $it" } ?: c.host?.let { " · $it" } ?: "") + (if (c.enabled) " · backs up new clips" else "") +
+                        if (d in unreadable) " · couldn't check now (last known)" else "",
                     inN, p.first, p.second, when { inN >= n -> State.ALL; inN > 0 -> State.SOME; else -> State.NONE })
             }
-            for (s in FolderDests.unused(a)) rows += Row(null, s, s.name, s.describe, 0, 0, 0, State.NONE)
+            // remote folders not used for backup yet (e.g. the one a saved copy came from)
+            for (s in FolderDests.unused(a)) {
+                // read the folder now, so a clip deleted there meanwhile shows unticked (and can be put back)
+                var stale = false
+                val names = (try { com.motioncam.remote.RemoteRepo.refresh(a, s) } catch (_: Exception) { stale = true
+                    try { com.motioncam.remote.RemoteRepo.cached(a, s) } catch (_: Exception) { emptyList() } }).map { it.name }.toHashSet()
+                val inN = list.count { it.name in names }
+                rows += Row(null, s, s.name, s.describe + if (stale) " · couldn't check now (last known)" else "", inN, inN, 0,
+                    when { inN >= n -> State.ALL; inN > 0 -> State.SOME; else -> State.NONE })
+            }
             a.runOnUiThread { if (!a.isFinishing) open(a, list, rows, skipped, done) }
         }.start()
     }
@@ -79,8 +88,8 @@ object BackupSheet {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply { isEnabled = changes > 0; alpha = if (changes > 0) 1f else 0.4f }
         }
         for (r in rows) box.addView(row(a, r, n) { refreshButton() })
-        box.addView(Ui.label(a, "Folders marked \"backs up new clips\" do so by themselves; choosing a folder here doesn't change that." +
-            if (skipped > 0) "\n\n$skipped selected clip${if (skipped == 1) " is a copy" else "s are copies"} saved from a remote folder (never backed up)." else "",
+        box.addView(Ui.label(a, "Folders marked \"backs up new clips\" do so by themselves; choosing a folder here doesn't change that. " +
+            "Unticking a folder deletes the clips' copies there (protected ones are kept); the clips on this phone always stay.",
             12f, Ui.GREY).apply { setPadding(0, d(a, 10), 0, 0) })
         dialog = AlertDialog.Builder(a).setTitle("Back up " + if (n == 1) "1 clip" else "$n clips")
             .setView(ScrollView(a).apply { addView(box) })
@@ -157,9 +166,9 @@ object BackupSheet {
             val names = deleting.joinToString { "\"${it.name}\"" }
             val count = deleting.sumOf { it.upCount }
             AlertDialog.Builder(a).setTitle("Remove from " + if (deleting.size == 1) deleting[0].name + "?" else "${deleting.size} folders?")
-                .setMessage("This deletes the cloud copies of these clips in $names ($count file${if (count == 1) "" else "s"}), " +
-                    "also for your other phones viewing ${if (deleting.size == 1) "that folder" else "those folders"} — even protected ones. " +
-                    "The clips on this phone are kept.")
+                .setMessage("This deletes the cloud copies of these clips in $names (up to $count file${if (count == 1) "" else "s"}), " +
+                    "also for your other phones viewing ${if (deleting.size == 1) "that folder" else "those folders"}. Protected clips are kept " +
+                    "(remove their protection first). The clips on this phone are kept.")
                 .setPositiveButton("Remove") { _, _ -> run(a, clips, adds, removes, dialog, done) }
                 .setNegativeButton("Cancel", null).show()
         } else run(a, clips, adds, removes, dialog, done)
@@ -174,12 +183,26 @@ object BackupSheet {
             val dests = adds.mapNotNull { r -> r.dest ?: r.source?.let { FolderDests.destFor(app, it) } }
             val queued = if (dests.isNotEmpty()) CloudSync.enqueueTo(app, ids, dests) else 0
             var removed = 0
+            var kept = 0
             var failed: String? = null
-            for (r in removes) r.dest?.let { d -> try { removed += CloudSync.removeFrom(app, ids, d) } catch (e: Exception) { failed = r.name + ": " + (e.message ?: "failed") } }
+            for (r in removes) try {
+                val d = r.dest
+                val src = r.source
+                if (d != null) CloudSync.removeFrom(app, clips, d).let { removed += it.first; kept += it.second }
+                else if (src != null) {
+                    // a remote folder not used for backup: delete its copies of these clips (protected ones are kept)
+                    val names = clips.map { it.name }.toSet()
+                    val remoteClips = com.motioncam.remote.RemoteRepo.cached(app, src).filter { it.name in names }
+                    val res = com.motioncam.remote.RemoteRepo.deleteFromCloud(app, src, remoteClips) { _, _ -> }
+                    removed += res.deleted; kept += res.protectedKept
+                    if (res.failed > 0) failed = r.name + ": " + (res.lastError ?: "failed")
+                }
+            } catch (e: Exception) { failed = r.name + ": " + (e.message ?: "failed") }
             a.runOnUiThread {
                 val parts = ArrayList<String>()
                 if (adds.isNotEmpty()) parts += if (queued > 0) "$queued upload${if (queued == 1) "" else "s"} queued" else "Already there"
                 if (removes.isNotEmpty()) parts += "removed $removed from the cloud"
+                if (kept > 0) parts += "$kept protected kept"
                 failed?.let { parts += "couldn't remove from $it" }
                 Toast.makeText(a, parts.joinToString(" · ").replaceFirstChar { it.uppercase() }, Toast.LENGTH_LONG).show()
                 done()

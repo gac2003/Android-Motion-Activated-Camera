@@ -131,8 +131,9 @@ object ClipStore {
     }
 
     /**
-     * Clips saved from a remote folder: never uploaded to cloud backup (they are already in someone's cloud)
-     * and never removed by the phone's automatic clean-up.
+     * Clips saved from a remote folder: kept on this phone until deleted by hand (never removed by automatic clean-up,
+     * also not when the folder deletes its copy) and not backed up by themselves — Back up to… can still put them in
+     * any folder (and shows the folder they came from).
      */
     @Synchronized
     fun isSavedCopy(ctx: Context, id: Long) = id in savedIds(ctx)

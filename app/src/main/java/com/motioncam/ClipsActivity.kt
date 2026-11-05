@@ -624,7 +624,7 @@ open class ClipsActivity : Activity() {
             opts += Opt("Protect all $n in cloud", "Kept from the camera phone's clean-up", IconDrawable.Kind.CLOUD, section = "Cloud") { protect(h.clips, true) }
             opts += Opt("Remove cloud protection from all $n", "They may be deleted by the clean-up", section = "Cloud") { protect(h.clips, false) }
         }
-        if (remote != null) opts += Opt("Save all $n to this phone", "Copies into Clips; never uploaded again", IconDrawable.Kind.DOWNLOAD, section = "Phone") {
+        if (remote != null) opts += Opt("Save all $n to this phone", "Copies into Clips, kept until you delete them", IconDrawable.Kind.DOWNLOAD, section = "Phone") {
             saveToPhone(h.clips)
         }
         if (CloudDelete.canDelete(remote)) opts += Opt("Delete all $n from the cloud", "Protected clips are kept", danger = true, section = "Cloud") {

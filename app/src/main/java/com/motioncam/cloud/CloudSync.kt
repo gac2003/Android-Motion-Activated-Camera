@@ -135,14 +135,29 @@ object CloudSync {
     /** Folders this phone can back up to: every set-up destination, whether or not it backs up new clips by itself. */
     fun targets(ctx: Context): List<Dest> = Dest.all(ctx).filter { CloudConfig(ctx, it).let { c -> c.isConfigured && c.folderId != null } }
 
-    /** Per destination: how many of [clipIds] are in it, and how many are waiting to be uploaded there. */
-    fun presence(ctx: Context, clipIds: Collection<Long>): Map<Dest, Pair<Int, Int>> = synchronized(lock) {
-        load(ctx)
-        val ids = clipIds.toSet()
-        targets(ctx).associateWith { d ->
-            val up = index!!.filter { it.kind == d && it.clipId in ids }.map { it.clipId }.toSet()
-            up.size to jobs!!.count { it.kind == d && it.clipId in ids && it.clipId !in up }
+    /**
+     * Per destination: how many of [clips] are in it (uploaded by this phone, or a file of the same name there, e.g. the
+     * folder a saved copy came from), and how many are waiting to be uploaded there. Network (folder listings, cached).
+     */
+    fun presence(ctx: Context, clips: List<Clip>, unreadable: MutableSet<Dest>? = null): Map<Dest, Pair<Int, Int>> {
+        val ids = clips.map { it.id }.toSet()
+        return targets(ctx).associateWith { d ->
+            // read the folder now (what's there may have changed on another phone); unreadable: what this phone knows
+            val names = folderNames(ctx, d, fresh = true) ?: emptySet<String>().also { unreadable?.add(d) }
+            synchronized(lock) {
+                load(ctx)
+                val up = clips.filter { c -> c.name in names || index!!.any { it.kind == d && it.clipId == c.id } }.map { it.id }.toSet()
+                up.size to jobs!!.count { it.kind == d && it.clipId in ids && it.clipId !in up }
+            }
         }
+    }
+
+    /** The clip names in a backup folder (listed at most every 5 minutes), or null if it can't be read now. */
+    fun folderNames(ctx: Context, d: Dest, fresh: Boolean = false): Set<String>? {
+        val cfg = CloudConfig(ctx, d)
+        val folder = cfg.folderId ?: return null
+        if (fresh) synchronized(lock) { listings.remove(d) }
+        return try { providerFor(ctx, d).use { p -> listing(cfg, p, folder).keys.toSet() } } catch (_: Exception) { null }
     }
 
     /** Queues these clips for exactly these folders (already there or waiting: skipped). Returns how many uploads were added. */
@@ -152,7 +167,7 @@ object CloudSync {
         synchronized(lock) {
             load(ctx)
             var seq = (jobs!!.maxOfOrNull { it.seq } ?: System.currentTimeMillis()) + 1
-            for (id in clipIds) for (k in dests) if (addJobLocked(ctx, id, k)) { jobs!!.last().seq = seq++; n++ }
+            for (id in clipIds) for (k in dests) if (addJobLocked(ctx, id, k, explicit = true)) { jobs!!.last().seq = seq++; n++ }
             save(ctx)
         }
         kick(ctx)
@@ -161,38 +176,39 @@ object CloudSync {
 
     /**
      * Takes these clips out of one backup folder: waiting uploads are dropped and their cloud copies deleted (with their
-     * thumbnails, protection marks and collection entries there). The clips on this phone are kept. Network; returns how
-     * many cloud copies were deleted.
+     * thumbnails, marks and collection entries there); protected clips are kept. The clips on this phone are kept.
+     * Network; returns (deleted, protected and kept).
      */
-    fun removeFrom(ctx: Context, clipIds: Collection<Long>, d: Dest): Int {
-        val ids = clipIds.toSet()
-        val names: List<String> = synchronized(lock) {
+    fun removeFrom(ctx: Context, clips: List<Clip>, d: Dest): Pair<Int, Int> {
+        val ids = clips.map { it.id }.toSet()
+        val names = synchronized(lock) {
             load(ctx)
             jobs!!.filter { it.kind == d && it.clipId in ids }.forEach { it.abort = true }
             jobs!!.removeAll { it.kind == d && it.clipId in ids }
             save(ctx)
-            index!!.filter { it.kind == d && it.clipId in ids }.map { it.name }
+            (clips.map { it.name } + index!!.filter { it.kind == d && it.clipId in ids }.map { it.name }).toSet()
         }
-        if (names.isEmpty()) return 0
         val cfg = CloudConfig(ctx, d)
-        val folder = cfg.folderId ?: return 0
-        var n = 0
+        val folder = cfg.folderId ?: return 0 to 0
+        var n = 0; var kept = 0
         providerFor(ctx, d).use { p ->
             val files = p.list(folder).associateBy { it.name }
             val marks = MarkStore.forProvider(p, folder)
             val shared = CollectionFiles(p, folder, true)
+            val keep = protectedNames(ctx, cfg, p, folder, shared)
             for (name in names) {
-                files[name]?.let { f ->
-                    p.delete(folder, f); n++
-                    try { deleteThumb(cfg, p, folder, name) } catch (_: Exception) {}
-                    try { marks.forget(name) } catch (_: Exception) {}
-                    try { shared.forgetClip(name) } catch (_: Exception) {}
-                }
+                val f = files[name] ?: continue
+                if (name in keep) { kept++; continue }
+                p.delete(folder, f); n++
+                try { deleteThumb(cfg, p, folder, name) } catch (_: Exception) {}
+                try { marks.forget(name) } catch (_: Exception) {}
+                try { shared.forgetClip(name) } catch (_: Exception) {}
                 forget(ctx, d, name)
             }
         }
+        synchronized(lock) { listings.remove(d) }
         com.motioncam.live.Live.nudge(ctx, cfg.kind, folder, "clips")   // viewing phones refresh now
-        return n
+        return n to kept
     }
 
     fun enabledKinds(ctx: Context) = Dest.all(ctx).filter { CloudConfig(ctx, it).let { c -> c.enabled && c.isConfigured } }
@@ -210,9 +226,9 @@ object CloudSync {
         kick(ctx)
     }
 
-    private fun addJobLocked(ctx: Context, clipId: Long, k: Dest): Boolean {
-        // a copy saved from someone's remote folder is already in the cloud: never upload it
-        if (ClipStore.isSavedCopy(ctx, clipId)) return false
+    private fun addJobLocked(ctx: Context, clipId: Long, k: Dest, explicit: Boolean = false): Boolean {
+        // a copy saved from a remote folder is already in that folder: only uploaded where it is chosen by hand
+        if (!explicit && ClipStore.isSavedCopy(ctx, clipId)) return false
         if (jobs!!.any { it.clipId == clipId && it.kind == k }) return false
         if (index!!.any { it.clipId == clipId && it.kind == k }) return false
         jobs!!.add(Job(clipId, k))
@@ -748,6 +764,7 @@ object CloudSync {
         if (stillQueued) return
         File(ctx.cacheDir, "cloud").listFiles()?.filter { it.name.startsWith("clip_${clip.id}_") }?.forEach { it.delete() }
         if (!Prefs(ctx).cloudDeleteLocal) return
+        if (ClipStore.isSavedCopy(ctx, clip.id)) return   // saved to this phone on purpose: kept until deleted by hand
         val everywhere = enabledKinds(ctx).all { k -> synchronized(lock) { index!!.any { it.clipId == clip.id && it.kind == k } } }
         val inCollection = Collections.all(ctx).any { clip.id in it.clipIds }
         if (everywhere && !inCollection) ClipStore.delete(ctx, clip)

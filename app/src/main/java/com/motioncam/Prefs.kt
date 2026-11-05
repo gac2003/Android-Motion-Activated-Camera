@@ -112,8 +112,6 @@ class Prefs(ctx: Context) {
     var cloudDeleteLocal: Boolean get() = b("cloudDeleteLocal", false); set(v) = put("cloudDeleteLocal", v)
     /** Upload each clip's peak-motion thumbnail too, for devices viewing the folder as a remote folder. */
     var cloudThumbs: Boolean get() = b("cloudThumbs", true); set(v) = put("cloudThumbs", v)
-    /** Allow FTP / SFTP servers as remote folders (Clips → Remote folders). */
-    var remoteFtp: Boolean get() = b("remoteFtp", true); set(v) = put("remoteFtp", v)
     /** When someone removes the cloud protection of a clip in this phone's remote collections, save a copy here. */
     var remoteKeepCopy: Boolean get() = b("remoteKeepCopy", true); set(v) = put("remoteKeepCopy", v)
     /** All uploads paused from the queue screen. */
@@ -189,7 +187,7 @@ class Prefs(ctx: Context) {
         val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal", "cloudThumbs", "cloudPaused")
         /** Stay connected, PIN for the view, camera role (the network sign-in, its connection and PINs are kept). */
         val LIVE_KEYS = listOf("liveStay", "livePinForView", "liveCamera", "liveStandby", "cardSnapshot")
-        val REMOTE_FOLDER_KEYS = listOf("remoteFtp", "remoteKeepCopy")
+        val REMOTE_FOLDER_KEYS = listOf("remoteKeepCopy")
         val PLAYER_KEYS = listOf("skipMs", "stripZoom")
         val ALERT_KEYS = listOf("alertsOn", "alertsInApp", "alertsPoll", "alertRemote", "alertMotion", "alertMotionGapMin", "alertClip", "alertBattery", "alertBatteryPct",
             "alertCharger", "alertHot", "alertOffline", "alertOfflineMin", "alertBackOnline", "alertMonitoring", "alertSync",

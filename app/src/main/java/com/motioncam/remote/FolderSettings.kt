@@ -74,9 +74,7 @@ object FolderSettings {
             "the folder sees the right frame and clip length without downloading videos.")
 
         title("Viewing other phones' folders")
-        form.toggle("Allow FTP / SFTP servers as remote folders", p.remoteFtp) { p.remoteFtp = it; changed() }
-        note("When off, other phones' FTP/SFTP folders are hidden and cannot be added. Clips from servers are downloaded " +
-            "fully before they play (cloud folders stream).")
+        note("Clips from FTP / SFTP servers are downloaded fully before they play (cloud folders stream).")
         form.toggle("Keep a copy on this phone when a clip in my collections loses its cloud protection", p.remoteKeepCopy) { p.remoteKeepCopy = it }
         note("Clips you favourite or add to a collection in another phone's folder are protected from that phone's clean-up. " +
             "Anyone signed in to the account can remove that protection; this saves such clips to this phone the next time " +

@@ -39,8 +39,7 @@ object FolderDests {
 
     /** Remote folders this phone could back up to but has no destination for yet. */
     fun unused(ctx: Context): List<RemoteSource> = RemoteSources.all(ctx).filter { s ->
-        s.mode != RemoteSources.MODE_LINK && destsOf(ctx, s).isEmpty() &&
-            (com.motioncam.Prefs(ctx).remoteFtp || (s.kind != CloudKind.FTP && s.kind != CloudKind.SFTP))
+        s.mode != RemoteSources.MODE_LINK && destsOf(ctx, s).isEmpty()
     }
 
     // ---- accounts already used by this phone's folders (to pick one when adding another folder)

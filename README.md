@@ -174,7 +174,7 @@ are always kept. Dropbox viewer links are fully read-only.
 * **Dropbox, same account**: ＋ Add → "my own backups".
 * **Dropbox, another account**: on the recording phone, Remote folders → its Dropbox folder's ⋮ → Backup settings → **Create viewer link**, send it,
   and paste it on the viewing device (＋ Add → "a viewer link"). Anyone with the link can view; **Revoke link** stops it.
-* **FTP / SFTP**: enter the server login (a read-only account is best). Can be turned off under Remote folder options.
+* **FTP / SFTP**: enter the server login (a read-only account is best for a folder you only view).
 * **Shared collections**: a remote folder's Favourites and collections are the same on every phone signed in to the
   account (stored in a hidden `.collections` folder); any phone can create, rename, delete and fill them. Changes
   show at once, are queued when offline and sync automatically. Clips in them are protected from clean-up.

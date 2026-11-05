@@ -148,7 +148,7 @@ open class RemoteFoldersActivity : Activity() {
         liveLines.clear()
         quickActions()
         val list = folders()
-        val shown = list.filter { it.backingUp || prefs.remoteFtp || !isServer(it.kind) }
+        val shown = list
         // "Your folders", with + Add beside it
         box.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -171,8 +171,6 @@ open class RemoteFoldersActivity : Activity() {
             })
         }
         for (f in shown) box.addView(folderRow(f))
-        val hidden = list.size - shown.size
-        if (hidden > 0) note("$hidden FTP/SFTP folder${if (hidden == 1) " is" else "s are"} hidden (Remote folder settings → Allow FTP / SFTP servers).")
         note("Tap a folder to watch its clips. A yellow cloud means this phone backs up its new clips there; ⋮ turns that on or off.")
     }
 
@@ -322,10 +320,8 @@ open class RemoteFoldersActivity : Activity() {
         list += com.motioncam.Opt("Dropbox viewer link", "Someone else's folder they shared with a link (view only)", IconDrawable.Kind.CLOUD) {
             dropboxAccount { t, w -> dropboxLink(t, w) }
         }
-        if (prefs.remoteFtp) {
-            list += com.motioncam.Opt("FTP / FTPS server", "Your own server; clips download before playing", IconDrawable.Kind.FOLDER) { serverChoice(CloudKind.FTP) }
-            list += com.motioncam.Opt("SFTP server", "Your own server over SSH", IconDrawable.Kind.FOLDER) { serverChoice(CloudKind.SFTP) }
-        }
+        list += com.motioncam.Opt("FTP / FTPS server", "Your own server; clips download before playing", IconDrawable.Kind.FOLDER) { serverChoice(CloudKind.FTP) }
+        list += com.motioncam.Opt("SFTP server", "Your own server over SSH", IconDrawable.Kind.FOLDER) { serverChoice(CloudKind.SFTP) }
         com.motioncam.OptionSheet.show(this, "Add remote folder", list,
             subtitle = "Next: the account, then a folder (an existing one or a new one), then whether this phone backs up to it.")
     }

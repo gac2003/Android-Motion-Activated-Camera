@@ -12,7 +12,7 @@ import android.widget.ImageView
 
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
-    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, SCREEN, VIDEOCAM, NETWORK, LIVE, CLOSE, SHARE, TRASH, ADD_TO, REMOVE, SELECT_ALL, FULLSCREEN }
+    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, SCREEN, VIDEOCAM, NETWORK, LIVE, CLOSE, SHARE, TRASH, ADD_TO, REMOVE, SELECT_ALL, FULLSCREEN, CLOUD_UP }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -92,6 +92,22 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 stroke.strokeWidth = 2f
                 c.drawCircle(12f, 12f, 6.4f, stroke)
                 c.drawCircle(12f, 12f, 2.4f, stroke)
+            }
+            Kind.CLOUD_UP -> {
+                // a cloud with an upward arrow: uploading / backing up
+                stroke.strokeWidth = 2f
+                path.moveTo(7f, 18.5f)
+                path.cubicTo(4.2f, 18.5f, 2.5f, 16.6f, 2.5f, 14.3f)
+                path.cubicTo(2.5f, 12f, 4.3f, 10.2f, 6.6f, 10.2f)
+                path.cubicTo(7.3f, 7.2f, 9.6f, 5.5f, 12.3f, 5.5f)
+                path.cubicTo(15.6f, 5.5f, 18.2f, 8f, 18.4f, 11.2f)
+                path.cubicTo(20.2f, 11.5f, 21.5f, 13f, 21.5f, 14.9f)
+                path.cubicTo(21.5f, 16.9f, 19.9f, 18.5f, 17.9f, 18.5f)
+                c.drawPath(path, stroke)
+                path.reset()
+                c.drawLine(12f, 20f, 12f, 11.5f, stroke)
+                path.moveTo(9f, 14.3f); path.lineTo(12f, 11.3f); path.lineTo(15f, 14.3f)
+                c.drawPath(path, stroke)
             }
             Kind.FULLSCREEN -> {
                 // four corner brackets

@@ -94,11 +94,11 @@ Long-press any control button on the main screen to choose which buttons are sho
 Backing up and viewing are the same thing: **remote folders** (cloud folders of clips). Clips → **Remote Folders** lists
 them; tapping one shows its clips. **＋ Add → Add remote folder**: pick **Google Drive**, **Dropbox**, a Dropbox viewer
 link, an **FTP/FTPS** or **SFTP** server, sign in, then **create a new folder** or open an existing one, and choose
-whether this phone backs up its new clips there. Every folder has a **Back up new clips here** switch (one folder per
-service; a viewer link is view-only), so footage survives if the phone is damaged or stolen and other phones can watch
-it. The screen also has the **Upload queue** and **Clear downloaded clips**; its ⚙ opens the folder settings (upload
-only on Wi-Fi / while charging, quality, delete the phone copy, thumbnails, FTP/SFTP, keep a copy), which are also in the
-app's Settings. Each backed-up folder's ⋮ → *Backup settings* has its account, clean-up rules and viewer link.
+whether this phone backs up its new clips there. A folder this phone backs up to shows the **↑ cloud** icon and its
+upload status; its **⋮** has *Back up new clips here* / *Stop backing up here* and *Backup settings* (account, clean-up
+rules, viewer link). A phone can back up to **several folders**, also on the same service. At the top of the screen:
+**Upload queue**, **Clear downloaded clips** and **Remote folder settings** (upload only on Wi-Fi / while charging,
+quality, delete the phone copy, thumbnails, FTP/SFTP, keep a copy – also in the app's Settings).
 
 * **Back up older clips**: select them in Clips and tap **Back up** (or *Back up all* in a collection).
 

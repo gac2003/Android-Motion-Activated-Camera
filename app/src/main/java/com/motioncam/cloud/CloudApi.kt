@@ -11,6 +11,44 @@ enum class CloudKind(val key: String, val label: String) {
     companion object { fun of(key: String?) = values().firstOrNull { it.key == key } }
 }
 
+/**
+ * A backup destination: one folder on one service, so a phone can back up to several folders (even on the same
+ * service). The first destination of each service keeps the service's own key ("drive"), so backups set up before
+ * this existed keep their settings, upload records and protection marks; further ones are "drive~<id>".
+ */
+class Dest private constructor(val key: String, val kind: CloudKind) {
+    val label get() = kind.label
+    val isPrimary get() = key == kind.key
+    override fun equals(other: Any?) = other is Dest && other.key == key
+    override fun hashCode() = key.hashCode()
+    override fun toString() = key
+
+    companion object {
+        private fun sp(ctx: android.content.Context) = ctx.getSharedPreferences("cloud_dests", android.content.Context.MODE_PRIVATE)
+        fun primary(k: CloudKind) = Dest(k.key, k)
+        fun of(key: String?): Dest? {
+            if (key == null) return null
+            val k = CloudKind.of(key.substringBefore('~')) ?: return null
+            return Dest(key, k)
+        }
+        private fun extras(ctx: android.content.Context): List<String> =
+            sp(ctx).getString("extra", "")!!.split(',').filter { it.isNotBlank() }
+        /** Every destination this phone knows (set up or not): the four services' own, then the extra ones. */
+        fun all(ctx: android.content.Context): List<Dest> = CloudKind.values().map { primary(it) } + extras(ctx).mapNotNull { of(it) }
+        /** A new, empty destination on [k]. */
+        fun create(ctx: android.content.Context, k: CloudKind): Dest {
+            val d = Dest(k.key + "~" + java.lang.Long.toString(System.currentTimeMillis(), 36), k)
+            sp(ctx).edit().putString("extra", (extras(ctx) + d.key).joinToString(",")).apply()
+            return d
+        }
+        /** Forgets an extra destination (the service's own one is only switched off). */
+        fun remove(ctx: android.content.Context, d: Dest) {
+            if (d.isPrimary) return
+            sp(ctx).edit().putString("extra", extras(ctx).filter { it != d.key }.joinToString(",")).apply()
+        }
+    }
+}
+
 /** A file in the backup folder. [id] is the provider's handle (Drive file id, Dropbox/FTP/SFTP path). */
 class RemoteFile(val id: String, val name: String, val size: Long, val modifiedMs: Long, val thumbUrl: String? = null,
                  /** Google Drive: MotionCam's hidden app properties (protection marks). */

@@ -25,14 +25,15 @@ import java.io.File
  */
 object MarkSync {
     fun backupKey(kind: CloudKind) = "b:${kind.key}"
+    fun backupKey(d: Dest) = "b:${d.key}"
     fun remoteKey(sourceId: String) = "r:$sourceId"
 
     /** Backup destinations that are set up (marks only matter where clips are backed up). */
-    fun localSpaces(ctx: Context): List<String> = CloudKind.values()
+    fun localSpaces(ctx: Context): List<String> = Dest.all(ctx)
         .filter { CloudConfig(ctx, it).let { c -> c.isConfigured && c.folderId != null } }.map { backupKey(it) }
 
     fun label(ctx: Context, space: String): String = when {
-        space.startsWith("b:") -> CloudKind.of(space.substring(2))?.label ?: space
+        space.startsWith("b:") -> Dest.of(space.substring(2))?.let { d -> CloudConfig(ctx, d).folderName?.let { "${d.label} · $it" } ?: d.label } ?: space
         else -> RemoteSources.get(ctx, space.substring(2))?.name ?: "Remote folder"
     }
 
@@ -106,7 +107,7 @@ object MarkSync {
                     intent(app, remoteKey(remoteId), clipIds.mapNotNull { RemoteRepo.entry(it)?.name })
                 } else {
                     val names = clipIds.mapNotNull { ClipStore.get(app, it)?.name }
-                    for (k in CloudKind.values()) {
+                    for (k in Dest.all(app)) {
                         if (collectionId in CloudConfig(app, k).protectedCollections) intent(app, backupKey(k), names)
                     }
                 }
@@ -123,7 +124,7 @@ object MarkSync {
         }
         for (n in manual(ctx, space)) add(n, true, null)
         if (space.startsWith("b:")) {
-            val kind = CloudKind.of(space.substring(2)) ?: return emptyMap()
+            val kind = Dest.of(space.substring(2)) ?: return emptyMap()
             val protect = CloudConfig(ctx, kind).protectedCollections
             val cols = Collections.all(ctx).filter { it.id in protect && it.clipIds.isNotEmpty() }
             val local = ClipStore.list(ctx)
@@ -223,7 +224,7 @@ object MarkSync {
     /** Opens the space's store and existing clip names, then syncs (network; blocking). */
     fun syncNow(ctx: Context, space: String): Result {
         if (space.startsWith("b:")) {
-            val kind = CloudKind.of(space.substring(2)) ?: throw CloudException("Unknown destination", CloudException.Kind.OTHER)
+            val kind = Dest.of(space.substring(2)) ?: throw CloudException("Unknown destination", CloudException.Kind.OTHER)
             val cfg = CloudConfig(ctx, kind)
             val folder = cfg.folderId ?: return Result(emptyMap(), emptySet(), emptySet(), true)
             return CloudSync.providerFor(ctx, kind).use { p ->
@@ -269,8 +270,8 @@ object MarkSync {
     private fun nudge(ctx: Context, space: String, what: String) {
         try {
             if (space.startsWith("b:")) {
-                val k = CloudKind.of(space.substring(2)) ?: return
-                CloudConfig(ctx, k).folderId?.let { com.motioncam.live.Live.nudge(ctx, k, it, what) }
+                val k = Dest.of(space.substring(2)) ?: return
+                CloudConfig(ctx, k).folderId?.let { com.motioncam.live.Live.nudge(ctx, k.kind, it, what) }
             } else RemoteSources.get(ctx, space.substring(2))?.let { com.motioncam.live.Live.nudge(ctx, it.kind, it.folderId, what) }
         } catch (_: Exception) {}
     }
@@ -282,7 +283,7 @@ object MarkSync {
         unprotectManualQuiet(ctx, space, names)
         val open: (MarkStore) -> Unit = { s -> for (n in names) s.override(n, by, now) }
         if (space.startsWith("b:")) {
-            val kind = CloudKind.of(space.substring(2))!!
+            val kind = Dest.of(space.substring(2))!!
             val folder = CloudConfig(ctx, kind).folderId ?: return syncNow(ctx, space)
             CloudSync.providerFor(ctx, kind).use { p -> open(MarkStore.forProvider(p, folder)) }
         } else {

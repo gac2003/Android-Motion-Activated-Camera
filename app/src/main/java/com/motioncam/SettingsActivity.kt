@@ -172,7 +172,7 @@ class SettingsActivity : Activity() {
             val update = {
                 val on = com.motioncam.cloud.CloudSync.enabledKinds(this@SettingsActivity)
                 val q = com.motioncam.cloud.CloudSync.counts(this@SettingsActivity, null)
-                val t = "Open Remote Folders\n" + (if (on.isEmpty()) "Backup is off" else "Backing up to " + on.joinToString { it.label }) +
+                val t = "Open Remote Folders\n" + (if (on.isEmpty()) "Backup is off" else "Backing up to " + (if (on.size == 1) on[0].label else "${on.size} folders")) +
                     (if (q.queued > 0) " · ${q.queued} waiting" else "") + (if (q.failed > 0) " · ${q.failed} failed" else "")
                 if (chip.text != t) chip.text = t
             }

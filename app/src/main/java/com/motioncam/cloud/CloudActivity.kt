@@ -31,18 +31,21 @@ class CloudActivity : Activity() {
     }
 
     private lateinit var kind: CloudKind
+    private lateinit var dest: Dest
     private lateinit var cfg: CloudConfig
     private lateinit var box: LinearLayout
     private lateinit var statusTv: TextView
     private val ui = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
-        override fun run() { statusTv.text = CloudSync.status(this@CloudActivity, kind); ui.postDelayed(this, 1500) }
+        override fun run() { statusTv.text = CloudSync.status(this@CloudActivity, dest); ui.postDelayed(this, 1500) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        kind = CloudKind.of(intent.getStringExtra(EXTRA_KIND)) ?: CloudKind.DRIVE
-        cfg = CloudConfig(this, kind)
+        // a destination key ("drive", or "drive~…" for a further folder on the same service)
+        dest = Dest.of(intent.getStringExtra(EXTRA_KIND)) ?: Dest.primary(CloudKind.DRIVE)
+        kind = dest.kind
+        cfg = CloudConfig(this, dest)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
         root.addView(topBar(this, kind.label))
         box = LinearLayout(this).apply {
@@ -70,11 +73,11 @@ class CloudActivity : Activity() {
     private fun build() {
         box.removeAllViews()
         title("Status")
-        statusTv = Ui.label(this, CloudSync.status(this, kind), 14f)
+        statusTv = Ui.label(this, CloudSync.status(this, dest), 14f)
         box.addView(statusTv)
-        cfg.lastError?.let { if (cfg.blocked != null || CloudSync.counts(this, kind).failed > 0) note("Last error: $it") }
+        cfg.lastError?.let { if (cfg.blocked != null || CloudSync.counts(this, dest).failed > 0) note("Last error: $it") }
         row(button("View queue") { startActivity(Intent(this, UploadQueueActivity::class.java)) },
-            button("Retry now") { CloudSync.retryNow(this, kind); toast("Retrying") })
+            button("Retry now") { CloudSync.retryNow(this, dest); toast("Retrying") })
         box.addView(button("Upload existing clips…") { uploadExisting() })
         note("Clips already in the backup folder (same name) are skipped, so nothing is uploaded twice.")
 
@@ -82,7 +85,7 @@ class CloudActivity : Activity() {
         toggle("Back up new clips to ${kind.label}", cfg.enabled) { on ->
             if (on && !cfg.isConfigured) { toast("Connect ${kind.label} first"); build(); return@toggle }
             cfg.enabled = on
-            if (on) CloudSync.kick(this) else CloudSync.dropJobs(this, kind)
+            if (on) CloudSync.kick(this) else CloudSync.dropJobs(this, dest)
         }
 
         title("Account")
@@ -127,7 +130,7 @@ class CloudActivity : Activity() {
         note("Clips in these collections, clips protected by hand, and clips other phones on this account keep (their " +
             "collections in Remote folders) are never deleted. Any phone on the account can remove a protection.")
         if (cfg.folderId != null) box.addView(button("Protected clips…") {
-            startActivity(Intent(this, ProtectedActivity::class.java).putExtra(ProtectedActivity.EXTRA_SPACE, MarkSync.backupKey(kind)))
+            startActivity(Intent(this, ProtectedActivity::class.java).putExtra(ProtectedActivity.EXTRA_SPACE, MarkSync.backupKey(dest)))
         })
         note("Clean-up only ever deletes MotionCam's own clips in the backup folder, oldest first.")
     }
@@ -140,7 +143,7 @@ class CloudActivity : Activity() {
             box.addView(button("Disconnect") {
                 AlertDialog.Builder(this).setTitle("Disconnect ${kind.label}?")
                     .setMessage("Uploads stop and the sign-in is removed from this phone. Clips already in the cloud stay there.")
-                    .setPositiveButton("Disconnect") { _, _ -> cfg.disconnect(); cfg.enabled = false; CloudSync.dropJobs(this, kind); build() }
+                    .setPositiveButton("Disconnect") { _, _ -> cfg.disconnect(); cfg.enabled = false; CloudSync.dropJobs(this, dest); build() }
                     .setNegativeButton("Cancel", null).show()
             })
         } else {
@@ -185,6 +188,7 @@ class CloudActivity : Activity() {
         Thread {
             try {
                 val code = rx.waitForCode(state, 5 * 60_000)
+                runOnUiThread { LoopbackReceiver.bringBack(this) }   // back from the browser tab
                 val refresh = DropboxProvider.exchange(code, verifier)
                 cfg.refreshToken = refresh
                 val who = DropboxProvider(DropboxProvider.APP_KEY, refresh).test()
@@ -192,10 +196,10 @@ class CloudActivity : Activity() {
                 cfg.blocked = null
                 runOnUiThread { toast("Connected to Dropbox as $who — return complete"); cfg.enabled = true; CloudSync.kick(this); build() }
             } catch (e: Exception) {
-                runOnUiThread { toast("Dropbox sign-in failed: ${e.message}") }
+                if (!rx.superseded) runOnUiThread { toast("Dropbox sign-in failed: ${e.message}") }   // replaced by a newer sign-in: quiet
             } finally { rx.close() }
         }.start()
-        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(DropboxProvider.authorizeUrl(Pkce.challenge(verifier), state))))
+        LoopbackReceiver.openPage(this, DropboxProvider.authorizeUrl(Pkce.challenge(verifier), state))
     }
 
     private fun serverFields() {
@@ -224,7 +228,7 @@ class CloudActivity : Activity() {
         toast("Testing…")
         Thread {
             val msg = try {
-                CloudSync.providerFor(this, kind).use { p ->
+                CloudSync.providerFor(this, dest).use { p ->
                     val who = p.test()
                     if (kind == CloudKind.FTP || kind == CloudKind.SFTP) cfg.account = who
                     val q = try { p.quota(cfg.folderId ?: "/") } catch (e: Exception) { null }
@@ -242,7 +246,7 @@ class CloudActivity : Activity() {
         toast("Loading folders…")
         Thread {
             try {
-                val folders = CloudSync.providerFor(this, kind).use { it.listFolders(parent?.id) }
+                val folders = CloudSync.providerFor(this, dest).use { it.listFolders(parent?.id) }
                 runOnUiThread {
                     val list = ArrayList<com.motioncam.Opt>()
                     if (parent != null) list += com.motioncam.Opt("Use “${parent.name}”", "Back up into this folder", checked = true) { pick(parent) }
@@ -260,7 +264,7 @@ class CloudActivity : Activity() {
     private fun create(parent: RemoteFolder?, name: String) {
         Thread {
             try {
-                val f = CloudSync.providerFor(this, kind).use { it.createFolder(parent?.id, name) }
+                val f = CloudSync.providerFor(this, dest).use { it.createFolder(parent?.id, name) }
                 runOnUiThread { pick(f) }
             } catch (e: Exception) { runOnUiThread { toast("Could not create folder: ${e.message}") } }
         }.start()
@@ -289,7 +293,7 @@ class CloudActivity : Activity() {
         toast("Creating link…")
         Thread {
             try {
-                val f = CloudSync.backupFolder(this, kind)
+                val f = CloudSync.backupFolder(this, dest)
                 val url = dropboxProvider().viewerLink(f.id)
                 runOnUiThread {
                     AlertDialog.Builder(this).setTitle("Viewer link for \"${f.name}\"").setMessage(url + "\n\nOn the other device: Clips → cloud icon → ＋ Add → Dropbox: a viewer link, and paste it.")
@@ -313,7 +317,7 @@ class CloudActivity : Activity() {
             .setPositiveButton("Revoke") { _, _ ->
                 Thread {
                     val msg = try {
-                        val f = CloudSync.backupFolder(this, kind)
+                        val f = CloudSync.backupFolder(this, dest)
                         val p = dropboxProvider()
                         val url = p.existingLink(f.id)
                         if (url == null) "There is no viewer link for this folder." else { p.revokeLink(url); "Link revoked." }
@@ -333,7 +337,7 @@ class CloudActivity : Activity() {
             .setMultiChoiceItems(cols.map { it.name }.toTypedArray(), checked) { _, i, b -> checked[i] = b }
             .setPositiveButton("Save") { _, _ ->
                 cfg.protectedCollections = cols.filterIndexed { i, _ -> checked[i] }.map { it.id }.toSet()
-                MarkSync.schedule(this, MarkSync.backupKey(kind))   // update the marks in the cloud
+                MarkSync.schedule(this, MarkSync.backupKey(dest))   // update the marks in the cloud
                 build()
             }
             .setNegativeButton("Cancel", null).show()
@@ -346,7 +350,7 @@ class CloudActivity : Activity() {
             com.motioncam.Opt(label) {
                 if (!cfg.enabled) { cfg.enabled = true }
                 Thread {
-                    val n = CloudSync.enqueueExisting(this, kind, if (span == 0L) 0 else System.currentTimeMillis() - span)
+                    val n = CloudSync.enqueueExisting(this, dest, if (span == 0L) 0 else System.currentTimeMillis() - span)
                     runOnUiThread { toast("$n clips queued"); build() }
                 }.start()
             }

@@ -133,7 +133,7 @@ object CameraLink {
                 val clip = com.motioncam.ClipStore.get(c, clipId) ?: return@Thread
                 val folders = JSONArray()
                 for (k in com.motioncam.cloud.CloudSync.enabledKinds(c)) com.motioncam.cloud.CloudConfig(c, k).folderId?.let {
-                    folders.put(JSONObject().put("k", k.key).put("f", Live.folderKey(k, it)))
+                    folders.put(JSONObject().put("k", k.kind.key).put("f", Live.folderKey(k.kind, it)))
                 }
                 val ms = clip.durationMs.takeIf { it > 0 } ?: lastClipMs
                 val sec = (ms / 1000).coerceAtLeast(1)

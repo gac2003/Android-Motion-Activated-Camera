@@ -9,7 +9,7 @@ object ResetEffects {
     fun apply(ctx: Context, keys: List<String>) {
         val p = Prefs(ctx)
         if (keys.any { it in Prefs.CLOUD_KEYS }) {
-            for (k in CloudKind.values()) CloudConfig(ctx, k).resetPolicies()
+            for (k in com.motioncam.cloud.Dest.all(ctx)) CloudConfig(ctx, k).resetPolicies()
             com.motioncam.cloud.MarkSync.scheduleLocal(ctx)    // protected collections back to Favourites
             com.motioncam.cloud.CloudSync.kick(ctx)            // Wi-Fi / charging rules, un-paused queue
         }

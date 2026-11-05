@@ -4,8 +4,17 @@ import android.content.Context
 import com.motioncam.Collections
 
 /** Settings for one backup destination. Secrets go through [SecretStore]. */
-class CloudConfig(private val ctx: Context, val kind: CloudKind) {
-    private val sp = ctx.getSharedPreferences("cloud_${kind.key}", Context.MODE_PRIVATE)
+class CloudConfig(private val ctx: Context, val dest: Dest) {
+    /** The service's own destination (backups set up before several folders were possible). */
+    constructor(ctx: Context, kind: CloudKind) : this(ctx, Dest.primary(kind))
+    val kind: CloudKind get() = dest.kind
+    private val sp = ctx.getSharedPreferences("cloud_${dest.key}", Context.MODE_PRIVATE)
+
+    /** Forgets everything about this destination (settings and sign-in). */
+    fun clearAll() {
+        sp.edit().clear().apply()
+        for (k in listOf("password", "privateKey", "passphrase", "refresh")) SecretStore.put(ctx, "${dest.key}.$k", null)
+    }
     private fun s(k: String) = sp.getString(k, null)
     private fun put(k: String, v: String?) = sp.edit().putString(k, v).apply()
 
@@ -40,11 +49,11 @@ class CloudConfig(private val ctx: Context, val kind: CloudKind) {
     /** SFTP: trusted server host-key fingerprint (trust on first use). */
     var hostKey: String? get() = s("hostKey"); set(v) = put("hostKey", v)
 
-    var password: String? get() = SecretStore.get(ctx, "${kind.key}.password"); set(v) = SecretStore.put(ctx, "${kind.key}.password", v)
-    var privateKey: String? get() = SecretStore.get(ctx, "${kind.key}.privateKey"); set(v) = SecretStore.put(ctx, "${kind.key}.privateKey", v)
-    var passphrase: String? get() = SecretStore.get(ctx, "${kind.key}.passphrase"); set(v) = SecretStore.put(ctx, "${kind.key}.passphrase", v)
+    var password: String? get() = SecretStore.get(ctx, "${dest.key}.password"); set(v) = SecretStore.put(ctx, "${dest.key}.password", v)
+    var privateKey: String? get() = SecretStore.get(ctx, "${dest.key}.privateKey"); set(v) = SecretStore.put(ctx, "${dest.key}.privateKey", v)
+    var passphrase: String? get() = SecretStore.get(ctx, "${dest.key}.passphrase"); set(v) = SecretStore.put(ctx, "${dest.key}.passphrase", v)
     /** Dropbox refresh token. (Google sign-in is managed by Google Play services.) */
-    var refreshToken: String? get() = SecretStore.get(ctx, "${kind.key}.refresh"); set(v) = SecretStore.put(ctx, "${kind.key}.refresh", v)
+    var refreshToken: String? get() = SecretStore.get(ctx, "${dest.key}.refresh"); set(v) = SecretStore.put(ctx, "${dest.key}.refresh", v)
 
     // status
     var lastOkAt: Long get() = sp.getLong("lastOkAt", 0); set(v) = sp.edit().putLong("lastOkAt", v).apply()

@@ -311,9 +311,9 @@ object Live {
             if (what == "clips") Thread { try { com.motioncam.remote.RemoteRepo.refresh(ctx, src) } catch (_: Exception) {} }.start()
         }
         // the camera phone itself: protections / collections affect its clean-up
-        for (k in CloudKind.values()) {
+        for (k in com.motioncam.cloud.Dest.all(ctx)) {
             val f = CloudConfig(ctx, k).folderId ?: continue
-            if (folderKey(k, f) != key) continue
+            if (folderKey(k.kind, f) != key) continue
             com.motioncam.cloud.MarkSync.schedule(ctx, com.motioncam.cloud.MarkSync.backupKey(k))
             // clips deleted from the cloud on another phone: forget them as "backed up" so they can be uploaded again
             if (what == "clips") Thread { try { com.motioncam.cloud.CloudSync.reconcile(ctx, k) } catch (_: Exception) {} }.start()

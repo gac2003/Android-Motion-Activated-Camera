@@ -34,7 +34,7 @@ import java.io.InputStream
  * when the app is not running.
  */
 object CloudSync {
-    class Job(val clipId: Long, val kind: CloudKind, var attempts: Int = 0, var nextAt: Long = 0,
+    class Job(val clipId: Long, val kind: Dest, var attempts: Int = 0, var nextAt: Long = 0,
               var resume: String? = null, var error: String? = null, var failed: Boolean = false,
               val addedAt: Long = System.currentTimeMillis(), var seq: Long = addedAt, var paused: Boolean = false) {
         val key get() = "$clipId:${kind.key}"
@@ -45,18 +45,18 @@ object CloudSync {
         @Volatile var phase: String? = null
     }
 
-    class Uploaded(val clipId: Long, val kind: CloudKind, val name: String, val remoteId: String,
+    class Uploaded(val clipId: Long, val kind: Dest, val name: String, val remoteId: String,
                    val size: Long, val at: Long, var pinned: Boolean, var thumb: Boolean = false)
 
     /** Read-only view of a job for the queue screen. */
-    class JobView(val key: String, val clipId: Long, val kind: CloudKind, val state: String, val progress: Int,
+    class JobView(val key: String, val clipId: Long, val kind: Dest, val state: String, val progress: Int,
                   val running: Boolean, val paused: Boolean, val failed: Boolean, val error: String?)
 
     private const val JOB_ID = 4242
     private val lock = Object()
     private var jobs: MutableList<Job>? = null
     private var index: MutableList<Uploaded>? = null
-    private val lanes = HashMap<CloudKind, Int>()
+    private val lanes = HashMap<Dest, Int>()
     @Volatile private var stop = false
     @Volatile private var jobCallback: ((Boolean) -> Unit)? = null
     @Volatile private var netCallbackRegistered = false
@@ -66,15 +66,16 @@ object CloudSync {
 
     /** Cached listing of each backup folder (for the duplicate check and size cap). */
     private class Listing(val at: Long, val files: java.util.concurrent.ConcurrentHashMap<String, RemoteFile>)
-    private val listings = HashMap<CloudKind, Listing>()
+    private val listings = HashMap<Dest, Listing>()
     private class FreeSpace(val at: Long, var free: Long?)
-    private val freeSpace = HashMap<CloudKind, FreeSpace>()
-    private val spaceLocks = CloudKind.values().associateWith { Object() }
+    private val freeSpace = HashMap<Dest, FreeSpace>()
+    private val spaceLocks = java.util.concurrent.ConcurrentHashMap<Dest, Any>()
+    private fun spaceLock(d: Dest): Any = spaceLocks.getOrPut(d) { Object() }
 
     private val BACKOFF_NET = longArrayOf(5_000, 15_000, 30_000, 60_000, 120_000, 300_000, 900_000)
     private val BACKOFF_OTHER = longArrayOf(60_000, 300_000, 900_000, 1_800_000, 3_600_000)
 
-    private fun laneLimit(k: CloudKind) = if (k == CloudKind.FTP || k == CloudKind.SFTP) 2 else 3
+    private fun laneLimit(k: Dest) = if (k.kind == CloudKind.FTP || k.kind == CloudKind.SFTP) 2 else 3
 
     // ------------------------------------------------------------------ persistence
 
@@ -90,7 +91,7 @@ object CloudSync {
                 val a = JSONArray(qFile(ctx).readText())
                 for (i in 0 until a.length()) {
                     val o = a.getJSONObject(i)
-                    val k = CloudKind.of(o.getString("kind")) ?: continue
+                    val k = Dest.of(o.getString("kind")) ?: continue
                     val added = o.optLong("added")
                     js += Job(o.getLong("clip"), k, o.optInt("attempts"), o.optLong("nextAt"),
                         o.optString("resume").ifEmpty { null }, o.optString("error").ifEmpty { null },
@@ -101,7 +102,7 @@ object CloudSync {
                 val a = JSONArray(iFile(ctx).readText())
                 for (i in 0 until a.length()) {
                     val o = a.getJSONObject(i)
-                    val k = CloudKind.of(o.getString("kind")) ?: continue
+                    val k = Dest.of(o.getString("kind")) ?: continue
                     ix += Uploaded(o.getLong("clip"), k, o.getString("name"), o.getString("rid"), o.optLong("size"), o.optLong("at"), o.optBoolean("pinned"), o.optBoolean("thumb"))
                 }
             }
@@ -128,7 +129,7 @@ object CloudSync {
 
     // ------------------------------------------------------------------ public API
 
-    fun enabledKinds(ctx: Context) = CloudKind.values().filter { CloudConfig(ctx, it).let { c -> c.enabled && c.isConfigured } }
+    fun enabledKinds(ctx: Context) = Dest.all(ctx).filter { CloudConfig(ctx, it).let { c -> c.enabled && c.isConfigured } }
 
     /** Called when a clip has been saved: queue it for every enabled destination. */
     fun onClipSaved(ctx: Context, clipId: Long) {
@@ -143,7 +144,7 @@ object CloudSync {
         kick(ctx)
     }
 
-    private fun addJobLocked(ctx: Context, clipId: Long, k: CloudKind): Boolean {
+    private fun addJobLocked(ctx: Context, clipId: Long, k: Dest): Boolean {
         // a copy saved from someone's remote folder is already in the cloud: never upload it
         if (ClipStore.isSavedCopy(ctx, clipId)) return false
         if (jobs!!.any { it.clipId == clipId && it.kind == k }) return false
@@ -157,7 +158,7 @@ object CloudSync {
      * (e.g. "Delete from cloud" on another phone) are forgotten, so they can be uploaded again. Network; returns how
      * many were forgotten (0 if the folder could not be read — nothing is changed then).
      */
-    fun reconcile(ctx: Context, kind: CloudKind): Int {
+    fun reconcile(ctx: Context, kind: Dest): Int {
         val cfg = CloudConfig(ctx, kind)
         val folder = cfg.folderId ?: return 0
         if (!cfg.isConfigured) return 0
@@ -177,11 +178,11 @@ object CloudSync {
     /** [reconcile] for every set-up destination, in the background. */
     fun reconcileAsync(ctx: Context) {
         val app = ctx.applicationContext
-        Thread { for (k in CloudKind.values()) try { reconcile(app, k) } catch (_: Exception) {} }.start()
+        Thread { for (k in Dest.all(app)) try { reconcile(app, k) } catch (_: Exception) {} }.start()
     }
 
     /** Queues existing clips newer than [sinceMs] (0 = all), oldest first. Returns how many were added. */
-    fun enqueueExisting(ctx: Context, kind: CloudKind, sinceMs: Long): Int {
+    fun enqueueExisting(ctx: Context, kind: Dest, sinceMs: Long): Int {
         reconcile(ctx, kind)   // clips deleted from the cloud meanwhile are uploaded again
         val clips = ClipStore.list(ctx).filter { it.startMs >= sinceMs }.sortedBy { it.startMs }
         var n = 0
@@ -218,18 +219,18 @@ object CloudSync {
     }
 
     /** Clears failures / waits and tries again now. */
-    fun retryNow(ctx: Context, kind: CloudKind? = null) {
+    fun retryNow(ctx: Context, kind: Dest? = null) {
         synchronized(lock) {
             load(ctx)
             for (j in jobs!!) if (kind == null || j.kind == kind) { j.failed = false; j.nextAt = 0; j.attempts = 0 }
             save(ctx)
         }
-        for (k in CloudKind.values()) if (kind == null || k == kind) CloudConfig(ctx, k).blocked = null
+        for (k in Dest.all(ctx)) if (kind == null || k == kind) CloudConfig(ctx, k).blocked = null
         kick(ctx)
     }
 
     /** Removes queued jobs for a destination (when it is disabled or disconnected). */
-    fun dropJobs(ctx: Context, kind: CloudKind) {
+    fun dropJobs(ctx: Context, kind: Dest) {
         synchronized(lock) {
             load(ctx)
             jobs!!.filter { it.kind == kind }.forEach { it.abort = true }
@@ -333,14 +334,14 @@ object CloudSync {
 
     class Counts(val queued: Int, val failed: Int, val uploaded: Int)
 
-    fun counts(ctx: Context, kind: CloudKind?): Counts = synchronized(lock) {
+    fun counts(ctx: Context, kind: Dest?): Counts = synchronized(lock) {
         load(ctx)
         val js = jobs!!.filter { kind == null || it.kind == kind }
         Counts(js.count { !it.failed }, js.count { it.failed }, index!!.count { kind == null || it.kind == kind })
     }
 
     /** One-line status for the settings screens. */
-    fun status(ctx: Context, kind: CloudKind): String {
+    fun status(ctx: Context, kind: Dest): String {
         val cfg = CloudConfig(ctx, kind)
         if (!cfg.isConfigured) return "Not set up"
         if (!cfg.enabled) return "Off"
@@ -450,7 +451,7 @@ object CloudSync {
     // ------------------------------------------------------------------ worker lanes
 
     /** Next job for this service: due, not paused, not taken by another lane; highest priority first. */
-    private fun claim(ctx: Context, k: CloudKind): Job? = synchronized(lock) {
+    private fun claim(ctx: Context, k: Dest): Job? = synchronized(lock) {
         load(ctx)
         if (Prefs(ctx).cloudPaused || CloudConfig(ctx, k).blocked != null) return null
         val now = System.currentTimeMillis()
@@ -461,7 +462,7 @@ object CloudSync {
         j
     }
 
-    private fun lane(ctx: Context, k: CloudKind) {
+    private fun lane(ctx: Context, k: Dest) {
         var p: CloudProvider? = null
         try {
             val cfg = CloudConfig(ctx, k)
@@ -514,10 +515,11 @@ object CloudSync {
     }
 
     /** Provider for a destination with the current settings (used by the settings screen too). */
-    fun providerFor(ctx: Context, kind: CloudKind): CloudProvider = provider(ctx, CloudConfig(ctx, kind))
+    fun providerFor(ctx: Context, kind: Dest): CloudProvider = provider(ctx, CloudConfig(ctx, kind))
+    fun providerFor(ctx: Context, kind: CloudKind): CloudProvider = providerFor(ctx, Dest.primary(kind))
 
     /** Backup folder, created ("MotionCam") on first use if the user did not pick one. */
-    private fun folder(cfg: CloudConfig, p: CloudProvider): String = synchronized(spaceLocks[cfg.kind]!!) {
+    private fun folder(cfg: CloudConfig, p: CloudProvider): String = synchronized(spaceLock(cfg.dest)) {
         cfg.folderId?.let { return it }
         val existing = p.listFolders(null).firstOrNull { it.name == "MotionCam" }
         val f = existing ?: p.createFolder(null, "MotionCam")
@@ -529,11 +531,11 @@ object CloudSync {
     /** Folder contents, fetched at most every 5 minutes and kept up to date as we upload/delete. */
     private fun listing(cfg: CloudConfig, p: CloudProvider, folder: String): MutableMap<String, RemoteFile> {
         synchronized(lock) {
-            listings[cfg.kind]?.let { if (System.currentTimeMillis() - it.at < 5 * 60_000L) return it.files }
+            listings[cfg.dest]?.let { if (System.currentTimeMillis() - it.at < 5 * 60_000L) return it.files }
         }
         // network call outside the queue lock (the queue screen must never wait for it)
         val files = java.util.concurrent.ConcurrentHashMap(p.list(folder).associateBy { it.name })
-        synchronized(lock) { listings[cfg.kind] = Listing(System.currentTimeMillis(), files) }
+        synchronized(lock) { listings[cfg.dest] = Listing(System.currentTimeMillis(), files) }
         return files
     }
 
@@ -566,7 +568,7 @@ object CloudSync {
                 })
             job.phase = "Thumbnail"
             done(ctx, job, cfg, clip, rf, uploadThumb(ctx, cfg, p, folder, clip))
-            synchronized(lock) { freeSpace[cfg.kind]?.let { fs -> fs.free = fs.free?.minus(rf.size) } }
+            synchronized(lock) { freeSpace[cfg.dest]?.let { fs -> fs.free = fs.free?.minus(rf.size) } }
             return true
         } catch (e: CloudException) {
             handleError(ctx, cfg, job, e)
@@ -586,14 +588,14 @@ object CloudSync {
             jobs!!.remove(job)
             index!!.removeAll { it.clipId == clip.id && it.kind == job.kind }
             index!!.add(Uploaded(clip.id, job.kind, rf.name, rf.id, rf.size, System.currentTimeMillis(), isProtected(ctx, cfg, clip.id), thumb))
-            listings[cfg.kind]?.files?.put(rf.name, rf)
+            listings[cfg.dest]?.files?.put(rf.name, rf)
             save(ctx)
         }
         cfg.lastOkAt = System.currentTimeMillis()
         cfg.lastError = null
         cfg.blocked = null
         // a clip that should be kept (protected collection / by hand): mark it in the cloud right away
-        val space = MarkSync.backupKey(cfg.kind)
+        val space = MarkSync.backupKey(cfg.dest)
         if (isProtected(ctx, cfg, clip.id) || clip.name in MarkSync.manual(ctx, space)) MarkSync.schedule(ctx, space)
         cfg.folderId?.let { com.motioncam.live.Live.nudge(ctx, cfg.kind, it, "clips") }   // viewing phones refresh now
         afterUpload(ctx, clip)
@@ -610,16 +612,16 @@ object CloudSync {
                 CloudException.Kind.AUTH -> {
                     cfg.blocked = "Sign-in problem — reconnect in Clips → Remote Folders → the folder's ⋮ → Backup settings"
                     job.nextAt = now + 30 * 60_000L
-                    notify(ctx, cfg.kind, "${cfg.kind.label}: sign-in needed", e.message ?: "")
+                    notify(ctx, cfg.dest, "${cfg.dest.label}: sign-in needed", e.message ?: "")
                 }
                 CloudException.Kind.QUOTA -> {
-                    cfg.blocked = "${cfg.kind.label} is full" + if (cfg.fullPolicy == CloudConfig.PAUSE) " — uploads paused" else " and nothing more can be deleted"
+                    cfg.blocked = "${cfg.dest.label} is full" + if (cfg.fullPolicy == CloudConfig.PAUSE) " — uploads paused" else " and nothing more can be deleted"
                     job.nextAt = now + 60 * 60_000L
-                    notify(ctx, cfg.kind, "${cfg.kind.label} is full", "New clips are waiting on the phone. Free up space or change the backup settings.")
+                    notify(ctx, cfg.dest, "${cfg.dest.label} is full", "New clips are waiting on the phone. Free up space or change the backup settings.")
                 }
                 CloudException.Kind.NOT_FOUND -> {
                     cfg.folderId = null            // the backup folder was removed: make a new one next time
-                    listings.remove(cfg.kind)
+                    listings.remove(cfg.dest)
                     job.nextAt = now + 5_000
                     job.attempts++
                 }
@@ -684,20 +686,20 @@ object CloudSync {
 
     /** Per destination: thumbnail folder id and its contents (clip name -> thumbnail file). */
     private class Thumbs(val parent: String, val folder: String, val at: Long, val byClip: java.util.concurrent.ConcurrentHashMap<String, RemoteFile>)
-    private val thumbs = HashMap<CloudKind, Thumbs>()
+    private val thumbs = HashMap<Dest, Thumbs>()
     /** Index entries tried this session by the back-fill (so a failing one is not retried in a loop). */
     private val thumbTried = HashSet<String>()
 
     private fun thumbsFor(cfg: CloudConfig, p: CloudProvider, folder: String, create: Boolean): Thumbs? {
         synchronized(lock) {
-            thumbs[cfg.kind]?.let { if (it.parent == folder && System.currentTimeMillis() - it.at < 30 * 60_000L) return it }
+            thumbs[cfg.dest]?.let { if (it.parent == folder && System.currentTimeMillis() - it.at < 30 * 60_000L) return it }
         }
         val f = p.listFolders(folder).firstOrNull { it.name == THUMB_FOLDER }
             ?: if (create) p.createFolder(folder, THUMB_FOLDER) else return null
         val map = java.util.concurrent.ConcurrentHashMap<String, RemoteFile>()
         for (rf in p.list(f.id)) parseThumbName(rf.name)?.let { map[it.first] = rf }
         val t = Thumbs(folder, f.id, System.currentTimeMillis(), map)
-        synchronized(lock) { thumbs[cfg.kind] = t }
+        synchronized(lock) { thumbs[cfg.dest] = t }
         return t
     }
 
@@ -709,7 +711,7 @@ object CloudSync {
     private fun uploadThumb(ctx: Context, cfg: CloudConfig, p: CloudProvider, folder: String, clip: Clip): Boolean {
         if (!Prefs(ctx).cloudThumbs) return false
         return try {
-            val t = synchronized(spaceLocks[cfg.kind]!!) { thumbsFor(cfg, p, folder, create = true) } ?: return false
+            val t = synchronized(spaceLock(cfg.dest)) { thumbsFor(cfg, p, folder, create = true) } ?: return false
             if (t.byClip.containsKey(clip.name)) return true
             val bmp = ClipThumbs.load(ctx, clip) ?: return false
             val bytes = java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, it) }.toByteArray()
@@ -726,7 +728,7 @@ object CloudSync {
         catch (e: Exception) { 0L } finally { try { r.release() } catch (_: Exception) {} }
     }
 
-    private fun thumbsDue(ctx: Context, k: CloudKind): Boolean {
+    private fun thumbsDue(ctx: Context, k: Dest): Boolean {
         if (!Prefs(ctx).cloudThumbs) return false
         val cfg = CloudConfig(ctx, k)
         if (!cfg.enabled || !cfg.isConfigured || cfg.folderId == null) return false
@@ -736,8 +738,8 @@ object CloudSync {
     /** One thumbnail for a clip uploaded earlier without one. Returns false when there is nothing to do. */
     private fun backfillThumb(ctx: Context, cfg: CloudConfig, p: CloudProvider): Boolean {
         val u = synchronized(lock) {
-            index!!.firstOrNull { it.kind == cfg.kind && !it.thumb && "${it.clipId}:${cfg.kind.key}" !in thumbTried }
-                ?.also { thumbTried += "${it.clipId}:${cfg.kind.key}" }
+            index!!.firstOrNull { it.kind == cfg.dest && !it.thumb && "${it.clipId}:${cfg.dest.key}" !in thumbTried }
+                ?.also { thumbTried += "${it.clipId}:${cfg.dest.key}" }
         } ?: return false
         val folder = cfg.folderId ?: return false
         val clip = ClipStore.get(ctx, u.clipId)
@@ -756,7 +758,7 @@ object CloudSync {
     }
 
     /** The backup folder (created if needed), for sharing it from the settings screen. */
-    fun backupFolder(ctx: Context, kind: CloudKind): RemoteFolder {
+    fun backupFolder(ctx: Context, kind: Dest): RemoteFolder {
         val cfg = CloudConfig(ctx, kind)
         val id = providerFor(ctx, kind).use { folder(cfg, it) }
         return RemoteFolder(id, cfg.folderName ?: "MotionCam")
@@ -778,7 +780,7 @@ object CloudSync {
         migratePinned(ctx, cfg)
         val existing = listing(cfg, p, folder).keys.filter { isOurClip(it) }.toSet()
         // clips in the shared collections other phones keep in this folder count as protected too
-        val r = MarkSync.sync(ctx, MarkSync.backupKey(cfg.kind), MarkStore.forProvider(p, folder), existing, MarkSync.sharedMarks(shared.load()))
+        val r = MarkSync.sync(ctx, MarkSync.backupKey(cfg.dest), MarkStore.forProvider(p, folder), existing, MarkSync.sharedMarks(shared.load()))
         // a clip whose protection was just removed is kept 24 h more, so phones that had it in a collection
         // have time to save a copy before the clean-up may delete it
         val grace = System.currentTimeMillis() - 24 * 3_600_000L
@@ -787,10 +789,10 @@ object CloudSync {
 
     /** Clips pinned by protected collections before cloud marks existed stay protected (now as marks). */
     private fun migratePinned(ctx: Context, cfg: CloudConfig) {
-        val sp = ctx.getSharedPreferences("cloud_${cfg.kind.key}", Context.MODE_PRIVATE)
+        val sp = ctx.getSharedPreferences("cloud_${cfg.dest.key}", Context.MODE_PRIVATE)
         if (sp.getBoolean("marksMigrated", false)) return
-        val names = synchronized(lock) { load(ctx); index!!.filter { it.kind == cfg.kind && it.pinned }.map { it.name } }
-        MarkSync.seedSticky(ctx, MarkSync.backupKey(cfg.kind), names, "Protected collection")
+        val names = synchronized(lock) { load(ctx); index!!.filter { it.kind == cfg.dest && it.pinned }.map { it.name } }
+        MarkSync.seedSticky(ctx, MarkSync.backupKey(cfg.dest), names, "Protected collection")
         sp.edit().putBoolean("marksMigrated", true).apply()
     }
 
@@ -799,16 +801,16 @@ object CloudSync {
      * parallel uploads never delete more than necessary. Free space is cached for a minute.
      */
     private fun ensureSpace(ctx: Context, p: CloudProvider, cfg: CloudConfig, folder: String, need: Long) =
-        synchronized(spaceLocks[cfg.kind]!!) {
+        synchronized(spaceLock(cfg.dest)) {
             var mustFree = 0L
             if (cfg.maxGb > 0) {
                 val used = listing(cfg, p, folder).values.filter { isOurClip(it.name) }.sumOf { it.size }
                 mustFree = maxOf(mustFree, used + need - cfg.maxGb * 1_000_000_000L)
             }
             val now = System.currentTimeMillis()
-            val cached = synchronized(lock) { freeSpace[cfg.kind]?.takeIf { now - it.at < 60_000L } }
+            val cached = synchronized(lock) { freeSpace[cfg.dest]?.takeIf { now - it.at < 60_000L } }
             val free = cached?.free ?: (try { p.quota(folder)?.free } catch (e: CloudException) { null }).also {
-                synchronized(lock) { freeSpace[cfg.kind] = FreeSpace(now, it) }
+                synchronized(lock) { freeSpace[cfg.dest] = FreeSpace(now, it) }
             }
             if (free != null) mustFree = maxOf(mustFree, need + 64_000_000L - free)
             if (mustFree <= 0) return@synchronized
@@ -823,22 +825,22 @@ object CloudSync {
                 if (freed >= mustFree) break
                 p.delete(folder, f)
                 freed += f.size
-                forget(ctx, cfg.kind, f.name)
+                forget(ctx, cfg.dest, f.name)
                 deleteThumb(cfg, p, folder, f.name)
                 try { marks.forget(f.name) } catch (_: Exception) {}
                 try { shared.forgetClip(f.name) } catch (_: Exception) {}   // no collection entries pointing at nothing
             }
-            synchronized(lock) { freeSpace.remove(cfg.kind) }
+            synchronized(lock) { freeSpace.remove(cfg.dest) }
             if (freed < mustFree) throw CloudException("Full: only protected clips are left", CloudException.Kind.QUOTA)
         }
 
-    private fun forget(ctx: Context, kind: CloudKind, name: String) = synchronized(lock) {
+    private fun forget(ctx: Context, kind: Dest, name: String) = synchronized(lock) {
         index!!.removeAll { it.kind == kind && it.name == name }
         listings[kind]?.files?.remove(name)
         save(ctx)
     }
 
-    private fun retentionDue(ctx: Context, k: CloudKind): Boolean {
+    private fun retentionDue(ctx: Context, k: Dest): Boolean {
         val cfg = CloudConfig(ctx, k)
         return cfg.enabled && cfg.isConfigured && cfg.keepDays > 0 && cfg.folderId != null &&
             System.currentTimeMillis() - cfg.lastRetentionAt > 6 * 3_600_000L
@@ -856,12 +858,12 @@ object CloudSync {
             val marks = MarkStore.forProvider(p, folder)
             val cutoff = now - cfg.keepDays * 86_400_000L
             val fmt = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
-            synchronized(spaceLocks[cfg.kind]!!) {
+            synchronized(spaceLock(cfg.dest)) {
                 for (f in p.list(folder)) {
                     if (!isOurClip(f.name) || f.name in keep) continue
                     val t = try { fmt.parse(f.name.substring(3, 18))?.time } catch (e: Exception) { null } ?: f.modifiedMs
                     if (t in 1 until cutoff) {
-                        p.delete(folder, f); forget(ctx, cfg.kind, f.name); deleteThumb(cfg, p, folder, f.name)
+                        p.delete(folder, f); forget(ctx, cfg.dest, f.name); deleteThumb(cfg, p, folder, f.name)
                         try { marks.forget(f.name) } catch (_: Exception) {}
                         try { shared.forgetClip(f.name) } catch (_: Exception) {}
                     }
@@ -872,13 +874,13 @@ object CloudSync {
 
     // ------------------------------------------------------------------ notifications
 
-    private fun notify(ctx: Context, kind: CloudKind, title: String, text: String) {
+    private fun notify(ctx: Context, kind: Dest, title: String, text: String) {
         try {
             val nm = ctx.getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(NotificationChannel("cloud", "Cloud backup", NotificationManager.IMPORTANCE_DEFAULT))
-            val open = PendingIntent.getActivity(ctx, 40 + kind.ordinal,
+            val open = PendingIntent.getActivity(ctx, 40 + (kind.key.hashCode() and 0xffff),
                 Intent(ctx, CloudActivity::class.java).putExtra(CloudActivity.EXTRA_KIND, kind.key), PendingIntent.FLAG_IMMUTABLE)
-            nm.notify(300 + kind.ordinal, Notification.Builder(ctx, "cloud")
+            nm.notify(300 + (kind.key.hashCode() and 0xffff), Notification.Builder(ctx, "cloud")
                 .setSmallIcon(android.R.drawable.stat_notify_error).setContentTitle(title).setContentText(text)
                 .setStyle(Notification.BigTextStyle().bigText(text)).setContentIntent(open).setAutoCancel(true).build())
         } catch (_: Exception) {}

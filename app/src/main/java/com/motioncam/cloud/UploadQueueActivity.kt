@@ -300,7 +300,7 @@ class UploadQueueActivity : Activity() {
             val bar = texts.getChildAt(2) as ProgressBar
             val handle = row.getChildAt(2) as TextView
             t1.text = title(v)
-            t2.text = "${v.kind.label} · ${v.state}"
+            t2.text = "${v.kind.label}" + (com.motioncam.cloud.CloudConfig(this@UploadQueueActivity, v.kind).folderName?.let { " · $it" } ?: "") + " · ${v.state}"
             t2.setTextColor(when { v.failed -> Ui.RED; v.running -> Ui.ACCENT; v.paused -> Ui.GREY; else -> 0xFFB0B4BA.toInt() })
             bar.visibility = if (v.running) View.VISIBLE else View.GONE
             bar.progress = v.progress.coerceAtLeast(0)

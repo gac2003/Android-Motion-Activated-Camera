@@ -62,13 +62,7 @@ class RemoteFoldersActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
-        // title bar: ⚙ folder settings (a page of their own) and ＋ Add
-        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        actions.addView(iconButton(this, IconDrawable.Kind.SETTINGS, 44, 11) {
-            startActivity(Intent(this, FolderSettingsActivity::class.java))
-        }.apply { contentDescription = "Remote folder settings"; tooltipText = "Remote folder settings" },
-            LinearLayout.LayoutParams(-2, -2).apply { rightMargin = Ui.dp(this@RemoteFoldersActivity, 6) })
-        actions.addView(Ui.chip(this, "＋ Add").apply { setOnClickListener { addSource() } })
+        val actions = Ui.chip(this, "＋ Add").apply { setOnClickListener { addSource() } }
         root.addView(topBar(this, "Remote Folders", actions))
         box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -100,7 +94,7 @@ class RemoteFoldersActivity : Activity() {
         if (intent.getBooleanExtra(EXTRA_BACKUP, false) && !scrolledToBackup) {
             // "set up backup": with no folder backed up yet, go straight to adding one
             scrolledToBackup = true
-            if (folders().none { it.backup?.enabled == true }) scroll.post { addSource() }
+            if (folders().none { it.backingUp }) scroll.post { addSource() }
         } else scroll.post { scroll.scrollTo(0, y) }
     }
     override fun onPause() { ui.removeCallbacks(tick); ui.removeCallbacks(liveTick); super.onPause() }
@@ -109,27 +103,30 @@ class RemoteFoldersActivity : Activity() {
         if (s.lastRefresh == 0L) "not loaded yet" else "${s.clipCount} clips · checked " + ago(s.lastRefresh)
 
     /**
-     * One cloud folder of MotionCam clips (a remote folder). This phone can view it and, with its switch, back up its new
-     * clips to it ([backup]: the service's backup settings point at this folder).
+     * One cloud folder of MotionCam clips (a remote folder). This phone can view it and back up its new clips to it
+     * ([dests]: the backup destinations pointing at this folder; a phone can back up to several folders).
      */
-    private class Folder(val kind: CloudKind, val backup: CloudConfig?, val source: RemoteSource)
+    private class Folder(val kind: CloudKind, val source: RemoteSource, val dests: List<com.motioncam.cloud.Dest>) {
+        val backingUp get() = dests.isNotEmpty()
+    }
 
-    /** This service's backup folder is [s] (on or off). */
-    private fun backupOf(s: RemoteSource): CloudConfig? {
-        if (s.mode == RemoteSources.MODE_LINK) return null
-        val c = CloudConfig(this, s.kind)
-        return c.takeIf { it.isConfigured && it.folderId == s.folderId }
+    /** Backup destinations of this folder: [onOnly] = only those uploading now (not switched off). */
+    private fun destsOf(s: RemoteSource, onOnly: Boolean = true): List<com.motioncam.cloud.Dest> {
+        if (s.mode == RemoteSources.MODE_LINK) return emptyList()
+        return com.motioncam.cloud.Dest.all(this).filter { d ->
+            d.kind == s.kind && CloudConfig(this, d).let { c -> c.isConfigured && c.folderId == s.folderId && (!onOnly || c.enabled) }
+        }
     }
 
     private fun folders(): List<Folder> {
         // a backup folder set up elsewhere (older versions, Backup settings) is listed like any other remote folder
-        for (k in CloudKind.values()) {
-            val c = CloudConfig(this, k)
+        for (d in com.motioncam.cloud.Dest.all(this)) {
+            val c = CloudConfig(this, d)
             val fid = c.folderId ?: continue
             if (!c.isConfigured) continue
-            if (RemoteSources.all(this).none { it.kind == k && it.mode != RemoteSources.MODE_LINK && it.folderId == fid }) sourceFromBackup(k, c)
+            if (RemoteSources.all(this).none { it.kind == d.kind && it.mode != RemoteSources.MODE_LINK && it.folderId == fid }) sourceFromBackup(d, c)
         }
-        return RemoteSources.all(this).sortedBy { it.added }.map { Folder(it.kind, backupOf(it), it) }
+        return RemoteSources.all(this).sortedBy { it.added }.map { Folder(it.kind, it, destsOf(it)) }
     }
 
     private fun isServer(k: CloudKind) = k == CloudKind.FTP || k == CloudKind.SFTP
@@ -138,10 +135,11 @@ class RemoteFoldersActivity : Activity() {
         box.removeAllViews()
         checkedLabels.clear()
         liveLines.clear()
+        quickActions()
         val list = folders()
-        val shown = list.filter { it.backup?.enabled == true || prefs.remoteFtp || !isServer(it.kind) }
-        note("Cloud folders of MotionCam clips. Tap one to see its clips; switch on \"Back up new clips here\" for the folder " +
-            "this phone should upload to.")
+        val shown = list.filter { it.backingUp || prefs.remoteFtp || !isServer(it.kind) }
+        note("Cloud folders of MotionCam clips. Tap one to see its clips. ↑ marks a folder this phone backs up its new clips " +
+            "to (⋮ → Back up new clips here).")
         if (shown.isEmpty()) {
             box.addView(Ui.label(this, "No remote folders yet. Tap ＋ Add to create one (and back up this phone's clips to it) or to open one another phone uses.", 15f).apply {
                 setPadding(0, Ui.dp(this@RemoteFoldersActivity, 16), 0, Ui.dp(this@RemoteFoldersActivity, 8))
@@ -149,86 +147,77 @@ class RemoteFoldersActivity : Activity() {
         }
         for (f in shown) box.addView(folderRow(f))
         val hidden = list.size - shown.size
-        if (hidden > 0) note("$hidden FTP/SFTP folder${if (hidden == 1) " is" else "s are"} hidden (⚙ → Allow FTP / SFTP servers).")
-        quickActions()
-    }
-
-    private fun backupDescribe(k: CloudKind, c: CloudConfig) = when (k) {
-        CloudKind.DRIVE -> "Google Drive · " + (c.account ?: "")
-        CloudKind.DROPBOX -> "Dropbox" + (c.account?.let { " · $it" } ?: "")
-        CloudKind.FTP -> (if (c.tls) "FTPS · " else "FTP · ") + "${c.user}@${c.host}"
-        CloudKind.SFTP -> "SFTP · ${c.user}@${c.host}"
+        if (hidden > 0) note("$hidden FTP/SFTP folder${if (hidden == 1) " is" else "s are"} hidden (Remote folder settings → Allow FTP / SFTP servers).")
     }
 
     private fun folderRow(f: Folder): View {
         val ctx = this
         val s = f.source
-        val cfg = f.backup?.takeIf { it.enabled }
         val r = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(Ui.dp(ctx, 10), Ui.dp(ctx, 10), Ui.dp(ctx, 2), Ui.dp(ctx, 10))
-            background = GradientDrawable().apply { setColor(0xFF1E2126.toInt()); cornerRadius = Ui.dp(ctx, 10).toFloat() }
+            background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30FFFFFF),
+                GradientDrawable().apply { setColor(0xFF1E2126.toInt()); cornerRadius = Ui.dp(ctx, 10).toFloat() }, null)
             isClickable = true
             setOnClickListener { openFolder(f) }
         }
-        r.addView(iconButton(ctx, if (isServer(f.kind)) IconDrawable.Kind.FOLDER else IconDrawable.Kind.CLOUD, 40, 8))
+        // the folder icon; a folder this phone backs up to gets the "uploading" cloud (↑ in it) in the accent colour
+        r.addView(android.widget.ImageView(ctx).apply {
+            setImageDrawable(IconDrawable(when {
+                f.backingUp -> IconDrawable.Kind.CLOUD_UP
+                isServer(f.kind) -> IconDrawable.Kind.FOLDER
+                else -> IconDrawable.Kind.CLOUD
+            }, if (f.backingUp) Ui.ACCENT else 0xFFFFFFFF.toInt()))
+            val p = Ui.dp(ctx, 8); setPadding(p, p, p, p)
+            contentDescription = if (f.backingUp) "Backing up new clips here" else null
+        }, LinearLayout.LayoutParams(Ui.dp(ctx, 40), Ui.dp(ctx, 40)))
         val texts = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(Ui.dp(ctx, 10), 0, 0, 0) }
         texts.addView(Ui.label(ctx, s.name, 16f))
         texts.addView(Ui.label(ctx, s.describe, 12f, Ui.GREY).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
         texts.addView(Ui.label(ctx, checkedText(s), 12f, Ui.GREY).also { checkedLabels[it] = s })
-        if (cfg != null) {
+        for (d in f.dests) {
             val st = Ui.label(ctx, "", 12f, Ui.ACCENT)
-            val update = { val t = "↑ " + com.motioncam.cloud.CloudSync.status(ctx, f.kind); if (st.text != t) st.text = t }
+            val update = { val t = "↑ Backing up new clips · " + com.motioncam.cloud.CloudSync.status(ctx, d); if (st.text != t) st.text = t }
             update(); liveLines += update
             texts.addView(st)
         }
         val conflicts = SharedSync.state(ctx, s.id).conflicts.size
         if (conflicts > 0) texts.addView(Ui.label(ctx, "⚠ $conflicts collection sync conflict${if (conflicts == 1) "" else "s"} — open Collections › Sync status", 12f, Ui.ACCENT))
-        // the folder's backup switch: upload this phone's new clips here (one folder per service; not for viewer links)
-        if (s.mode != RemoteSources.MODE_LINK) texts.addView(android.widget.Switch(ctx).apply {
-            text = "Back up new clips here"
-            textSize = 13f
-            setTextColor(Color.WHITE)
-            isChecked = cfg != null
-            setPadding(0, Ui.dp(ctx, 4), 0, 0)
-            setOnCheckedChangeListener { sw, on ->
-                if (on) backUpHere(s) { ok -> if (!ok) { sw.isChecked = false } }
-                else {
-                    f.backup?.enabled = false
-                    com.motioncam.cloud.CloudSync.kick(ctx)
-                    Toast.makeText(ctx, "New clips are no longer uploaded to ${s.name}", Toast.LENGTH_SHORT).show()
-                    render()
-                }
-            }
-        })
         r.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
         lateinit var more: View
         more = iconButton(ctx, IconDrawable.Kind.MORE, 44, 10) {
             val pm = PopupMenu(ctx, more)
             pm.menu.add(0, 1, 0, "Open")
             pm.menu.add(0, 2, 1, "Collections")
-            if (f.backup != null) pm.menu.add(0, 5, 2, "Backup settings…")
-            pm.menu.add(0, 3, 3, "Rename")
-            pm.menu.add(0, 4, 4, "Remove from this device")
+            if (s.mode != RemoteSources.MODE_LINK) pm.menu.add(0, 6, 2, if (f.backingUp) "Stop backing up here" else "Back up new clips here")
+            val settingsDest = destsOf(s, onOnly = false).firstOrNull()
+            if (settingsDest != null) pm.menu.add(0, 5, 3, "Backup settings…")
+            pm.menu.add(0, 3, 4, "Rename")
+            pm.menu.add(0, 4, 5, "Remove from this device")
             pm.setOnMenuItemClickListener {
                 when (it.itemId) {
                     1 -> openFolder(f)
-                    2 -> startActivity(Intent(ctx, CollectionsActivity::class.java).putExtra(CollectionsActivity.EXTRA_REMOTE, sourceOf(f).id))
+                    2 -> startActivity(Intent(ctx, CollectionsActivity::class.java).putExtra(CollectionsActivity.EXTRA_REMOTE, s.id))
                     3 -> askText("Rename", s.name) { n -> if (n.isNotBlank()) { s.name = n.trim(); RemoteSources.update(ctx, s); render() } }
                     4 -> AlertDialog.Builder(ctx).setTitle("Remove \"${s.name}\"?")
                         .setMessage("Removes it from this device only (with its cached clips and the collections you made for it). " +
                             "Nothing in the folder itself is touched. Clips you saved to this phone are kept." +
-                            if (f.backup != null) "\n\nThis phone also stops backing up to it." else "")
+                            if (f.backingUp) "\n\nThis phone also stops backing up to it." else "")
                         .setPositiveButton("Remove") { _, _ ->
-                            f.backup?.let { c -> c.enabled = false; c.folderId = null; c.folderName = null }
+                            stopBackup(s, forget = true)
                             RemoteRepo.forget(ctx, s)
                             Collections.dropRemote(ctx, s.id)
                             RemoteSources.remove(ctx, s.id)
                             render()
                         }
                         .setNegativeButton("Cancel", null).show()
-                    5 -> startActivity(Intent(ctx, com.motioncam.cloud.CloudActivity::class.java).putExtra(com.motioncam.cloud.CloudActivity.EXTRA_KIND, f.kind.key))
+                    5 -> settingsDest?.let { d -> startActivity(Intent(ctx, com.motioncam.cloud.CloudActivity::class.java).putExtra(com.motioncam.cloud.CloudActivity.EXTRA_KIND, d.key)) }
+                    6 -> if (f.backingUp) AlertDialog.Builder(ctx).setTitle("Stop backing up to \"${s.name}\"?")
+                            .setMessage("New clips are no longer uploaded here. Clips already in the folder stay, and you can still watch them.")
+                            .setPositiveButton("Stop") { _, _ -> stopBackup(s, forget = false); render() }
+                            .setNegativeButton("Cancel", null).show()
+                        else backUpHere(s)
                 }
                 true
             }
@@ -240,11 +229,9 @@ class RemoteFoldersActivity : Activity() {
         return wrap
     }
 
-    private fun sourceOf(f: Folder) = f.source
-
     /** Lists a backup folder set up elsewhere as a remote folder (same account / server). */
-    private fun sourceFromBackup(k: CloudKind, c: CloudConfig): RemoteSource {
-        val s = RemoteSource(id = RemoteSources.newId(), name = c.folderName ?: "MotionCam", kind = k, mode = RemoteSources.MODE_OWN,
+    private fun sourceFromBackup(d: com.motioncam.cloud.Dest, c: CloudConfig): RemoteSource {
+        val s = RemoteSource(id = RemoteSources.newId(), name = c.folderName ?: "MotionCam", kind = d.kind, mode = RemoteSources.MODE_OWN,
             folderId = c.folderId!!, folderName = c.folderName ?: "", account = c.account, host = c.host, port = c.port, user = c.user,
             tls = c.tls, useKey = c.useKey, hostKey = c.hostKey)
         s.password = c.password; s.privateKey = c.privateKey; s.passphrase = c.passphrase; s.refreshToken = c.refreshToken
@@ -254,64 +241,85 @@ class RemoteFoldersActivity : Activity() {
 
     private fun openFolder(f: Folder) = open(f.source)
 
-    /** Makes a folder this phone views also the folder it backs up to (same account / server). */
+    /**
+     * This phone backs up its new clips to [s] too (several folders are fine, also on the same service). Reuses the
+     * folder's switched-off destination or the service's unused one, otherwise adds a destination.
+     */
     private fun backUpHere(s: RemoteSource, done: (Boolean) -> Unit = {}) {
-        val c = CloudConfig(this, s.kind)
-        fun go() {
-            when (s.kind) {
-                CloudKind.DRIVE -> c.account = s.account
-                CloudKind.DROPBOX -> { c.refreshToken = s.refreshToken; c.account = s.account }
-                CloudKind.FTP -> { c.host = s.host; c.port = s.port; c.user = s.user; c.tls = s.tls; c.password = s.password }
-                CloudKind.SFTP -> {
-                    c.host = s.host; c.port = s.port; c.user = s.user; c.useKey = s.useKey; c.password = s.password
-                    c.privateKey = s.privateKey; c.passphrase = s.passphrase; c.hostKey = s.hostKey
-                }
+        val d = destsOf(s, onOnly = false).firstOrNull()
+            ?: com.motioncam.cloud.Dest.primary(s.kind).takeIf { CloudConfig(this, it).let { c -> !c.isConfigured || c.folderId == null } }
+            ?: com.motioncam.cloud.Dest.create(this, s.kind)
+        val c = CloudConfig(this, d)
+        when (s.kind) {
+            CloudKind.DRIVE -> c.account = s.account
+            CloudKind.DROPBOX -> { c.refreshToken = s.refreshToken; c.account = s.account }
+            CloudKind.FTP -> { c.host = s.host; c.port = s.port; c.user = s.user; c.tls = s.tls; c.password = s.password }
+            CloudKind.SFTP -> {
+                c.host = s.host; c.port = s.port; c.user = s.user; c.useKey = s.useKey; c.password = s.password
+                c.privateKey = s.privateKey; c.passphrase = s.passphrase; c.hostKey = s.hostKey
             }
-            c.folderId = s.folderId; c.folderName = s.folderName.ifEmpty { s.name }
-            c.blocked = null
-            c.enabled = true
-            com.motioncam.cloud.CloudSync.kick(this)
-            Toast.makeText(this, "This phone now backs up new clips to ${s.name}", Toast.LENGTH_LONG).show()
-            done(true)
-            render()
         }
-        if (c.isConfigured && c.enabled && c.folderId != null && c.folderId != s.folderId)
-            AlertDialog.Builder(this).setTitle("Back up here instead?")
-                .setMessage("New clips go to \"${c.folderName ?: "MotionCam"}\" on ${s.kind.label} now. A phone backs up to one folder per " +
-                    "service, so they would go to \"${s.name}\" instead. Clips already uploaded stay where they are.")
-                .setPositiveButton("Back up here") { _, _ -> go() }.setNegativeButton("Cancel") { _, _ -> done(false) }
-                .setOnCancelListener { done(false) }.show()
-        else go()
+        c.folderId = s.folderId; c.folderName = s.folderName.ifEmpty { s.name }
+        c.blocked = null
+        c.enabled = true
+        com.motioncam.cloud.CloudSync.kick(this)
+        Toast.makeText(this, "New clips will also be backed up to ${s.name}", Toast.LENGTH_LONG).show()
+        done(true)
+        render()
     }
 
-    // ------------------------------------------------------------------ the two things used often here (settings: ⚙)
+    /** Stops backing up to [s]: the service's own destination is switched off ([forget]: also forgets the folder), others are removed. */
+    private fun stopBackup(s: RemoteSource, forget: Boolean) {
+        for (d in destsOf(s, onOnly = false)) {
+            val c = CloudConfig(this, d)
+            com.motioncam.cloud.CloudSync.dropJobs(this, d)
+            if (d.isPrimary) { c.enabled = false; if (forget) { c.folderId = null; c.folderName = null } }
+            else { c.clearAll(); com.motioncam.cloud.Dest.remove(this, d) }
+        }
+        com.motioncam.cloud.CloudSync.kick(this)
+    }
+
+    // ------------------------------------------------------------------ top rows: upload queue, downloaded clips, settings
+
+    /** A tall (two-line) tappable row: title and a live subtitle. */
+    private fun navRow(title: String, subtitle: () -> String, icon: IconDrawable.Kind, click: () -> Unit): View {
+        val ctx = this
+        val r = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = Ui.dp(ctx, 60)
+            setPadding(Ui.dp(ctx, 12), Ui.dp(ctx, 8), Ui.dp(ctx, 12), Ui.dp(ctx, 8))
+            background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30FFFFFF),
+                GradientDrawable().apply { setColor(0xFF2A2D33.toInt()); cornerRadius = Ui.dp(ctx, 12).toFloat() }, null)
+            isClickable = true
+            setOnClickListener { click() }
+        }
+        r.addView(android.widget.ImageView(ctx).apply { setImageDrawable(IconDrawable(icon)) }, LinearLayout.LayoutParams(Ui.dp(ctx, 24), Ui.dp(ctx, 24)))
+        val texts = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(Ui.dp(ctx, 14), 0, 0, 0) }
+        texts.addView(Ui.label(ctx, title, 16f))
+        val sub = Ui.label(ctx, subtitle(), 12f, Ui.GREY)
+        texts.addView(sub)
+        liveLines += { val t = subtitle(); if (sub.text != t) sub.text = t }
+        r.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+        r.addView(Ui.label(ctx, "›", 22f, Ui.GREY))
+        return LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(0, Ui.dp(ctx, 8), 0, 0); addView(r) }
+    }
 
     private fun quickActions() {
         val ctx = this
-        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, Ui.dp(ctx, 18), 0, 0) }
-        backupTitle = row
-        row.addView(Ui.chip(ctx, "").apply {
-            val chip = this
-            val update = {
-                val c = com.motioncam.cloud.CloudSync.counts(ctx, null)
-                val t = "Upload queue · ${c.queued}" + if (c.failed > 0) " · ${c.failed} failed" else ""
-                if (chip.text != t) chip.text = t
-            }
-            update(); liveLines += update
-            setOnClickListener { startActivity(Intent(ctx, com.motioncam.cloud.UploadQueueActivity::class.java)) }
-        }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = Ui.dp(ctx, 8) })
-        row.addView(Ui.chip(ctx, "").apply {
-            val chip = this
-            val update = { chip.text = "Clear downloaded clips · ${StreamCache.cacheBytes(ctx) / 1_000_000} MB" }
-            update(); liveLines += update
-            setOnClickListener {
-                AlertDialog.Builder(ctx).setTitle("Clear downloaded clips?")
-                    .setMessage("Frees the space used by clips played from cloud folders. They stream again the next time you play them.")
-                    .setPositiveButton("Clear") { _, _ -> StreamCache.clearAll(ctx); Toast.makeText(ctx, "Cleared", Toast.LENGTH_SHORT).show(); update() }
-                    .setNegativeButton("Cancel", null).show()
-            }
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        box.addView(row)
+        box.addView(navRow("Upload queue", {
+            val c = com.motioncam.cloud.CloudSync.counts(ctx, null)
+            (if (c.queued == 0) "Nothing waiting" else "${c.queued} waiting") + (if (c.failed > 0) " · ${c.failed} failed" else "")
+        }, IconDrawable.Kind.CLOUD_UP) { startActivity(Intent(ctx, com.motioncam.cloud.UploadQueueActivity::class.java)) }.also { backupTitle = it })
+        box.addView(navRow("Clear downloaded clips", { "${StreamCache.cacheBytes(ctx) / 1_000_000} MB used by clips played from remote folders" },
+            IconDrawable.Kind.TRASH) {
+            AlertDialog.Builder(ctx).setTitle("Clear downloaded clips?")
+                .setMessage("Frees the space used by clips played from cloud folders. They stream again the next time you play them.")
+                .setPositiveButton("Clear") { _, _ -> StreamCache.clearAll(ctx); Toast.makeText(ctx, "Cleared", Toast.LENGTH_SHORT).show(); render() }
+                .setNegativeButton("Cancel", null).show()
+        })
+        box.addView(navRow("Remote folder settings", { "Upload rules (Wi-Fi, charging, quality), FTP/SFTP, keeping copies" },
+            IconDrawable.Kind.SETTINGS) { startActivity(Intent(ctx, FolderSettingsActivity::class.java)) })
     }
 
     private fun open(s: RemoteSource) {
@@ -389,14 +397,15 @@ class RemoteFoldersActivity : Activity() {
         Thread {
             try {
                 val code = rx.waitForCode(state, 5 * 60_000)
+                runOnUiThread { LoopbackReceiver.bringBack(this) }   // back from the browser tab
                 val refresh = DropboxProvider.exchange(code, verifier)
                 val who = DropboxProvider(DropboxProvider.APP_KEY, refresh).test()
                 runOnUiThread { toast("Signed in to Dropbox as $who"); then(refresh, who) }
             } catch (e: Exception) {
-                runOnUiThread { toast("Dropbox sign-in failed: ${e.message}") }
+                if (!rx.superseded) runOnUiThread { toast("Dropbox sign-in failed: ${e.message}") }   // replaced by a newer sign-in: quiet
             } finally { rx.close() }
         }.start()
-        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(DropboxProvider.authorizeUrl(Pkce.challenge(verifier), state))))
+        LoopbackReceiver.openPage(this, DropboxProvider.authorizeUrl(Pkce.challenge(verifier), state))
     }
 
     private fun dropboxOwn(refresh: String, who: String) {
@@ -544,13 +553,10 @@ class RemoteFoldersActivity : Activity() {
             RemoteSources.add(this, src)
             render()
             if (src.mode == RemoteSources.MODE_LINK) { if (clipCount > 0) open(src); return@askText }
-            // last step: should this phone back up here? (the folder's switch changes it later)
-            val c = CloudConfig(this, src.kind)
-            val replaces = c.isConfigured && c.enabled && c.folderId != null && c.folderId != src.folderId
+            // last step: should this phone back up here? (⋮ on the folder changes it later)
             AlertDialog.Builder(this).setTitle("Back up this phone's new clips to “${src.name}”?")
-                .setMessage("New clips recorded on this phone are uploaded to this folder, so other phones can watch them." +
-                    (if (replaces) "\n\nThis phone backs up to “${c.folderName ?: "MotionCam"}” on ${src.kind.label} now; new clips would go here instead." else "") +
-                    "\n\nYou can change this any time with the folder's switch.")
+                .setMessage("New clips recorded on this phone are uploaded to this folder, so other phones can watch them. A phone can " +
+                    "back up to several folders.\n\nYou can change this any time with the folder's ⋮ menu.")
                 .setPositiveButton("Back up here") { _, _ -> backUpHere(src); if (clipCount > 0) open(src) }
                 .setNegativeButton("Only view it") { _, _ -> if (clipCount > 0) open(src) }
                 .show()

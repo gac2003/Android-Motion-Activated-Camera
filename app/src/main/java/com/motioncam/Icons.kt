@@ -101,17 +101,17 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 path.lineTo(21f, 6.6f); path.lineTo(21f, 20f); path.close()
                 c.drawPath(path, stroke)
                 stroke.pathEffect = null
-                // the strip with sprocket holes down both sides and two frames, punched out (even-odd fill)
+                // a horizontal film strip: sprocket holes along top and bottom, two frames between, punched out (even-odd)
                 path.reset()
                 path.fillType = Path.FillType.EVEN_ODD
-                path.addRoundRect(RectF(7.6f, 8.4f, 16.4f, 18.6f), 1.1f, 1.1f, Path.Direction.CW)
-                for (i in 0 until 3) {
-                    val y = 9.4f + i * 2.95f
-                    path.addRoundRect(RectF(8.5f, y, 10f, y + 1.5f), 0.35f, 0.35f, Path.Direction.CW)
-                    path.addRoundRect(RectF(14f, y, 15.5f, y + 1.5f), 0.35f, 0.35f, Path.Direction.CW)
+                path.addRoundRect(RectF(6f, 9.2f, 18f, 18.4f), 1f, 1f, Path.Direction.CW)
+                for (i in 0 until 4) {
+                    val x = 7.475f + i * 2.55f
+                    path.addRoundRect(RectF(x, 10f, x + 1.4f, 11.3f), 0.3f, 0.3f, Path.Direction.CW)
+                    path.addRoundRect(RectF(x, 16.3f, x + 1.4f, 17.6f), 0.3f, 0.3f, Path.Direction.CW)
                 }
-                path.addRoundRect(RectF(10.9f, 9.4f, 13.1f, 13.1f), 0.35f, 0.35f, Path.Direction.CW)
-                path.addRoundRect(RectF(10.9f, 13.9f, 13.1f, 17.6f), 0.35f, 0.35f, Path.Direction.CW)
+                path.addRoundRect(RectF(6.9f, 12.1f, 11.6f, 15.5f), 0.4f, 0.4f, Path.Direction.CW)
+                path.addRoundRect(RectF(12.4f, 12.1f, 17.1f, 15.5f), 0.4f, 0.4f, Path.Direction.CW)
                 c.drawPath(path, fill)
                 path.fillType = Path.FillType.WINDING
             }

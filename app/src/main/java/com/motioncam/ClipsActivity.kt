@@ -145,13 +145,15 @@ class ClipsActivity : Activity() {
         }
         val title = collectionId?.let { store.get(this, it)?.name } ?: remote?.name ?: "Clips"
         // Remote folders is a destination of its own: a wide button in the title bar (phone's own clips only)
-        val remoteBtn = if (collectionId == null && remote == null) Ui.chip(this, "Remote folders").apply {
-            val d = Ui.dp(this@ClipsActivity, 20)
+        val remoteBtn = if (collectionId == null && remote == null) Ui.chip(this, "Remote Folders").apply {
+            // a bigger cloud (the glyph is wide and short), with less vertical padding so the bar keeps its height
+            val d = Ui.dp(this@ClipsActivity, 28)
+            setPadding(Ui.dp(this@ClipsActivity, 10), Ui.dp(this@ClipsActivity, 3), Ui.dp(this@ClipsActivity, 14), Ui.dp(this@ClipsActivity, 3))
             setCompoundDrawablesRelative(IconDrawable(IconDrawable.Kind.CLOUD).apply { setBounds(0, 0, d, d) }, null, null, null)
-            compoundDrawablePadding = Ui.dp(this@ClipsActivity, 8)
+            compoundDrawablePadding = Ui.dp(this@ClipsActivity, 6)
             gravity = Gravity.CENTER_VERTICAL
             background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x40FFFFFF), background, null)
-            contentDescription = "Remote folders"
+            contentDescription = "Remote Folders"
             setOnClickListener { startActivity(Intent(this@ClipsActivity, com.motioncam.remote.RemoteFoldersActivity::class.java)) }
             pressFeedback(this)
         } else null

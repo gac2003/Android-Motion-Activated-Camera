@@ -83,9 +83,8 @@ object Alerts {
 
     private fun post(ctx: Context, cam: String, kind: String, channel: String, title: String, text: String, silent: Boolean, update: Boolean = false,
                      clip: JSONObject? = null, at: Long = System.currentTimeMillis()) {
-        AlertInbox.add(ctx, cam, kind, title, text, update, clip?.toString(), at)
-        // "inside MotionCam only", or MotionCam is open on screen right now: the in-app card (not for silent updates) and
-        // the Alerts list, never a phone notification on top of the app you are looking at
+        // "inside MotionCam only", or MotionCam is open on screen right now: the in-app card (not for silent updates),
+        // never a phone notification on top of the app you are looking at (everything is in Activity anyway)
         if (Prefs(ctx).alertsInApp || AlertInbox.front?.get() != null) {
             if (!update) AlertInbox.banner(cam, title, text)
             return
@@ -189,11 +188,13 @@ object Alerts {
 
     /**
      * Alerts missed while this phone wasn't connected (MotionCam closed, no "Stay connected"): the camera keeps 7 days of
-     * events in the live connection, so they are read when the connection starts and added to the Alerts list at their
+     * events in the live connection, so they are read when the connection starts (marked new in Activity) at their
      * own times. Motion and clips are summarised per camera; nothing rings (they are old news), a banner or one silent
      * notification says what was missed.
      */
     fun catchUp(ctx: Context, cam: String, events: List<Pair<Long, JSONObject>>) {
+        // new in Activity (the dot on the Live connection icon), whatever this phone's alert settings are
+        events.filter { it.second.optString("type") in ActivityTypes.OVERVIEW }.maxOfOrNull { it.first }?.let { AlertInbox.noteEvent(ctx, cam, it - Live.serverOffset) }
         val p = Prefs(ctx)
         if (!p.alertsOn || mutedUntil(ctx, cam) > 0 || events.isEmpty()) return
         val name = camName(cam)
@@ -227,18 +228,17 @@ object Alerts {
             }
             return
         }
-        AlertInbox.addPast(ctx, cam, out, latestClip?.toString())
         val summary = listOfNotNull(
             motions.size.takeIf { it > 0 }?.let { "motion ×$it" },
             clips.size.takeIf { it > 0 }?.let { "$it clip${if (it == 1) "" else "s"}" },
             (out.size - (if (motions.isNotEmpty()) 1 else 0) - (if (clips.isNotEmpty()) 1 else 0)).takeIf { it > 0 }?.let { "$it other" },
         ).joinToString(" · ")
         val title = "While you were away · $name"
-        if (AlertInbox.front?.get() != null || p.alertsInApp) { AlertInbox.banner(cam, title, "$summary — tap to see the list", openList = true); return }
+        if (AlertInbox.front?.get() != null || p.alertsInApp) { AlertInbox.banner(cam, title, "$summary — tap to see them in Activity", openList = true); return }
         try {
             channels(ctx)
             val open = PendingIntent.getActivity(ctx, nid(cam, "missed"),
-                Intent(ctx, AlertsInboxActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
+                Intent(ctx, ActivityLogActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
             ctx.getSystemService(NotificationManager::class.java).notify(nid(cam, "missed"), Notification.Builder(ctx, CH_QUIET)
                 .setSmallIcon(android.R.drawable.ic_menu_camera).setContentTitle(title).setContentText(summary)
                 .setContentIntent(open).setAutoCancel(true).setGroup("cam_$cam").build())

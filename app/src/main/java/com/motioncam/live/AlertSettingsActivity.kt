@@ -15,20 +15,13 @@ import com.motioncam.topBar
 class AlertSettingsActivity : Activity() {
     private lateinit var f: Form
     private lateinit var p: Prefs
-    private var inboxBtn: android.widget.TextView? = null
     private var resumedOnce = false
-    private val inboxChanged: () -> Unit = { updateInbox() }
 
     override fun onResume() {
         super.onResume()
-        AlertInbox.listeners += inboxChanged
-        if (resumedOnce) render() else updateInbox()   // back from the Alerts list or Android's channel settings
+        if (resumedOnce) render()   // back from Android's channel settings
         resumedOnce = true
     }
-
-    override fun onPause() { AlertInbox.listeners -= inboxChanged; super.onPause() }
-
-    private fun updateInbox() { inboxBtn?.text = "Alerts list (${AlertInbox.unread(this)} unread)" }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,7 +42,6 @@ class AlertSettingsActivity : Activity() {
 
     private fun render() {
         f.box.removeAllViews()
-        inboxBtn = null
         f.toggle("Show camera alerts on this phone", p.alertsOn) { p.alertsOn = it; AlertCheckJob.schedule(this); render() }
         if (!p.alertsOn) return
         if (!p.liveStay) {
@@ -59,11 +51,12 @@ class AlertSettingsActivity : Activity() {
                 "always shown when you open MotionCam.")
         }
         f.choice("Where alerts appear", listOf("Phone notifications when MotionCam isn't on screen (while it is: a card in the app)",
-            "Inside MotionCam only (a banner on the open screen + the Alerts list; nothing in the notification shade)"),
+            "Inside MotionCam only (a card on the open screen; nothing in the notification shade)"),
             if (p.alertsInApp) 1 else 0) { p.alertsInApp = it == 1 }
-        inboxBtn = f.button("Alerts list (${AlertInbox.unread(this)} unread)") { startActivity(android.content.Intent(this, AlertsInboxActivity::class.java)) }
-        f.note("Alerts come from the camera phones in your live connection. Each camera's alerts are grouped, and every alert " +
-            "has Mute 1 h / 8 h buttons. Mute a camera for longer in Live connection → ⋮.")
+        f.note("These settings decide what notifies this phone. Everything the cameras report is in Activity either way " +
+            "(Live connection → See all activity; new entries are marked, and the Live connection icon shows a dot). Each " +
+            "camera's alerts are grouped, and every alert has Mute 1 h / 8 h buttons. Mute a camera for longer in Live connection → ⋮.")
+        f.button("See all activity", full = false) { startActivity(android.content.Intent(this, ActivityLogActivity::class.java)) }
 
         f.title("Motion")
         f.toggle("Motion detected", p.alertMotion) { p.alertMotion = it; render() }

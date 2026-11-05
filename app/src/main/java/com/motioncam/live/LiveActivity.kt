@@ -47,6 +47,7 @@ class LiveActivity : Activity() {
     /** Recent activity across all cameras (top of the screen), updating live. */
     private var dash: ActivityFeed? = null
     private var dashBox: LinearLayout? = null
+    private var dashNewSince = Long.MAX_VALUE
 
     override fun onResume() {
         super.onResume()
@@ -54,6 +55,8 @@ class LiveActivity : Activity() {
         Live.viewerActive = true
         Live.refresh(this)
         dash = ActivityFeed(this, 12) { fillDash() }
+        dashNewSince = AlertInbox.seenAt(this, null)
+        AlertInbox.markSeen(this, null)
         render()
     }
     override fun onPause() { Live.listeners -= refresh; dash?.stop(); dash = null; super.onPause() }
@@ -72,7 +75,8 @@ class LiveActivity : Activity() {
             return
         }
         val prefs = Prefs(this)
-        for (e in list) box.addView(ActivityLogActivity.eventRow(this, prefs, e, showCam = true, seconds = false))
+        for (e in list) box.addView(ActivityLogActivity.eventRow(this, prefs, e, showCam = true, seconds = false, newSince = dashNewSince))
+        AlertInbox.markSeen(this, null)   // shown here = seen
     }
 
     private fun render() {
@@ -98,6 +102,13 @@ class LiveActivity : Activity() {
 
         // recent activity of all cameras, near the top (a few entries, so the rest of the screen stays close)
         if (LiveNet.mode(this) != null && LiveNet.ready(this)) {
+            // a camera that was monitoring and lost its connection: a current state, shown on top (not a history entry)
+            val meId = Device.id(this)
+            for (p in Live.phones.values.filter { it.id != meId && !it.online && Live.cams[it.id]?.status?.optBoolean("monitoring") == true }) {
+                f.line("⚠ ${p.name.ifEmpty { "A camera" }} is offline" +
+                    (if (p.seen > 0) " since " + Fmt.t(prefs, p.seen - Live.serverOffset, seconds = false) else "") +
+                    " — it keeps recording if it still runs", 14f, Ui.ACCENT)
+            }
             f.title("Recent activity")
             dashBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             box.addView(dashBox)

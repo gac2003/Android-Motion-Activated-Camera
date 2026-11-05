@@ -64,8 +64,13 @@ class ActivityLogActivity : Activity() {
         f.note("Loading…")
     }
 
+    /** Entries after this are marked new (when activity was last looked at, before this visit). */
+    private var newSince = Long.MAX_VALUE
+
     override fun onResume() {
         super.onResume()
+        newSince = AlertInbox.seenAt(this, cam)
+        AlertInbox.markSeen(this, cam)
         val c = cam
         if (c != null) {
             listener = object : ValueEventListener {
@@ -105,6 +110,7 @@ class ActivityLogActivity : Activity() {
 
     private fun render() {
         if (isFinishing) return
+        AlertInbox.markSeen(this, cam)   // anything arriving while this is open is seen too
         f.box.removeAllViews()
         val want = filters[filter].second
         val all = cam == null
@@ -119,7 +125,7 @@ class ActivityLogActivity : Activity() {
         for (e in list) {
             val day = dayFmt.format(Date(e.t))
             if (day != lastDay) { lastDay = day; f.title(day); block = null }
-            if (!all) { f.box.addView(eventRow(this, prefs, e, showCam = false, openCamera = false)); continue }
+            if (!all) { f.box.addView(eventRow(this, prefs, e, showCam = false, openCamera = false, newSince = newSince)); continue }
             // all cameras: consecutive events of one phone share a card with its name
             if (block == null || blockCam != e.cam) {
                 blockCam = e.cam
@@ -147,7 +153,7 @@ class ActivityLogActivity : Activity() {
                 })
                 f.box.addView(block, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@ActivityLogActivity, 8) })
             }
-            block.addView(eventRow(this, prefs, e, showCam = false))
+            block.addView(eventRow(this, prefs, e, showCam = false, newSince = newSince))
         }
         f.note("Events are kept for 7 days." + if (all) " Settings changes and who changed a camera are in each camera's own Activity." else "")
     }
@@ -164,7 +170,8 @@ class ActivityLogActivity : Activity() {
          * One event as a row: time, icon and text; a motion with its clip gets the clip on a second line (tap to watch).
          * Tapping opens the clip when there is one, otherwise the camera. [showCam]: the camera's name in the row.
          */
-        fun eventRow(a: Activity, prefs: Prefs, e: ActivityEvent, showCam: Boolean, openCamera: Boolean = true, seconds: Boolean = true): View {
+        fun eventRow(a: Activity, prefs: Prefs, e: ActivityEvent, showCam: Boolean, openCamera: Boolean = true, seconds: Boolean = true,
+                     newSince: Long = Long.MAX_VALUE): View {
             val ctx: Context = a
             val r = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -174,7 +181,12 @@ class ActivityLogActivity : Activity() {
                 background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30FFFFFF), null,
                     android.graphics.drawable.ColorDrawable(0xFFFFFFFF.toInt()))
             }
-            r.addView(Ui.label(ctx, Fmt.t(prefs, e.t, seconds = seconds), 13f, Ui.GREY).apply { minWidth = Ui.dp(ctx, if (seconds) 84 else 64) })
+            // new since activity was last looked at: a yellow dot before the time
+            val isNew = e.t > newSince
+            r.addView(Ui.label(ctx, (if (isNew) "● " else "") + Fmt.t(prefs, e.t, seconds = seconds), 13f, if (isNew) Ui.ACCENT else Ui.GREY).apply {
+                minWidth = Ui.dp(ctx, if (seconds) 92 else 72)
+                if (isNew) contentDescription = "New: " + text
+            })
             // one line: what happened (· which camera) and, for a recording, a "▶ 3s" mark in the accent colour = tap to watch
             val clip = e.clip ?: e.d.takeIf { e.type == "clip" }
             val ref = clip?.let { Alerts.clipRef(it) }

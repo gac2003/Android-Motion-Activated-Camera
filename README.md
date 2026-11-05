@@ -179,17 +179,20 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
   quiet hours, per-camera mute (also from the alert), a separate Android channel per alert type for sound/vibration.
   Alerts arrive while MotionCam is open; **Stay connected** (silent notification) keeps them coming when it is closed.
   Without it, MotionCam **checks about every 15 minutes** (connects for a few seconds; alerts can be up to ~15 min late),
-  and nothing is lost: cameras keep 7 days of events, and what was missed is added to the Alerts list at its own time
-  (motion and clips summarised per camera) with a "While you were away" banner when MotionCam opens.
-* **Alerts open the clip**: once the camera saves the clip a motion alert recorded, the alert (notification, Alerts list,
-  Activity log) says "tap to watch" and plays it from the camera's cloud backup – waiting for the upload if needed.
+  and nothing is lost: cameras keep 7 days of events in their **Activity**, where what you haven't seen yet is marked new
+  (and a "While you were away" card says so when MotionCam opens).
+* **Alerts open the clip**: once the camera saves the clip a motion alert recorded, the alert (notification, in-app card,
+  Activity) says "tap to watch" and plays it from the camera's cloud backup – waiting for the upload if needed.
   This needs the camera's backup folder added once under Clips → Remote Folders; the screen explains if it isn't.
   While MotionCam is on screen, alerts only show as a card in the app (no phone notification on top of it). Or choose
-  **inside MotionCam only**: a card on the open screen and the Alerts list, nothing in the notification shade.
+  **inside MotionCam only**: a card on the open screen, nothing in the notification shade. Alerts are only how this phone
+  is told; the history is **Activity** (the same on every phone), so muting a camera silences it without hiding anything.
   In-app cards stack like the phone's notifications (one in front, "+N more" with layers behind): swipe a card sideways
   to dismiss it, up to dismiss all, tap to open; they hide by themselves after a few seconds.
 * **Live connection icon** (main screen): yellow while another phone is online as a camera; red with **LIVE** under the
-  cloud while this phone is sending its live picture to another phone; a red dot for unread alerts.
+  cloud while this phone is sending its live picture to another phone; a red dot when cameras have activity you haven't
+  seen (new entries are marked with a yellow ● in Activity). A camera that was monitoring and lost its connection is shown
+  at the top of Live connection.
 * **Recent activity** (top of Live connection): the 3 latest events of all cameras – motion (with the clip it recorded,
   tap to watch), monitoring started/stopped, heat, power, battery, PIN lock-outs – updating live. **See all activity**
   lists 7 days of them, newest first, consecutive events of one phone grouped under its name. Each camera's own Activity

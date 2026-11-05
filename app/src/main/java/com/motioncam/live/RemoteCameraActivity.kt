@@ -50,6 +50,7 @@ class RemoteCameraActivity : Activity() {
 
     private var recent: List<ActivityEvent> = emptyList()
     private var recentLoaded = false
+    private var recentNewSince = Long.MAX_VALUE
     private var recentBox: LinearLayout? = null
     private var recentL: com.google.firebase.database.ValueEventListener? = null
 
@@ -83,7 +84,8 @@ class RemoteCameraActivity : Activity() {
             return
         }
         val p = Prefs(this)
-        for (e in list) box.addView(ActivityLogActivity.eventRow(this, p, e, showCam = false, openCamera = false, seconds = false))
+        for (e in list) box.addView(ActivityLogActivity.eventRow(this, p, e, showCam = false, openCamera = false, seconds = false, newSince = recentNewSince))
+        AlertInbox.markSeen(this, cam)   // shown here = seen
     }
     private lateinit var r: CamRemote
     private lateinit var feed: CamRemote.Feed
@@ -318,6 +320,7 @@ class RemoteCameraActivity : Activity() {
         super.onResume()
         Live.listeners += refresh
         Live.eventListeners += events
+        recentNewSince = AlertInbox.seenAt(this, cam)
         followRecent()
         Live.viewerActive = true
         Live.refresh(this)

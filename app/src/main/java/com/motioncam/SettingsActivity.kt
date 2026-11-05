@@ -155,11 +155,6 @@ class SettingsActivity : Activity() {
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
         if (prefs.liveOn) box.addView(Ui.chip(this, "Alerts & notifications").apply {
             setOnClickListener { startActivity(Intent(this@SettingsActivity, com.motioncam.live.AlertSettingsActivity::class.java)) }
-            val chip = this
-            live += {
-                val n = com.motioncam.live.AlertInbox.unread(this@SettingsActivity)
-                chip.text = "Alerts & notifications" + if (n > 0) "  ·  $n unread" else ""
-            }
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
 
         // cloud folders: a link to the folders themselves, and their settings right here (same code as Remote Folders → ⚙)

@@ -60,6 +60,7 @@ class LiveActivity : Activity() {
                 LiveService.stop(this)
                 CameraLink.stop(this)
                 Live.refresh(this)
+                AlertCheckJob.schedule(this)
             }
             render()
         }
@@ -107,10 +108,15 @@ class LiveActivity : Activity() {
         f.toggle("Stay connected in the background", prefs.liveStay) { on ->
             prefs.liveStay = on
             if (on) LiveService.start(this) else LiveService.stop(this)
+            AlertCheckJob.schedule(this)
+            render()
         }
-        f.note("Without this, alerts arrive while MotionCam is open (and shortly after). With it, a silent notification keeps " +
-            "the connection so alerts arrive any time; it uses a little battery. For reliable alerts, also exempt MotionCam " +
-            "from battery optimisation.")
+        f.note(if (prefs.liveStay) "Alerts arrive instantly any time: a silent notification keeps the connection open (uses a " +
+                "little battery). For reliable alerts, also exempt MotionCam from battery optimisation."
+            else "Off: alerts arrive instantly while MotionCam is open; otherwise " +
+                (if (prefs.alertsPoll) "MotionCam checks about every 15 minutes (Alerts & notifications), so an alert can be up to ~15 minutes late. "
+                else "they are shown when you next open MotionCam. ") +
+                "Nothing is missed either way: cameras keep 7 days of events. Turn this on for instant alerts.")
 
         f.title("This phone as a camera")
         f.toggle("Let other phones see and control this phone while it is monitoring", prefs.liveCamera) { on ->
@@ -289,6 +295,7 @@ class LiveActivity : Activity() {
 
     private fun enable() {
         prefs.liveOn = true
+        AlertCheckJob.schedule(this)
         if (prefs.liveStay) LiveService.start(this)
         Live.refresh(this)
         render()

@@ -132,6 +132,7 @@ object CloudSync {
 
     /** Called when a clip has been saved: queue it for every enabled destination. */
     fun onClipSaved(ctx: Context, clipId: Long) {
+        com.motioncam.live.CameraLink.clipSaved(ctx, clipId)   // viewing phones' alerts can then open this clip
         val kinds = enabledKinds(ctx)
         if (kinds.isEmpty()) return
         synchronized(lock) {

@@ -137,6 +137,8 @@ class Prefs(ctx: Context) {
     var liveStandby: Boolean get() = b("liveStandby", true); set(v) = put("liveStandby", v)
     /** Where camera alerts appear: false = phone notifications, true = only inside MotionCam (banner + Alerts list). */
     var alertsInApp: Boolean get() = b("alertsInApp", false); set(v) = put("alertsInApp", v)
+    /** Without "Stay connected": check for alerts about every 15 minutes (connects briefly, then disconnects). */
+    var alertsPoll: Boolean get() = b("alertsPoll", true); set(v) = put("alertsPoll", v)
     // alerts on viewing phones
     var alertsOn: Boolean get() = b("alertsOn", true); set(v) = put("alertsOn", v)
     var alertMotion: Boolean get() = b("alertMotion", true); set(v) = put("alertMotion", v)
@@ -186,7 +188,7 @@ class Prefs(ctx: Context) {
         val LIVE_KEYS = listOf("liveOn", "liveStay", "livePinForView", "liveCamera", "liveStandby")
         val REMOTE_FOLDER_KEYS = listOf("remoteFtp", "remoteKeepCopy")
         val PLAYER_KEYS = listOf("skipMs", "stripZoom")
-        val ALERT_KEYS = listOf("alertsOn", "alertsInApp", "alertMotion", "alertMotionGapMin", "alertClip", "alertBattery", "alertBatteryPct",
+        val ALERT_KEYS = listOf("alertsOn", "alertsInApp", "alertsPoll", "alertMotion", "alertMotionGapMin", "alertClip", "alertBattery", "alertBatteryPct",
             "alertCharger", "alertHot", "alertOffline", "alertOfflineMin", "alertBackOnline", "alertMonitoring", "alertSync",
             "quietOn", "quietFrom", "quietTo", "quietMode")
         val CAMERA_KEYS = listOf("camera", "exposureAuto", "evIndex", "iso", "shutterNs", "focusAuto", "focusPos",

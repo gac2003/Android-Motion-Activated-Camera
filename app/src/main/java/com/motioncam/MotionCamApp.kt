@@ -10,6 +10,10 @@ import com.motioncam.live.LiveService
 
 /** Knows whether any MotionCam screen is open: the live connection (viewer side) only runs then, or in "Stay connected". */
 class MotionCamApp : Application() {
+    companion object {
+        /** A MotionCam screen is open (started). */
+        @Volatile var foreground = false
+    }
     private var started = 0
     private val ui = Handler(Looper.getMainLooper())
     private val idle = Runnable {
@@ -18,9 +22,11 @@ class MotionCamApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        try { com.motioncam.live.AlertCheckJob.schedule(this) } catch (_: Exception) {}   // 15-minute alert check
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(a: Activity) {
                 started++
+                foreground = true
                 ui.removeCallbacks(idle)
                 if (started == 1) {
                     Live.viewerActive = true
@@ -30,6 +36,7 @@ class MotionCamApp : Application() {
             }
             override fun onActivityStopped(a: Activity) {
                 started = (started - 1).coerceAtLeast(0)
+                foreground = started > 0
                 if (started == 0) ui.postDelayed(idle, 20_000)   // brief app switches keep the connection
             }
             override fun onActivityCreated(a: Activity, b: Bundle?) {}

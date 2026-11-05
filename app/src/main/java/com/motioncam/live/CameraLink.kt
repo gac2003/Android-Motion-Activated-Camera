@@ -83,6 +83,29 @@ object CameraLink {
         if (CameraService.inStandby) CameraService.exit(c)
     }
 
+    @Volatile private var lastClipMs = 0L
+
+    /**
+     * A clip was saved (and kept): tells the viewing phones its name and the backup folders it goes to, so their
+     * alerts can open it (from the cloud, once uploaded).
+     */
+    fun clipSaved(ctx: Context, clipId: Long) {
+        if (!running) return
+        val c = ctx.applicationContext
+        Thread {
+            try {
+                val clip = com.motioncam.ClipStore.get(c, clipId) ?: return@Thread
+                val folders = JSONArray()
+                for (k in com.motioncam.cloud.CloudSync.enabledKinds(c)) com.motioncam.cloud.CloudConfig(c, k).folderId?.let {
+                    folders.put(JSONObject().put("k", k.key).put("f", Live.folderKey(k, it)))
+                }
+                val ms = clip.durationMs.takeIf { it > 0 } ?: lastClipMs
+                val sec = (ms / 1000).coerceAtLeast(1)
+                event(c, "clip", "Clip of ${sec}s saved", JSONObject().put("name", clip.name).put("dur", ms).put("folders", folders))
+            } catch (_: Exception) {}
+        }.start()
+    }
+
     /** Monitoring stopped by the phone itself (battery, heat, storage…). */
     fun safetyStop(ctx: Context, why: String) = event(ctx, "safety_stop", why)
 
@@ -99,10 +122,9 @@ object CameraLink {
         last = s
         if (prev != null) {
             if (prev.mode != Mode.RECORDING && s.mode == Mode.RECORDING) event(ctx, "motion", "Motion detected")
-            if (prev.mode == Mode.RECORDING && s.mode != Mode.RECORDING && prev.recordingSinceWall > 0) {
-                val sec = ((System.currentTimeMillis() - prev.recordingSinceWall) / 1000).coerceAtLeast(1)
-                event(ctx, "clip", "Clip of ${sec}s saved")
-            }
+            // the "clip" event itself is sent once the clip is saved (clipSaved), with its name, so alerts can open it
+            if (prev.mode == Mode.RECORDING && s.mode != Mode.RECORDING && prev.recordingSinceWall > 0)
+                lastClipMs = System.currentTimeMillis() - prev.recordingSinceWall
             if (!prev.monitoring && s.monitoring) event(ctx, "monitor_on", "Monitoring started")
             if (prev.mode != Mode.PAUSED_HOT && s.mode == Mode.PAUSED_HOT) event(ctx, "hot", "Paused because the phone is too hot (${"%.0f".format(s.tempC)} °C)")
             if (prev.charging && !s.charging && s.monitoring) event(ctx, "unplugged", "The camera phone is no longer charging (${s.batteryPct}%)")

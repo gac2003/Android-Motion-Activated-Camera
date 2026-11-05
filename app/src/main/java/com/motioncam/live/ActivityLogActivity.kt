@@ -93,6 +93,11 @@ class ActivityLogActivity : Activity() {
             val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, Ui.dp(this@ActivityLogActivity, 4), 0, Ui.dp(this@ActivityLogActivity, 4)) }
             r.addView(Ui.label(this, Fmt.t(prefs, t), 13f, Ui.GREY).apply { minWidth = Ui.dp(this@ActivityLogActivity, 96) })
             r.addView(Ui.label(this, icon(d.optString("type")) + "  " + d.optString("text"), 14f), LinearLayout.LayoutParams(0, -2, 1f))
+            // a saved clip: tap to watch it (from the camera's cloud backup)
+            if (d.optString("type") == "clip") Alerts.clipRef(d)?.let { ref ->
+                r.addView(Ui.label(this, "▶ Watch", 13f, Ui.ACCENT).apply { setPadding(Ui.dp(this@ActivityLogActivity, 8), 0, 0, 0) })
+                r.setOnClickListener { OpenClipActivity.open(this, cam, ref.toString()) }
+            }
             f.box.addView(r)
         }
         f.note("Events are kept for 7 days.")

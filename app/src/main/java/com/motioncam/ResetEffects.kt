@@ -13,12 +13,16 @@ object ResetEffects {
             com.motioncam.cloud.MarkSync.scheduleLocal(ctx)    // protected collections back to Favourites
             com.motioncam.cloud.CloudSync.kick(ctx)            // Wi-Fi / charging rules, un-paused queue
         }
-        if (keys.any { it in Prefs.ALERT_KEYS }) ctx.getSharedPreferences("alerts_mute", Context.MODE_PRIVATE).edit().clear().apply()
+        if (keys.any { it in Prefs.ALERT_KEYS }) {
+            ctx.getSharedPreferences("alerts_mute", Context.MODE_PRIVATE).edit().clear().apply()
+            com.motioncam.live.AlertCheckJob.schedule(ctx)
+        }
         if (keys.any { it in Prefs.LIVE_KEYS }) {
             if (!p.liveOn || !p.liveStay) com.motioncam.live.LiveService.stop(ctx)
             if (!p.liveOn || !p.liveCamera) com.motioncam.live.CameraLink.stop(ctx)
             com.motioncam.live.Live.refresh(ctx)
             CameraService.settingsChanged(ctx)
+            com.motioncam.live.AlertCheckJob.schedule(ctx)
         }
         if (keys.any { it in Prefs.REMOTE_KEYS }) CameraService.instance?.reloadServer()
     }

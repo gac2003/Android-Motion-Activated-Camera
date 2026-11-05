@@ -50,8 +50,14 @@ class AlertSettingsActivity : Activity() {
     private fun render() {
         f.box.removeAllViews()
         inboxBtn = null
-        f.toggle("Show camera alerts on this phone", p.alertsOn) { p.alertsOn = it; render() }
+        f.toggle("Show camera alerts on this phone", p.alertsOn) { p.alertsOn = it; AlertCheckJob.schedule(this); render() }
         if (!p.alertsOn) return
+        if (!p.liveStay) {
+            f.toggle("Check for alerts every 15 minutes when MotionCam is closed", p.alertsPoll) { p.alertsPoll = it; AlertCheckJob.schedule(this); render() }
+            f.note("Connects for a few seconds, then disconnects: very little battery. Android picks the exact moment, so an alert " +
+                "can be up to ~15 minutes late. For instant alerts turn on Stay connected (Live connection). Anything missed is " +
+                "always shown when you open MotionCam.")
+        }
         f.choice("Where alerts appear", listOf("Phone notifications (also when MotionCam is closed, with Stay connected)",
             "Inside MotionCam only (a banner on the open screen + the Alerts list; nothing in the notification shade)"),
             if (p.alertsInApp) 1 else 0) { p.alertsInApp = it == 1 }

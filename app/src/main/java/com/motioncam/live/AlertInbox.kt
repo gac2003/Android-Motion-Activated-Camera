@@ -31,7 +31,8 @@ import java.util.Locale
  * list (unread count on the Cameras button).
  */
 object AlertInbox {
-    class Item(val at: Long, val cam: String, val kind: String, var title: String, var text: String, var read: Boolean)
+    /** [clip]: the clip the alert is about (JSON: name, folders), so tapping it opens the clip. */
+    class Item(val at: Long, val cam: String, val kind: String, var title: String, var text: String, var read: Boolean, var clip: String? = null)
 
     private var items: MutableList<Item>? = null
     val listeners = java.util.concurrent.CopyOnWriteArraySet<() -> Unit>()
@@ -45,7 +46,8 @@ object AlertInbox {
         try {
             val a = JSONArray(file(ctx).readText())
             for (i in 0 until a.length()) a.getJSONObject(i).let {
-                out += Item(it.getLong("at"), it.getString("cam"), it.optString("kind"), it.optString("title"), it.optString("text"), it.optBoolean("read"))
+                out += Item(it.getLong("at"), it.getString("cam"), it.optString("kind"), it.optString("title"), it.optString("text"), it.optBoolean("read"),
+                    it.optString("clip").ifEmpty { null })
             }
         } catch (_: Exception) {}
         items = out
@@ -55,17 +57,17 @@ object AlertInbox {
     @Synchronized
     private fun save(ctx: Context) {
         val a = JSONArray()
-        for (i in all(ctx).take(200)) a.put(JSONObject().put("at", i.at).put("cam", i.cam).put("kind", i.kind).put("title", i.title).put("text", i.text).put("read", i.read))
+        for (i in all(ctx).take(200)) a.put(JSONObject().put("at", i.at).put("cam", i.cam).put("kind", i.kind).put("title", i.title).put("text", i.text).put("read", i.read).put("clip", i.clip ?: ""))
         try { val t = File(file(ctx).path + ".tmp"); t.writeText(a.toString()); t.renameTo(file(ctx)) } catch (_: Exception) {}
     }
 
     /** Records an alert; an [update] of the newest one of the same camera and kind replaces its text. */
-    fun add(ctx: Context, cam: String, kind: String, title: String, text: String, update: Boolean) {
+    fun add(ctx: Context, cam: String, kind: String, title: String, text: String, update: Boolean, clip: String? = null, at: Long = System.currentTimeMillis()) {
         synchronized(this) {
             val l = all(ctx)
-            val last = l.firstOrNull()
-            if (update && last != null && last.cam == cam && last.kind == kind) { last.title = title; last.text = text; last.read = false }
-            else l.add(0, Item(System.currentTimeMillis(), cam, kind, title, text, false))
+            val last = l.firstOrNull { it.cam == cam && it.kind == kind }
+            if (update && last != null) { last.title = title; last.text = text; last.read = false; if (clip != null) last.clip = clip }
+            else { l.add(Item(at, cam, kind, title, text, false, clip)); l.sortByDescending { it.at } }
             while (l.size > 200) l.removeAt(l.size - 1)
             save(ctx)
         }
@@ -75,11 +77,11 @@ object AlertInbox {
     fun unread(ctx: Context) = synchronized(this) { all(ctx).count { !it.read } }
 
     /** Adds alerts that happened earlier (missed while not connected), each at its own time, newest first. */
-    fun addPast(ctx: Context, cam: String, past: List<Triple<Long, String, Pair<String, String>>>) {
+    fun addPast(ctx: Context, cam: String, past: List<Triple<Long, String, Pair<String, String>>>, clip: String? = null) {
         if (past.isEmpty()) return
         synchronized(this) {
             val l = all(ctx)
-            for ((at, kind, tt) in past) l += Item(at, cam, kind, tt.first, tt.second, false)
+            for ((at, kind, tt) in past) l += Item(at, cam, kind, tt.first, tt.second, false, if (kind == "motion" || kind == "clip") clip else null)
             l.sortByDescending { it.at }
             while (l.size > 200) l.removeAt(l.size - 1)
             save(ctx)
@@ -155,10 +157,14 @@ class AlertsInboxActivity : Activity() {
             val r = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(0, Ui.dp(this@AlertsInboxActivity, 6), 0, Ui.dp(this@AlertsInboxActivity, 6))
-                setOnClickListener { startActivity(Intent(this@AlertsInboxActivity, RemoteCameraActivity::class.java).putExtra(Alerts.EXTRA_CAM, i.cam)) }
+                setOnClickListener {
+                    if (i.clip != null) OpenClipActivity.open(this@AlertsInboxActivity, i.cam, i.clip!!)
+                    else startActivity(Intent(this@AlertsInboxActivity, RemoteCameraActivity::class.java).putExtra(Alerts.EXTRA_CAM, i.cam))
+                }
             }
             r.addView(Ui.label(this, (if (!i.read) "● " else "") + i.title + "  ·  " + Fmt.t(p, i.at, seconds = false), 14f, if (!i.read) Ui.ACCENT else 0xFFFFFFFF.toInt()))
             r.addView(Ui.label(this, i.text, 12f, Ui.GREY))
+            if (i.clip != null) r.addView(Ui.label(this, "▶ Tap to watch the clip", 12f, Ui.ACCENT))
             f.box.addView(r)
         }
     }

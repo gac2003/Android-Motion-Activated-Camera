@@ -81,8 +81,9 @@ object Alerts {
     private fun camName(cam: String) = Live.phones[cam]?.name?.ifEmpty { null } ?: "Camera"
     private fun nid(cam: String, kind: String) = (cam + kind).hashCode() and 0x7fffffff
 
-    private fun post(ctx: Context, cam: String, kind: String, channel: String, title: String, text: String, silent: Boolean, update: Boolean = false) {
-        AlertInbox.add(ctx, cam, kind, title, text, update)
+    private fun post(ctx: Context, cam: String, kind: String, channel: String, title: String, text: String, silent: Boolean, update: Boolean = false,
+                     clip: JSONObject? = null, at: Long = System.currentTimeMillis()) {
+        AlertInbox.add(ctx, cam, kind, title, text, update, clip?.toString(), at)
         if (Prefs(ctx).alertsInApp) {
             // "inside MotionCam only": a banner on the open screen (not for silent updates), nothing in the phone's notifications
             if (!update) AlertInbox.banner(cam, title, text)
@@ -90,8 +91,12 @@ object Alerts {
         }
         try {
             channels(ctx)
-            val open = PendingIntent.getActivity(ctx, nid(cam, "open"),
-                Intent(ctx, RemoteCameraActivity::class.java).putExtra(EXTRA_CAM, cam).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
+            // tapping opens the clip when the alert is about one (motion once its clip is saved, new clip), else the camera
+            val open = if (clip != null) PendingIntent.getActivity(ctx, nid(cam, "clip_$kind"),
+                    OpenClipActivity.intent(ctx, cam, clip.toString()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                else PendingIntent.getActivity(ctx, nid(cam, "open"),
+                    Intent(ctx, RemoteCameraActivity::class.java).putExtra(EXTRA_CAM, cam).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
             fun mute(min: Int, label: String) = Notification.Action.Builder(null, label, PendingIntent.getBroadcast(ctx, nid(cam, "mute$min"),
                 Intent(ctx, AlertActionReceiver::class.java).putExtra(EXTRA_CAM, cam).putExtra("min", min), PendingIntent.FLAG_IMMUTABLE)).build()
             val n = Notification.Builder(ctx, if (silent) CH_QUIET else channel)
@@ -100,7 +105,12 @@ object Alerts {
                 .setContentIntent(open).setAutoCancel(true)
                 .setGroup("cam_$cam")
                 .setOnlyAlertOnce(update)          // updating an alert never rings again
-                .setWhen(System.currentTimeMillis()).setShowWhen(true)
+                .setWhen(at).setShowWhen(true)
+                .apply {
+                    if (clip != null) addAction(Notification.Action.Builder(null, "Watch clip", open).build())
+                    else if (kind == "motion") addAction(Notification.Action.Builder(null, "Live view", PendingIntent.getActivity(ctx, nid(cam, "live"),
+                        Intent(ctx, RemoteLiveActivity::class.java).putExtra(EXTRA_CAM, cam).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)).build())
+                }
                 .addAction(mute(60, "Mute 1 h")).addAction(mute(8 * 60, "Mute 8 h"))
                 .build()
             ctx.getSystemService(NotificationManager::class.java).notify(nid(cam, kind), n)
@@ -112,7 +122,20 @@ object Alerts {
 
     // ------------------------------------------------------------------ events from cameras
 
-    private class MotionState(var lastAlert: Long = 0, var count: Int = 0, var since: Long = 0)
+    private class MotionState(var lastAlert: Long = 0, var count: Int = 0, var since: Long = 0, var clip: JSONObject? = null, var silent: Boolean = false)
+
+    /** The clip a "clip" event is about (name + backup folders), or null for cameras on older versions. */
+    fun clipRef(d: JSONObject): JSONObject? {
+        val name = d.optString("name").ifEmpty { return null }
+        return JSONObject().put("name", name).put("dur", d.optLong("dur")).put("folders", d.optJSONArray("folders") ?: org.json.JSONArray())
+    }
+
+    private fun motionText(p: Prefs, st: MotionState): String {
+        val base = if (st.count <= 1) "Motion detected at ${Fmt.t(p, st.since, seconds = false)}" else "Motion ${st.count} times since ${Fmt.t(p, st.since, seconds = false)}"
+        val c = st.clip ?: return if (st.count <= 1) "$base — recording" else base
+        val sec = (c.optLong("dur") / 1000).coerceAtLeast(1)
+        return "$base · ${sec}s clip saved — tap to watch"
+    }
     private val motion = HashMap<String, MotionState>()
 
     fun onEvent(ctx: Context, cam: String, t: Long, d: JSONObject) {
@@ -128,14 +151,23 @@ object Alerts {
                 if (now - st.lastAlert < p.alertMotionGapMin * 60_000L) {
                     // within the quiet gap: update the same notification, no sound
                     st.count++
-                    post(ctx, cam, "motion", CH_MOTION, "Motion · $name",
-                        "Motion ${st.count} times since ${Fmt.t(p, st.since, seconds = false)}", silent = true, update = true)
+                    post(ctx, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent = true, update = true, clip = st.clip)
                 } else {
-                    st.lastAlert = now; st.count = 1; st.since = now
-                    post(ctx, cam, "motion", CH_MOTION, "Motion · $name", "Motion detected at ${Fmt.t(p, now, seconds = false)} — recording", silent)
+                    st.lastAlert = now; st.count = 1; st.since = now; st.clip = null
+                    post(ctx, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent)
                 }
             }
-            "clip" -> if (p.alertClip) gate(ctx, cam, false)?.let { s -> post(ctx, cam, "clip", CH_CLIP, "New clip · $name", d.optString("text"), s) }
+            "clip" -> {
+                val ref = clipRef(d)
+                // the motion alert now leads to the clip it recorded (updated silently)
+                val st = motion[cam]
+                if (ref != null && p.alertMotion && st != null && System.currentTimeMillis() - st.lastAlert < maxOf(p.alertMotionGapMin, 10) * 60_000L) {
+                    st.clip = ref
+                    gate(ctx, cam, false)?.let { post(ctx, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent = true, update = true, clip = ref) }
+                }
+                if (p.alertClip) gate(ctx, cam, false)?.let { s -> post(ctx, cam, "clip", CH_CLIP, "New clip · $name",
+                    d.optString("text") + if (ref != null) " — tap to watch" else "", s, clip = ref) }
+            }
             "hot" -> if (p.alertHot) gate(ctx, cam, false)?.let { s -> post(ctx, cam, "hot", CH_STATUS, "Camera too hot · $name", d.optString("text"), s) }
             "unplugged" -> if (p.alertCharger) gate(ctx, cam, false)?.let { s -> post(ctx, cam, "power", CH_STATUS, "Charger unplugged · $name", d.optString("text"), s) }
             "monitor_off", "monitor_paused", "safety_stop" ->
@@ -173,7 +205,18 @@ object Alerts {
             if (ok) out += Triple(at(t), kind, title to (d.optString("text") + " (" + tm(t) + ")"))
         }
         if (out.isEmpty()) return
-        AlertInbox.addPast(ctx, cam, out)
+        val latestClip = events.lastOrNull { it.second.optString("type") == "clip" }?.let { clipRef(it.second) }
+        // the 15-minute background check: these are fresh enough to alert like live ones (sound, quiet hours apply)
+        if (Live.bgCheck && AlertInbox.front?.get() == null && !p.alertsInApp) {
+            for ((t, kind, tt) in out) {
+                val silent = gate(ctx, cam, false) ?: continue
+                val ch = when (kind) { "motion" -> CH_MOTION; "clip" -> CH_CLIP; else -> CH_STATUS }
+                post(ctx, cam, kind, ch, tt.first, tt.second + if (latestClip != null && (kind == "motion" || kind == "clip")) " — tap to watch the latest" else "",
+                    silent || kind == "clip", clip = if (kind == "motion" || kind == "clip") latestClip else null, at = t)
+            }
+            return
+        }
+        AlertInbox.addPast(ctx, cam, out, latestClip?.toString())
         val summary = listOfNotNull(
             motions.size.takeIf { it > 0 }?.let { "motion ×$it" },
             clips.size.takeIf { it > 0 }?.let { "$it clip${if (it == 1) "" else "s"}" },

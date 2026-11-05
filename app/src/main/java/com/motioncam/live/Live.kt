@@ -51,6 +51,11 @@ object Live {
 
     @Volatile var cameraActive = false
     @Volatile var viewerActive = false
+    /** The 15-minute background check is connected (missed alerts then ring like live ones). */
+    @Volatile var bgCheck = false
+    /** The phone list has arrived since connecting, and no missed-alert read is still running (background check). */
+    @Volatile var devicesLoaded = false
+    val catchUpsRunning = java.util.concurrent.atomic.AtomicInteger(0)
     private var presenceFor: String? = null
     private var listening = false
 
@@ -126,6 +131,7 @@ object Live {
     private fun startListening(ctx: Context) {
         if (listening) return
         listening = true
+        devicesLoaded = false
         attachedAt = System.currentTimeMillis()
         offsetListener = object : ValueEventListener {
             override fun onDataChange(s: DataSnapshot) { serverOffset = (s.value as? Number)?.toLong() ?: 0L }
@@ -154,6 +160,7 @@ object Live {
                     if (wasOnline != p.online) Alerts.onPresence(ctx, p)
                 }
                 phones.keys.retainAll(seenIds)
+                devicesLoaded = true
                 changed()
             }
             override fun onCancelled(e: DatabaseError) {}
@@ -232,9 +239,14 @@ object Live {
         val last = seen(ctx).getLong(cam, 0)
         if (last == 0L) { markSeen(ctx, cam, until); return }
         if (last >= until) return
-        ref(ctx, "cams/$cam/events")?.orderByChild("t")?.startAt((last + 1).toDouble())?.endAt((until - 1).toDouble())
-            ?.addListenerForSingleValueEvent(object : ValueEventListener {
+        val q = ref(ctx, "cams/$cam/events")?.orderByChild("t")?.startAt((last + 1).toDouble())?.endAt((until - 1).toDouble()) ?: return
+        catchUpsRunning.incrementAndGet()
+        q.addListenerForSingleValueEvent(object : ValueEventListener {
                 override fun onDataChange(s: DataSnapshot) {
+                    try { read(s) } finally { catchUpsRunning.decrementAndGet() }
+                }
+                override fun onCancelled(e: DatabaseError) { catchUpsRunning.decrementAndGet() }
+                private fun read(s: DataSnapshot) {
                     val list = s.children.mapNotNull { c ->
                         val t = (c.child("t").value as? Number)?.toLong() ?: return@mapNotNull null
                         val d = LiveNet.open(ctx, c.child("d").value as? String) ?: return@mapNotNull null
@@ -243,7 +255,6 @@ object Live {
                     markSeen(ctx, cam, until - 1)
                     try { Alerts.catchUp(ctx, cam, list) } catch (_: Exception) {}
                 }
-                override fun onCancelled(e: DatabaseError) {}
             })
     }
 

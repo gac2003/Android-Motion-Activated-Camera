@@ -142,6 +142,15 @@ object CameraLink {
         }.start()
     }
 
+    /**
+     * A clip finished uploading: viewing phones then know that a clip missing from the folder later was deleted (not
+     * still waiting to be uploaded). Not shown in Activity.
+     */
+    fun clipUploaded(ctx: Context, name: String, kind: com.motioncam.cloud.CloudKind, folderId: String) {
+        if (!running) return
+        event(ctx, "clip_up", "Clip uploaded", JSONObject().put("name", name).put("f", Live.folderKey(kind, folderId)))
+    }
+
     /** Monitoring stopped by the phone itself (battery, heat, storage…). */
     fun safetyStop(ctx: Context, why: String) = event(ctx, "safety_stop", why)
 

@@ -597,7 +597,10 @@ object CloudSync {
         // a clip that should be kept (protected collection / by hand): mark it in the cloud right away
         val space = MarkSync.backupKey(cfg.dest)
         if (isProtected(ctx, cfg, clip.id) || clip.name in MarkSync.manual(ctx, space)) MarkSync.schedule(ctx, space)
-        cfg.folderId?.let { com.motioncam.live.Live.nudge(ctx, cfg.kind, it, "clips") }   // viewing phones refresh now
+        cfg.folderId?.let {
+            com.motioncam.live.Live.nudge(ctx, cfg.kind, it, "clips")   // viewing phones refresh now
+            com.motioncam.live.CameraLink.clipUploaded(ctx, clip.name, cfg.kind, it)   // so they know it was uploaded
+        }
         afterUpload(ctx, clip)
     }
 

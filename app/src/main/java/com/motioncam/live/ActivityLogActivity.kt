@@ -44,7 +44,15 @@ class ActivityLogActivity : Activity() {
         super.onCreate(savedInstanceState)
         cam = intent.getStringExtra(Alerts.EXTRA_CAM)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
-        root.addView(topBar(this, cam?.let { "Activity · " + (Live.phones[it]?.name?.ifEmpty { null } ?: "Camera") } ?: "Activity · all cameras"))
+        // a camera's Activity links to the all-cameras one (and back: the all-cameras one opens each camera's)
+        root.addView(topBar(this, cam?.let { "Activity · " + (Live.phones[it]?.name?.ifEmpty { null } ?: "Camera") } ?: "Activity · all cameras",
+            if (cam != null) Ui.chip(this, "All cameras").apply {
+                setOnClickListener {
+                    // came from the all-cameras list: just go back to it
+                    if (intent.getBooleanExtra(EXTRA_FROM_ALL, false)) finish()
+                    else startActivity(Intent(this@ActivityLogActivity, ActivityLogActivity::class.java))
+                }
+            } else null))
         chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(Ui.dp(this@ActivityLogActivity, 12), 0, 0, Ui.dp(this@ActivityLogActivity, 6)) }
         root.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(chips) })
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; val p = Ui.dp(this@ActivityLogActivity, 16); setPadding(p, 0, p, p) }
@@ -100,7 +108,7 @@ class ActivityLogActivity : Activity() {
         f.box.removeAllViews()
         val want = filters[filter].second
         val all = cam == null
-        val base = if (all) feed?.events() ?: emptyList() else ActivityTypes.pair(single)
+        val base = if (all) feed?.events() ?: emptyList() else ActivityTypes.pair(single.filter { it.type != "clip_up" })
         val list = base.filter { want.isEmpty() || it.type in want }
         if (list.isEmpty()) { f.note(if (all && feed?.loaded != true) "Loading…" else "Nothing in the last 7 days."); return }
         val prefs = Prefs(this)
@@ -120,8 +128,22 @@ class ActivityLogActivity : Activity() {
                     val p = Ui.dp(this@ActivityLogActivity, 10); setPadding(p, p / 2, p, p / 2)
                     background = GradientDrawable().apply { setColor(0xFF1E2126.toInt()); cornerRadius = Ui.dp(this@ActivityLogActivity, 10).toFloat() }
                 }
-                block.addView(Ui.label(this, camName(e.cam), 13f, Ui.ACCENT).apply {
-                    setPadding(0, Ui.dp(this@ActivityLogActivity, 4), 0, Ui.dp(this@ActivityLogActivity, 2))
+                // the phone's name heads its card: tap for that phone's own Activity (Back returns here)
+                val c = e.cam
+                block.addView(LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, Ui.dp(this@ActivityLogActivity, 6), 0, Ui.dp(this@ActivityLogActivity, 4))
+                    isClickable = true
+                    background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30FFFFFF), null,
+                        android.graphics.drawable.ColorDrawable(0xFFFFFFFF.toInt()))
+                    contentDescription = "${camName(c)}: open its activity"
+                    addView(Ui.label(this@ActivityLogActivity, camName(c), 14f, Ui.ACCENT).apply { setTypeface(typeface, android.graphics.Typeface.BOLD) },
+                        LinearLayout.LayoutParams(0, -2, 1f))
+                    addView(Ui.label(this@ActivityLogActivity, "Its activity ›", 12f, Ui.GREY))
+                    setOnClickListener {
+                        startActivity(Intent(this@ActivityLogActivity, ActivityLogActivity::class.java).putExtra(Alerts.EXTRA_CAM, c).putExtra(EXTRA_FROM_ALL, true))
+                    }
                 })
                 f.box.addView(block, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@ActivityLogActivity, 8) })
             }
@@ -133,6 +155,8 @@ class ActivityLogActivity : Activity() {
     private fun camName(c: String) = Live.phones[c]?.name?.ifEmpty { null } ?: "Camera"
 
     companion object {
+        private const val EXTRA_FROM_ALL = "fromAll"
+
         /**
          * One event as a row: time, icon and text; a motion with its clip gets the clip on a second line (tap to watch).
          * Tapping opens the clip when there is one, otherwise the camera. [showCam]: the camera's name in the row.

@@ -80,6 +80,7 @@ object RemoteRepo {
             val t = File(f.path + ".tmp"); t.writeText(o.toString()); t.renameTo(f)
         } catch (_: Exception) {}
         lists.remove(src.id)
+        noteSeen(ctx, src.id, clipFiles.map { it.name })
         val clips = build(ctx, src, clipFiles, thumbFiles)
         src.lastRefresh = System.currentTimeMillis()
         src.clipCount = clips.size
@@ -89,6 +90,40 @@ object RemoteRepo {
         SharedSync.schedule(ctx, src.id, 300)
         return clips
     }
+
+    // ---- what this phone knows about clips that are no longer in a folder (to tell "deleted" from "not uploaded yet")
+
+    private fun seenFile(ctx: Context, id: String) = File(dataDir(ctx, id), "seen.txt")
+    private fun deletedFile(ctx: Context, id: String) = File(dataDir(ctx, id), "deleted.json")
+
+    /** Remembers clip names seen in the folder (the newest 20 000). */
+    @Synchronized
+    fun noteSeen(ctx: Context, id: String, names: Collection<String>) {
+        try {
+            val f = seenFile(ctx, id)
+            val set = LinkedHashSet(if (f.exists()) f.readLines() else emptyList())
+            if (set.containsAll(names)) return
+            set.addAll(names.sorted())
+            f.writeText(set.toList().takeLast(20_000).joinToString("\n"))
+        } catch (_: Exception) {}
+    }
+
+    fun seenBefore(ctx: Context, id: String, name: String): Boolean =
+        try { seenFile(ctx, id).let { it.exists() && it.readLines().contains(name) } } catch (_: Exception) { false }
+
+    /** Clips this phone deleted from the folder (name → when). */
+    @Synchronized
+    fun noteDeleted(ctx: Context, id: String, name: String) {
+        try {
+            val f = deletedFile(ctx, id)
+            val o = if (f.exists()) JSONObject(f.readText()) else JSONObject()
+            o.put(name, System.currentTimeMillis())
+            f.writeText(o.toString())
+        } catch (_: Exception) {}
+    }
+
+    fun deletedAt(ctx: Context, id: String, name: String): Long? =
+        try { deletedFile(ctx, id).takeIf { it.exists() }?.let { JSONObject(it.readText()).optLong(name).takeIf { t -> t > 0 } } } catch (_: Exception) { null }
 
     /** Cached listing, or a network listing if there is none yet. */
     fun clips(ctx: Context, src: RemoteSource): List<Clip> = cached(ctx, src).ifEmpty { refresh(ctx, src) }
@@ -332,6 +367,7 @@ object RemoteRepo {
                     File(File(cacheDir(ctx, src.id), "clips"), e.name).delete()
                     thumbFile(ctx, e).delete()
                     entries.remove(c.id)
+                    noteDeleted(ctx, src.id, e.name)
                     res.deleted++
                 } catch (ex: Exception) { res.failed++; res.lastError = ex.message }
             }

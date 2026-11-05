@@ -100,15 +100,31 @@ class OpenClipActivity : Activity() {
         f.button("Open the camera (live view)") { startActivity(Intent(this, RemoteLiveActivity::class.java).putExtra(Alerts.EXTRA_CAM, cam)); finish() }
     }
 
-    /** Lists the folder until the clip is there (the camera may still be uploading it), then plays it. */
+    /**
+     * Plays the clip when it is in the folder. When it isn't, works out why before saying anything: deleted (by this
+     * phone — it remembers what it deleted —, or it was in the folder before / the camera reported it uploaded) or not
+     * uploaded yet (then it keeps checking until it arrives).
+     */
     private fun waitFor(src: RemoteSource) {
         waitingSince = System.currentTimeMillis()
         f.box.removeAllViews()
         val status = f.line("Looking for the clip in ${src.name}…")
-        f.box.addView(ProgressBar(this).apply { isIndeterminate = true }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = Ui.dp(this@OpenClipActivity, 12) })
-        f.note("$name — the camera uploads it after recording (when its upload rules allow, e.g. Wi-Fi only or while charging).")
-        camButtons()
+        val spinner = ProgressBar(this).apply { isIndeterminate = true }
+        f.box.addView(spinner, LinearLayout.LayoutParams(-2, -2).apply { topMargin = Ui.dp(this@OpenClipActivity, 12) })
         var tries = 0
+        var decided = false
+        fun play() {
+            startActivity(Intent(this, PlayerActivity::class.java)
+                .putExtra(PlayerActivity.EXTRA_REMOTE, src.id).putExtra(PlayerActivity.EXTRA_START_ID, RemoteRepo.idFor(src.id, name)))
+            finish()
+        }
+        fun deleted(why: String) {
+            f.box.removeAllViews()
+            f.line("This clip was deleted", 16f, Ui.ACCENT)
+            f.note("$name\n\n$why")
+            f.note("The camera phone may still have its own copy (its Clips), unless it deletes clips after backing them up.")
+            camButtons()
+        }
         fun attempt() {
             if (stopped) return
             Thread {
@@ -116,29 +132,69 @@ class OpenClipActivity : Activity() {
                 runOnUiThread {
                     if (stopped) return@runOnUiThread
                     tries++
-                    when {
-                        found == true -> {
-                            startActivity(Intent(this, PlayerActivity::class.java)
-                                .putExtra(PlayerActivity.EXTRA_REMOTE, src.id).putExtra(PlayerActivity.EXTRA_START_ID, RemoteRepo.idFor(src.id, name)))
-                            finish()
+                    if (found == true) { play(); return@runOnUiThread }
+                    if (!decided && found == false) {
+                        decided = true
+                        // deleted by this phone?
+                        RemoteRepo.deletedAt(this, src.id, name)?.let { t ->
+                            deleted("You deleted it from ${src.name} on " + java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.getDefault()).format(java.util.Date(t)) + ".")
+                            return@runOnUiThread
                         }
+                        // in the folder before, or reported uploaded by the camera: deleted since (another phone, or clean-up)
+                        if (RemoteRepo.seenBefore(this, src.id, name)) {
+                            deleted("It was in ${src.name} before and has been deleted since — from another phone, or by the camera's clean-up rules (folder full or older than its keep time).")
+                            return@runOnUiThread
+                        }
+                        wasUploaded { up ->
+                            if (stopped) return@wasUploaded
+                            if (up) deleted("The camera uploaded it to ${src.name}, and it has been deleted since — from another phone, or by the camera's clean-up rules.")
+                            else { waitingUi(status, src); ui.postDelayed({ attempt() }, 6000) }
+                        }
+                        return@runOnUiThread
+                    }
+                    when {
                         System.currentTimeMillis() - waitingSince > WAIT_MS -> {
                             f.box.removeAllViews()
                             f.line("The clip hasn't been uploaded yet.")
-                            f.note("The camera may be waiting for Wi-Fi or for charging (its Cloud backup rules), or has no internet. " +
+                            f.note("The camera may be waiting for Wi-Fi or for charging (its upload rules), or has no internet. " +
                                 "The clip stays on the camera phone; it appears in ${src.name} once uploaded.")
                             f.button("Keep waiting") { waitFor(src) }
                             camButtons()
+                            return@runOnUiThread
                         }
-                        else -> {
-                            status.text = if (found == null) "Can't reach ${src.name} right now — trying again…"
-                                else "Waiting for the camera to upload the clip… (checked $tries×)"
-                            ui.postDelayed({ attempt() }, 6000)
-                        }
+                        found == null -> status.text = "Can't reach ${src.name} right now — trying again…"
+                        decided -> status.text = "Waiting for the camera to upload the clip… (checked $tries×)"
                     }
+                    ui.postDelayed({ attempt() }, 6000)
                 }
             }.start()
         }
         attempt()
+    }
+
+    private fun waitingUi(status: android.widget.TextView, src: RemoteSource) {
+        status.text = "Not uploaded yet — waiting for the camera to upload it…"
+        f.note("$name — the camera uploads it after recording (when its upload rules allow, e.g. Wi-Fi only or while charging). " +
+            "This screen opens it as soon as it arrives.")
+        camButtons()
+    }
+
+    /** Did the camera report this clip uploaded? (its "clip uploaded" events; unknown counts as no) */
+    private fun wasUploaded(done: (Boolean) -> Unit) {
+        val ref = Live.ref(this, "cams/$cam/events")?.orderByChild("t")?.limitToLast(500) ?: run { done(false); return }
+        var answered = false
+        ref.addListenerForSingleValueEvent(object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(s: com.google.firebase.database.DataSnapshot) {
+                if (answered) return
+                answered = true
+                val up = s.children.any { c ->
+                    val d = LiveNet.open(this@OpenClipActivity, c.child("d").value as? String) ?: return@any false
+                    try { JSONObject(d).let { it.optString("type") == "clip_up" && it.optString("name") == name } } catch (_: Exception) { false }
+                }
+                done(up)
+            }
+            override fun onCancelled(e: com.google.firebase.database.DatabaseError) { if (!answered) { answered = true; done(false) } }
+        })
+        ui.postDelayed({ if (!answered) { answered = true; done(false) } }, 8000)
     }
 }

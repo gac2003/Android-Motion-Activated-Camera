@@ -18,13 +18,17 @@ import android.widget.TextView
 import java.util.concurrent.Executors
 
 /** List of collections (Favourites + user-made). Each opens the normal clip gallery filtered to it. */
-class CollectionsActivity : Activity() {
+open class CollectionsActivity : Activity() {
     companion object {
         /** Shared collections of a remote folder. */
         const val EXTRA_REMOTE = "remote"
     }
 
     private var remote: com.motioncam.remote.RemoteSource? = null
+    /** The remote folder whose collections these are (null = this phone's). */
+    val sourceId: String? get() = remote?.id
+    /** Shown inside the Clips tab (its title, the switch and "‹ Collections" instead of a top bar). */
+    protected open val asTab = false
     private var store: CollectionStore = Collections
     private lateinit var box: LinearLayout
     private val pool = Executors.newFixedThreadPool(2)
@@ -39,7 +43,16 @@ class CollectionsActivity : Activity() {
         val add = Ui.chip(this, "＋ New").apply {
             setOnClickListener { CollectionPicker.askName(this@CollectionsActivity, "New collection", "") { store.create(this@CollectionsActivity, it); reload() } }
         }
-        root.addView(topBar(this, remote?.let { "Collections · ${it.name}" } ?: "Collections", if (canEdit()) add else null))
+        if (asTab) root.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = Ui.dp(this@CollectionsActivity, 16)
+            setPadding(p, p, p, Ui.dp(this@CollectionsActivity, 4))
+            addView(Ui.label(this@CollectionsActivity, "Clips", 26f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 0, 0, Ui.dp(this@CollectionsActivity, 10)) })
+            addView(ClipsSwitch.view(this@CollectionsActivity, remote = remote != null))
+            val back = backRow(this@CollectionsActivity, "Collections", remote?.name) { finish() } as LinearLayout
+            if (canEdit()) back.addView(add)
+            addView(back)
+        }) else root.addView(topBar(this, remote?.let { "Collections · ${it.name}" } ?: "Collections", if (canEdit()) add else null))
         box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@CollectionsActivity, 12)
@@ -148,7 +161,7 @@ class CollectionsActivity : Activity() {
             setPadding(0, Ui.dp(ctx, 8), 0, Ui.dp(ctx, 8))
             isClickable = true
             setOnClickListener {
-                startActivity(Intent(ctx, ClipsActivity::class.java).putExtra(ClipsActivity.EXTRA_COLLECTION, c.id)
+                startActivity(Intent(ctx, if (asTab) CollectionTabActivity::class.java else ClipsActivity::class.java).putExtra(ClipsActivity.EXTRA_COLLECTION, c.id)
                     .putExtra(ClipsActivity.EXTRA_REMOTE, remote?.id))
             }
         }

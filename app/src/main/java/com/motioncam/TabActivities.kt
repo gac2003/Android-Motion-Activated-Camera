@@ -16,25 +16,27 @@ class ActivityTabActivity : com.motioncam.live.ActivityLogActivity() {
 
 class ClipsTabActivity : ClipsActivity() {
     override val asTab = true
+    override fun onCreate(savedInstanceState: android.os.Bundle?) { Nav.clipsTop = java.lang.ref.WeakReference(this); super.onCreate(savedInstanceState) }
     override fun onSelecting(on: Boolean) { window.decorView.findViewWithTag<View>("tabbar")?.visibility = if (on) View.GONE else View.VISIBLE }
     override fun setContentView(view: View) = super.setContentView(Nav.wrap(this, view, Nav.Tab.CLIPS))
-    override fun onResume() { super.onResume(); Nav.tabShown(this, Nav.Tab.CLIPS); Nav.setClipsRemote(this, false) }
+    override fun onResume() { super.onResume(); Nav.tabShown(this, Nav.Tab.CLIPS); Nav.setClipsRemote(this, false); Nav.clipsTop = java.lang.ref.WeakReference(this) }
     override fun finish() { if (!isTaskRoot) Nav.leaveTab(this, Nav.Tab.CLIPS) else super.finish() }
 }
 
 class RemoteTabActivity : com.motioncam.remote.RemoteFoldersActivity() {
     override val asTab = true
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        Nav.clipsTop = java.lang.ref.WeakReference(this)
         super.onCreate(savedInstanceState)
         // the folder that was open when the app was last closed: open it again
-        if (savedInstanceState == null && Nav.openFolder == null) Nav.lastFolder(this)?.let { id ->
+        if (savedInstanceState == null && !Nav.folderOpen()) Nav.lastFolder(this)?.let { id ->
             if (com.motioncam.remote.RemoteSources.get(this, id) != null)
                 startActivity(android.content.Intent(this, RemoteClipsTabActivity::class.java).putExtra(ClipsActivity.EXTRA_REMOTE, id))
             else Nav.setLastFolder(this, null)
         }
     }
     override fun setContentView(view: View) = super.setContentView(Nav.wrap(this, view, Nav.Tab.CLIPS))
-    override fun onResume() { super.onResume(); Nav.tabShown(this, Nav.Tab.CLIPS); Nav.setClipsRemote(this, true) }
+    override fun onResume() { super.onResume(); Nav.tabShown(this, Nav.Tab.CLIPS); Nav.setClipsRemote(this, true); Nav.clipsTop = java.lang.ref.WeakReference(this) }
     override fun finish() { if (!isTaskRoot) Nav.leaveTab(this, Nav.Tab.CLIPS) else super.finish() }
 }
 
@@ -46,23 +48,40 @@ class SettingsTabActivity : SettingsActivity() {
 }
 
 /**
- * A remote folder opened in the Clips tab: like On this phone (tab bar, switch, count above the tiles), with the folder's
- * name to go back to your folders. Switching tabs and back returns to the open folder.
+ * Screens inside the Clips tab (a remote folder, the collections, one collection): like On this phone (tab bar, switch,
+ * count above the tiles) with a "‹ name" row to go back. Returning to the tab shows the one that was open.
  */
-class RemoteClipsTabActivity : ClipsActivity() {
+abstract class ClipsInner : ClipsActivity(), ClipsSide {
     override val asTab = true
+    override val onRemoteSide get() = sourceId != null
     override fun setContentView(view: View) = super.setContentView(Nav.wrap(this, view, Nav.Tab.CLIPS))
     override fun onSelecting(on: Boolean) { window.decorView.findViewWithTag<View>("tabbar")?.visibility = if (on) View.GONE else View.VISIBLE }
-    override fun onCreate(savedInstanceState: android.os.Bundle?) { super.onCreate(savedInstanceState); Nav.openFolder = this }
+    override fun onCreate(savedInstanceState: android.os.Bundle?) { super.onCreate(savedInstanceState); Nav.innerOpened(this) }
     override fun onResume() {
-        super.onResume(); Nav.tabShown(this, Nav.Tab.CLIPS); Nav.setClipsRemote(this, true)
-        Nav.setLastFolder(this, intent.getStringExtra(EXTRA_REMOTE))   // reopened after a restart too
+        super.onResume(); Nav.tabShown(this, Nav.Tab.CLIPS); Nav.setClipsRemote(this, onRemoteSide)
+        Nav.clipsTop = java.lang.ref.WeakReference(this)
     }
-    /** Back (or "Remote folders" again): to the list of folders, wherever it is in the stack. */
-    override fun finish() {
-        Nav.setLastFolder(this, null)
-        super.finish()
-        if (!isTaskRoot) Nav.open(this, RemoteTabActivity::class.java)
+    override fun finish() { super.finish(); Nav.innerClosed(this) }
+}
+
+/** A remote folder opened in the Clips tab (also reopened after a restart). */
+class RemoteClipsTabActivity : ClipsInner() {
+    override fun onResume() { super.onResume(); Nav.setLastFolder(this, intent.getStringExtra(EXTRA_REMOTE)) }
+    override fun finish() { if (!Nav.quietly(this)) Nav.setLastFolder(this, null); super.finish() }
+}
+
+/** One collection's clips, in the Clips tab. */
+class CollectionTabActivity : ClipsInner()
+
+/** The collections (this phone's, or a remote folder's), in the Clips tab. */
+class CollectionsTabActivity : CollectionsActivity(), ClipsSide {
+    override val asTab = true
+    override val onRemoteSide get() = sourceId != null
+    override fun setContentView(view: View) = super.setContentView(Nav.wrap(this, view, Nav.Tab.CLIPS))
+    override fun onCreate(savedInstanceState: android.os.Bundle?) { super.onCreate(savedInstanceState); Nav.innerOpened(this) }
+    override fun onResume() {
+        super.onResume(); Nav.tabShown(this, Nav.Tab.CLIPS); Nav.setClipsRemote(this, onRemoteSide)
+        Nav.clipsTop = java.lang.ref.WeakReference(this)
     }
-    override fun onDestroy() { if (Nav.openFolder === this) Nav.openFolder = null; super.onDestroy() }
+    override fun finish() { super.finish(); Nav.innerClosed(this) }
 }

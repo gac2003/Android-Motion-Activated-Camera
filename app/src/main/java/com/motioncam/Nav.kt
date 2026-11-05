@@ -29,8 +29,56 @@ object Nav {
     fun lastPlace(ctx: Context): String = sp(ctx).getString("place", "home") ?: "home"
     fun lastTab(ctx: Context): Tab = try { Tab.valueOf(sp(ctx).getString("tab", "HOME") ?: "HOME").takeIf { it != Tab.CAMERA } ?: Tab.HOME } catch (_: Exception) { Tab.HOME }
     /** The Clips tab shows its remote folders (true) or this phone's clips. */
-    /** A remote folder open in the Clips tab (the tab returns to it). */
-    @Volatile var openFolder: Activity? = null
+    /**
+     * The Clips tab's inner screens (a remote folder, the collections, one collection): at most one of each kind, each
+     * remembering the screen it was opened from. Returning to the tab shows the deepest one on the side last shown.
+     */
+    private val inner = HashMap<Class<*>, java.lang.ref.WeakReference<Activity>>()
+    private val parents = java.util.WeakHashMap<Activity, java.lang.ref.WeakReference<Activity>>()
+    private val quiet = java.util.Collections.newSetFromMap(java.util.WeakHashMap<Activity, Boolean>())
+    /** The Clips tab screen last in front (the parent of the next inner screen). */
+    var clipsTop: java.lang.ref.WeakReference<Activity>? = null
+    private val INNER = listOf(CollectionTabActivity::class.java, CollectionsTabActivity::class.java, RemoteClipsTabActivity::class.java)
+
+    private fun alive(a: Activity?) = a != null && !a.isFinishing && !a.isDestroyed
+    /** Which side of the Clips tab an inner screen belongs to (true = remote folders). */
+    private fun remoteSide(a: Activity) = (a as? ClipsSide)?.onRemoteSide == true
+
+    fun innerOpened(a: Activity) {
+        // the other side's screen of this kind is replaced (with the screens opened from it)
+        inner[a.javaClass]?.get()?.takeIf { it !== a && alive(it) }?.let { old ->
+            val side = remoteSide(old)
+            for (c in INNER.takeWhile { it != a.javaClass }) inner[c]?.get()?.takeIf { alive(it) && remoteSide(it) == side }?.let { quiet += it; it.finish(); inner.remove(c) }
+            quiet += old; old.finish()
+        }
+        inner[a.javaClass] = java.lang.ref.WeakReference(a)
+        clipsTop?.get()?.takeIf { it !== a }?.let { parents[a] = java.lang.ref.WeakReference(it) }
+        clipsTop = java.lang.ref.WeakReference(a)
+    }
+
+    /** An inner screen closed (Back): show the screen it was opened from. */
+    fun innerClosed(a: Activity) {
+        if (inner[a.javaClass]?.get() === a) inner.remove(a.javaClass)
+        if (quiet.remove(a)) return
+        val p = parents[a]?.get()
+        if (alive(p) && !a.isTaskRoot) open(a, p!!.javaClass)
+    }
+
+    /** The deepest open screen of one side of the Clips tab, or its first screen. */
+    fun clipsScreen(ctx: Context, remote: Boolean): Class<out Activity> =
+        INNER.mapNotNull { inner[it]?.get() }.firstOrNull { alive(it) && remoteSide(it) == remote }?.javaClass
+            ?: if (remote) RemoteTabActivity::class.java else ClipsTabActivity::class.java
+
+    /** Back to a side's first screen (its inner screens close). */
+    fun popClips(a: Activity, remote: Boolean) {
+        for (c in INNER) inner[c]?.get()?.takeIf { alive(it) && remoteSide(it) == remote }?.let { quiet += it; it.finish(); inner.remove(c) }
+        open(a, if (remote) RemoteTabActivity::class.java else ClipsTabActivity::class.java)
+    }
+
+    /** Being closed because it was replaced or the side went back to its first screen (not by the user's Back). */
+    fun quietly(a: Activity) = a in quiet
+
+    fun folderOpen() = inner[RemoteClipsTabActivity::class.java]?.get().let { alive(it) }
     fun lastFolder(ctx: Context): String? = sp(ctx).getString("clipsFolder", null)
     fun setLastFolder(ctx: Context, id: String?) = sp(ctx).edit().putString("clipsFolder", id).apply()
     fun clipsRemote(ctx: Context): Boolean = sp(ctx).getBoolean("clipsRemote", false)
@@ -43,8 +91,7 @@ object Nav {
         Tab.HOME -> HomeActivity::class.java
         Tab.ACTIVITY -> ActivityTabActivity::class.java
         Tab.CAMERA -> MainActivity::class.java
-        Tab.CLIPS -> if (!clipsRemote(ctx)) ClipsTabActivity::class.java
-            else if (openFolder?.isFinishing == false) RemoteClipsTabActivity::class.java else RemoteTabActivity::class.java
+        Tab.CLIPS -> clipsScreen(ctx, clipsRemote(ctx))
         Tab.SETTINGS -> SettingsTabActivity::class.java
     }
 
@@ -206,13 +253,35 @@ object ClipsSwitch {
                 isClickable = true
                 contentDescription = label + if (on) " (shown)" else ""
                 setOnClickListener {
-                    // in an open folder, "Remote folders" goes back to the list of folders
-                    if (on) { if (a is RemoteClipsTabActivity) a.finish(); return@setOnClickListener }
+                    // the side already shown: back to its first screen (folders / this phone's clips)
+                    if (on) { if (a !is ClipsTabActivity && a !is RemoteTabActivity) { if (isRemote) Nav.setLastFolder(a, null); Nav.popClips(a, isRemote) }; return@setOnClickListener }
                     Nav.setClipsRemote(a, isRemote)
-                    Nav.open(a, if (isRemote) Nav.cls(a, Nav.Tab.CLIPS) else ClipsTabActivity::class.java)
+                    Nav.open(a, Nav.clipsScreen(a, isRemote))
                 }
             }, LinearLayout.LayoutParams(0, -2, 1f))
         }
         return box
     }
+}
+
+/** A Clips tab screen: which side of the switch it belongs to. */
+interface ClipsSide { val onRemoteSide: Boolean }
+
+/** "‹ name" (with a smaller [sub] after it): where you are inside the Clips tab; tap to go back one step. */
+fun backRow(a: Activity, name: String, sub: String?, back: () -> Unit): View = LinearLayout(a).apply {
+    orientation = LinearLayout.HORIZONTAL
+    gravity = Gravity.CENTER_VERTICAL
+    setPadding(0, Ui.dp(a, 10), 0, 0)
+    isClickable = true
+    contentDescription = "Back from $name"
+    setOnClickListener { back() }
+    addView(Ui.label(a, "‹", 24f).apply { setPadding(0, 0, Ui.dp(a, 10), Ui.dp(a, 2)) })
+    addView(Ui.label(a, "", 16f).apply {
+        maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+        text = android.text.SpannableStringBuilder(name).apply {
+            setSpan(android.text.style.StyleSpan(Typeface.BOLD), 0, length, 0)
+            if (sub != null) { append("  ·  "); val st = length; append(sub)
+                setSpan(android.text.style.ForegroundColorSpan(Ui.GREY), st, length, 0); setSpan(android.text.style.RelativeSizeSpan(0.85f), st, length, 0) }
+        }
+    }, LinearLayout.LayoutParams(0, -2, 1f))
 }

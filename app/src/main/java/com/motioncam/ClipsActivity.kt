@@ -46,6 +46,8 @@ open class ClipsActivity : Activity() {
     private var swipe: androidx.swiperefreshlayout.widget.SwipeRefreshLayout? = null
     private var favIds: Set<Long> = emptySet()
     private var backedUp: Set<Long> = emptySet()
+    /** The remote folder shown (null = this phone's clips). */
+    val sourceId: String? get() = remote?.id
     /** Shown as the Clips tab: big title and the On this phone / Remote folders switch instead of a back arrow. */
     protected open val asTab = false
     /** The selection bar takes the tab bar's place (tab screens hide their tab bar meanwhile). */
@@ -142,7 +144,8 @@ open class ClipsActivity : Activity() {
                 }, LinearLayout.LayoutParams(0, -2, 1f).apply { val m = Ui.dp(this@ClipsActivity, 4); setMargins(m, m, m, m) })
             if (remote != null) add(IconDrawable.Kind.REFRESH, "Refresh") { refreshRemote(quiet = false) }
             if (collectionId == null) add(IconDrawable.Kind.COLLECTIONS, "Collections") {
-                startActivity(Intent(this@ClipsActivity, CollectionsActivity::class.java).putExtra(CollectionsActivity.EXTRA_REMOTE, remote?.id))
+                startActivity(Intent(this@ClipsActivity, if (asTab) CollectionsTabActivity::class.java else CollectionsActivity::class.java)
+                    .putExtra(CollectionsActivity.EXTRA_REMOTE, remote?.id))
             }
             // a collection: get all of it here (remote) or into the cloud (phone)
             if (collectionId != null && remote != null) add(IconDrawable.Kind.DOWNLOAD, "Save all") {
@@ -1028,25 +1031,15 @@ open class ClipsActivity : Activity() {
         exitSelection()
     }
 
-    /** The Clips tab's header: its title and the On this phone / Remote folders switch. */
+    /** The Clips tab's header: its title, the On this phone / Remote folders switch, and where you are inside the tab. */
     private fun tabHeader(): View = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8))
         addView(Ui.label(this@ClipsActivity, "Clips", 26f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 0, 0, Ui.dp(this@ClipsActivity, 10)) })
         addView(ClipsSwitch.view(this@ClipsActivity, remote = remote != null))
-        // a remote folder opened in the Clips tab: its name, tap to go back to your folders
-        val r = remote
-        if (r != null) addView(LinearLayout(this@ClipsActivity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, Ui.dp(this@ClipsActivity, 10), 0, 0)
-            isClickable = true
-            contentDescription = "Back to your folders (${r.name})"
-            setOnClickListener { finish() }
-            addView(Ui.label(this@ClipsActivity, "‹", 24f).apply { setPadding(0, 0, Ui.dp(this@ClipsActivity, 10), Ui.dp(this@ClipsActivity, 2)) })
-            addView(Ui.label(this@ClipsActivity, r.name, 16f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END },
-                LinearLayout.LayoutParams(0, -2, 1f))
-        })
+        // a remote folder or a collection opened in the Clips tab: its name, tap to go back one step
+        val name = collectionId?.let { store.get(this@ClipsActivity, it)?.name } ?: remote?.name
+        if (name != null) addView(backRow(this@ClipsActivity, name, remote?.takeIf { collectionId != null }?.name) { finish() })
     }
 
     private fun deleteSelected() {

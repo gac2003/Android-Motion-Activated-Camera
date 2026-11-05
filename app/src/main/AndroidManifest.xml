@@ -45,6 +45,8 @@
         <activity android:name=".ClipsTabActivity" android:exported="false" />
         <activity android:name=".RemoteTabActivity" android:exported="false" />
         <activity android:name=".RemoteClipsTabActivity" android:exported="false" />
+        <activity android:name=".CollectionsTabActivity" android:exported="false" />
+        <activity android:name=".CollectionTabActivity" android:exported="false" />
         <activity android:name=".SettingsTabActivity" android:exported="false" />
 
         <activity android:name=".SettingsActivity" android:exported="false" />

@@ -371,14 +371,21 @@ class BatteryDrawable(private val pct: Int, private val charging: Boolean, priva
 
 /**
  * The live connection icon with its state: [caption] draws a small "LIVE" under the cloud (the icon moves up to make
- * room), [dot] a small dot in the corner (unread alerts).
+ * room), [count] the number of camera events not seen yet in the top-right corner (1–9, then "9+"): white digits with a
+ * dark outline, no coloured badge (so it can't be mistaken for a recording light).
  */
-class LiveIconDrawable(private val tint: Int, private val caption: Boolean, private val dot: Boolean) : Drawable() {
+class LiveIconDrawable(private val tint: Int, private val caption: Boolean, private val count: Int) : Drawable() {
     private val icon = IconDrawable(IconDrawable.Kind.LIVE, tint)
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = tint; textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD; letterSpacing = 0.08f
     }
-    private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val num = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFFFFFF.toInt(); textAlign = Paint.Align.RIGHT; typeface = android.graphics.Typeface.DEFAULT_BOLD
+    }
+    private val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF15171B.toInt(); textAlign = Paint.Align.RIGHT; typeface = android.graphics.Typeface.DEFAULT_BOLD
+        style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND
+    }
 
     override fun draw(c: Canvas) {
         val b = bounds
@@ -396,9 +403,13 @@ class LiveIconDrawable(private val tint: Int, private val caption: Boolean, priv
             icon.setBounds(b)
             icon.draw(c)
         }
-        if (dot) {
-            dotPaint.color = if (tint == Ui.RED) 0xFFFFFFFF.toInt() else Ui.RED
-            c.drawCircle(ox + 21.5f * s, oy + 3.5f * s, 3f * s, dotPaint)
+        if (count > 0) {
+            val t = if (count > 9) "9+" else "$count"
+            num.textSize = 8.5f * s; halo.textSize = 8.5f * s; halo.strokeWidth = 3f * s
+            val x = ox + 26.5f * s   // right-aligned just past the icon's edge (inside the button)
+            val y = oy + 12f * s   // between the signal arcs and the cloud, on the right
+            c.drawText(t, x, y, halo)
+            c.drawText(t, x, y, num)
         }
     }
 

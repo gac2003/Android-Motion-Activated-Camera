@@ -194,7 +194,8 @@ object Alerts {
      */
     fun catchUp(ctx: Context, cam: String, events: List<Pair<Long, JSONObject>>) {
         // new in Activity (the dot on the Live connection icon), whatever this phone's alert settings are
-        events.filter { it.second.optString("type") in ActivityTypes.OVERVIEW }.maxOfOrNull { it.first }?.let { AlertInbox.noteEvent(ctx, cam, it - Live.serverOffset) }
+        AlertInbox.noteEvents(ctx, cam, events.filter { it.second.optString("type").let { t -> t in ActivityTypes.OVERVIEW && t != "clip" } }
+            .map { it.first - Live.serverOffset })
         val p = Prefs(ctx)
         if (!p.alertsOn || mutedUntil(ctx, cam) > 0 || events.isEmpty()) return
         val name = camName(cam)

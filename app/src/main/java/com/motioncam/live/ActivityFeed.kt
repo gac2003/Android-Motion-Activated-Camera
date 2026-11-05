@@ -74,7 +74,7 @@ class ActivityFeed(private val ctx: Context, private val perCam: Int, private va
                     }
                     loaded = true
                     // keeps "new activity" (the dot) right, also for events that arrived while this phone was offline
-                    byCam[c]?.filter { it.type in ActivityTypes.OVERVIEW }?.maxOfOrNull { it.t }?.let { AlertInbox.noteEvent(ctx, c, it) }
+                    byCam[c]?.filter { it.type in ActivityTypes.OVERVIEW && it.type != "clip" }?.map { it.t }?.let { AlertInbox.noteEvents(ctx, c, it) }
                     main.post(onChange)
                 }
                 override fun onCancelled(e: DatabaseError) {}

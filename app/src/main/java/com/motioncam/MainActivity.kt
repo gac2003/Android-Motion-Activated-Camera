@@ -136,7 +136,7 @@ class MainActivity : Activity() {
 
     /**
      * The live connection icon: red with "LIVE" under the cloud while this phone sends its live picture to another phone;
-     * yellow while at least one other phone is online as a camera; white otherwise. Camera activity not seen yet: a dot.
+     * yellow while at least one other phone is online as a camera; white otherwise. Camera events not seen yet: their number.
      */
     private fun tintLiveIcon() {
         val v = liveChip as? ImageView ?: return
@@ -144,14 +144,14 @@ class MainActivity : Activity() {
         val me = com.motioncam.cloud.Device.id(this)
         val streaming = on && com.motioncam.live.CameraLink.streaming
         val cams = if (on) com.motioncam.live.Live.phones.values.filter { it.id != me && it.online && it.camera } else emptyList()
-        val unread = on && com.motioncam.live.AlertInbox.hasNew(this)   // camera activity not seen yet
+        val unread = if (on) com.motioncam.live.AlertInbox.newCount(this) else 0   // camera events not seen yet
         v.setImageDrawable(LiveIconDrawable(when { streaming -> Ui.RED; cams.isNotEmpty() -> Ui.ACCENT; else -> 0xFFFFFFFF.toInt() },
-            caption = streaming, dot = unread))
+            caption = streaming, count = unread))
         val what = when {
             streaming -> "this phone is live: another phone is watching it"
             cams.isNotEmpty() -> cams.joinToString { it.name.ifEmpty { "a camera" } } + " online"
             else -> "no camera online"
-        } + if (unread) " · new activity" else ""
+        } + if (unread > 0) " · $unread new in Activity" else ""
         v.contentDescription = "Live connection ($what)"
         v.tooltipText = "Live connection — $what"
     }

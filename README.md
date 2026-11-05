@@ -190,7 +190,7 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
   In-app cards stack like the phone's notifications (one in front, "+N more" with layers behind): swipe a card sideways
   to dismiss it, up to dismiss all, tap to open; they hide by themselves after a few seconds.
 * **Live connection icon** (main screen): yellow while another phone is online as a camera; red with **LIVE** under the
-  cloud while this phone is sending its live picture to another phone; a red dot when cameras have activity you haven't
+  cloud while this phone is sending its live picture to another phone; a white number (1–9, then 9+) for camera events you haven't
   seen (new entries are marked with a yellow ● in Activity). A camera that was monitoring and lost its connection is shown
   at the top of Live connection.
 * **Recent activity** (top of Live connection): the 3 latest events of all cameras – motion (with the clip it recorded,

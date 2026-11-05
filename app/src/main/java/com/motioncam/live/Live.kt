@@ -211,7 +211,7 @@ object Live {
                 val t = (s.child("t").value as? Number)?.toLong() ?: return
                 val d0 = LiveNet.open(ctx, s.child("d").value as? String) ?: return
                 // new in Activity (the dot on the Live connection icon), whatever this phone's alert settings are
-                try { if (JSONObject(d0).optString("type") in ActivityTypes.OVERVIEW) AlertInbox.noteEvent(ctx, id, t - serverOffset) } catch (_: Exception) {}
+                try { JSONObject(d0).optString("type").let { ty -> if (ty in ActivityTypes.OVERVIEW && ty != "clip") AlertInbox.noteEvent(ctx, id, t - serverOffset) } } catch (_: Exception) {}
                 if (t < attachedAt - 60_000 + serverOffset) return     // older events: only shown in Activity, not alerted
                 val d = d0
                 try {

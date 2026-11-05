@@ -37,12 +37,30 @@ object AlertInbox {
     private fun sp(ctx: Context) = ctx.getSharedPreferences("activity_seen", Context.MODE_PRIVATE)
     private fun changed() = main.post { for (x in listeners) try { x() } catch (_: Exception) {} }
 
-    /** A notable camera event (local time) arrived: remembered as that camera's newest. */
-    fun noteEvent(ctx: Context, cam: String, t: Long) {
+    /**
+     * Notable camera events (local times) arrived: each camera's recent ones are remembered (the last 30), to count
+     * what is new. A clip saved after a motion isn't counted on its own (callers pass motion, not clip times).
+     */
+    fun noteEvents(ctx: Context, cam: String, times: Collection<Long>) {
+        if (times.isEmpty()) return
         val sp = sp(ctx)
-        if (t <= sp.getLong("latest:$cam", 0)) return
-        sp.edit().putLong("latest:$cam", t).apply()
-        if (t > seenAt(ctx, cam)) changed()
+        val old = sp.getString("times:$cam", "")!!.split(',').mapNotNull { it.toLongOrNull() }.toSet()
+        val all = (old + times).sorted().takeLast(30)
+        if (all.toSet() == old) return
+        sp.edit().putString("times:$cam", all.joinToString(",")).putLong("latest:$cam", all.last()).apply()
+        if (times.any { it > seenAt(ctx, cam) }) changed()
+    }
+
+    fun noteEvent(ctx: Context, cam: String, t: Long) = noteEvents(ctx, cam, listOf(t))
+
+    /** How many camera events this phone has not seen yet (for the number on the Live connection icon). */
+    fun newCount(ctx: Context): Int {
+        val all = sp(ctx).all
+        return all.keys.filter { it.startsWith("times:") }.sumOf { k ->
+            val cam = k.removePrefix("times:")
+            val seen = seenAt(ctx, cam)
+            (all[k] as? String ?: "").split(',').mapNotNull { it.toLongOrNull() }.count { it > seen }
+        }
     }
 
     /** When activity was last looked at: all cameras ([cam] null), or this camera (whichever is later). */

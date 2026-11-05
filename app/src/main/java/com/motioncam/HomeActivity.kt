@@ -84,6 +84,7 @@ class HomeActivity : Activity(), Nav.Reselect {
         AlertInbox.listeners -= changed
         StatusBus.remove(statusL)
         feed?.stop(); feed = null
+        CardPictures.stop(this)
         ui.removeCallbacks(tick)
         super.onPause()
     }
@@ -279,6 +280,7 @@ class HomeActivity : Activity(), Nav.Reselect {
 
     private fun overview() {
         val cams = cameras()
+        CardPictures.follow(this, cams.map { it.id }) { renderSoon() }
         val on = cams.count { it.online }
         val off = cams.size - on
         val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM; setPadding(0, d(22), 0, d(8)) }
@@ -417,7 +419,53 @@ class HomeActivity : Activity(), Nav.Reselect {
     }
 }
 
-/** The picture on a camera's Home card: its latest frame this phone has (live view or the camera's card picture). */
+/**
+ * The picture on a camera's Home card: the newest of the last live frame this phone saw and the camera's card picture
+ * (its latest clip's motion frame, or a snapshot every 15 minutes if the camera allows it). A camera whose live view
+ * needs the PIN locks its card picture with it: shown once this phone knows the PIN.
+ */
 object CardPictures {
-    fun picture(ctx: android.content.Context, cam: String): Pair<android.graphics.Bitmap, Long>? = CamRemote.lastFrames[cam]
+    private val pics = java.util.concurrent.ConcurrentHashMap<String, Pair<android.graphics.Bitmap, Long>>()
+    private val seen = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val listeners = HashMap<String, com.google.firebase.database.ValueEventListener>()
+
+    fun picture(ctx: android.content.Context, cam: String): Pair<android.graphics.Bitmap, Long>? {
+        val live = CamRemote.lastFrames[cam]
+        val card = pics[cam]
+        return listOfNotNull(live, card).maxByOrNull { it.second }
+    }
+
+    /** Follows the cameras' card pictures while Home is open; [changed] runs on the main thread. */
+    fun follow(ctx: android.content.Context, cams: Collection<String>, changed: () -> Unit) {
+        for (cam in cams) if (!listeners.containsKey(cam)) {
+            val l = object : com.google.firebase.database.ValueEventListener {
+                override fun onDataChange(s: com.google.firebase.database.DataSnapshot) {
+                    val t = (s.child("t").value as? Number)?.toLong() ?: return
+                    if (seen[cam] == t) return
+                    val at = (s.child("at").value as? Number)?.toLong() ?: t
+                    val sealed = s.child("img").value as? String
+                    val locked = s.child("pin").value == true
+                    Thread {
+                        var bytes = com.motioncam.live.LiveNet.openBytes(ctx, sealed) ?: return@Thread
+                        if (locked) {
+                            val pin = com.motioncam.cloud.SecretStore.get(ctx, "live.pin.$cam") ?: return@Thread
+                            bytes = com.motioncam.live.CameraLink.pinOpen(cam, pin, bytes) ?: return@Thread
+                        }
+                        val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@Thread
+                        seen[cam] = t
+                        pics[cam] = bmp to at
+                        android.os.Handler(android.os.Looper.getMainLooper()).post(changed)
+                    }.start()
+                }
+                override fun onCancelled(e: com.google.firebase.database.DatabaseError) {}
+            }
+            Live.ref(ctx, "cams/$cam/thumb")?.addValueEventListener(l)
+            listeners[cam] = l
+        }
+    }
+
+    fun stop(ctx: android.content.Context) {
+        for ((cam, l) in listeners) Live.ref(ctx, "cams/$cam/thumb")?.removeEventListener(l)
+        listeners.clear()
+    }
 }

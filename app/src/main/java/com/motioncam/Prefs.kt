@@ -135,6 +135,8 @@ class Prefs(ctx: Context) {
     var liveCamera: Boolean get() = b("liveCamera", false); set(v) = put("liveCamera", v)
     /** Camera: when monitoring stops, stay in standby (camera closed) so other phones can start it again. */
     var liveStandby: Boolean get() = b("liveStandby", true); set(v) = put("liveStandby", v)
+    /** Camera: also send a fresh card picture every 15 minutes while monitoring (otherwise the latest clip's motion frame). */
+    var cardSnapshot: Boolean get() = b("cardSnapshot", false); set(v) = put("cardSnapshot", v)
     /** Where camera alerts appear: false = phone notifications, true = only inside MotionCam (a card on the open screen). */
     var alertsInApp: Boolean get() = b("alertsInApp", false); set(v) = put("alertsInApp", v)
     /** Without "Stay connected": check for alerts about every 15 minutes (connects briefly, then disconnects). */
@@ -186,7 +188,7 @@ class Prefs(ctx: Context) {
         val REMOTE_KEYS = listOf("serverOn", "streamHd", "port")
         val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal", "cloudThumbs", "cloudPaused")
         /** Stay connected, PIN for the view, camera role (the network sign-in, its connection and PINs are kept). */
-        val LIVE_KEYS = listOf("liveStay", "livePinForView", "liveCamera", "liveStandby")
+        val LIVE_KEYS = listOf("liveStay", "livePinForView", "liveCamera", "liveStandby", "cardSnapshot")
         val REMOTE_FOLDER_KEYS = listOf("remoteFtp", "remoteKeepCopy")
         val PLAYER_KEYS = listOf("skipMs", "stripZoom")
         val ALERT_KEYS = listOf("alertsOn", "alertsInApp", "alertsPoll", "alertRemote", "alertMotion", "alertMotionGapMin", "alertClip", "alertBattery", "alertBatteryPct",

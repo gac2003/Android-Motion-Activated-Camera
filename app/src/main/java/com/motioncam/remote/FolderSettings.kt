@@ -59,7 +59,7 @@ object FolderSettings {
     fun build(a: Activity, form: SettingsForm, title: (String) -> Unit, note: (String) -> Unit, changed: () -> Unit = {}) {
         val p = Prefs(a)
         title("Uploading")
-        note("For the folders this phone backs up to (↑ in Remote Folders). New clips upload by themselves and resume if the " +
+        note("For the folders this phone backs up to (↑ in Clips → Remote folders). New clips upload by themselves and resume if the " +
             "internet drops; to upload older clips, select them in Clips → Back up.")
         form.toggle("Upload only on Wi-Fi (not mobile data)", p.cloudWifiOnly) { p.cloudWifiOnly = it; CloudSync.kick(a) }
         form.toggle("Upload only while charging", p.cloudChargingOnly) { p.cloudChargingOnly = it; CloudSync.kick(a) }
@@ -81,7 +81,7 @@ object FolderSettings {
             "Anyone signed in to the account can remove that protection; this saves such clips to this phone the next time " +
             "the folder is checked, so your collection keeps them.")
         note("Played remote clips are kept (up to 1.5 GB) so replaying and scrubbing are instant; \"Clear downloaded clips\" " +
-            "in Remote Folders frees that space. Android may also clear them when storage is low.")
+            "in Clips → Remote folders frees that space. Android may also clear them when storage is low.")
     }
 
     /** Background on how folders work (shown in Remote Folders → ⚙). */

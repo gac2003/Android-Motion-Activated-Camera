@@ -100,7 +100,7 @@ object LiveNet {
 
     /** Google sign-in (account picker): only basic profile, so no Google verification is needed. */
     fun signInGoogle(a: Activity, done: (String?) -> Unit) {
-        if (!LiveConfig.configured || LiveConfig.WEB_CLIENT_ID.isEmpty()) { done("Live connection is not set up in this build"); return }
+        if (!LiveConfig.configured || LiveConfig.WEB_CLIENT_ID.isEmpty()) { done("Connecting your phones is not set up in this build"); return }
         val opt = GetGoogleIdOption.Builder().setServerClientId(LiveConfig.WEB_CLIENT_ID).setFilterByAuthorizedAccounts(false).build()
         val req = GetCredentialRequest.Builder().addCredentialOption(opt).build()
         CredentialManager.create(a).getCredentialAsync(a, req, null, a.mainExecutor,
@@ -128,7 +128,7 @@ object LiveNet {
         // only codes made by MotionCam (20 random characters, ~99 bits): a hand-made code could be guessed
         if (c.length != 20 || c.any { it !in CODE_ALPHABET }) return "That isn't a MotionCam network code. Codes are 20 letters/digits " +
             "like ABCDE-FGHJK-MNPQR-STUVW, made with \"Create a network code\" on one of your phones."
-        val auth = auth(ctx) ?: return "Live connection is not set up in this build"
+        val auth = auth(ctx) ?: return "Connecting your phones is not set up in this build"
         return try {
             if (auth.currentUser == null) Tasks.await(auth.signInAnonymously(), 30, TimeUnit.SECONDS)
             SecretStore.put(ctx, "live.code", c)

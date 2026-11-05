@@ -37,7 +37,7 @@ class CamRemote(private val a: Activity, val cam: String) {
         val s = status()
         if (!p.camera || (s != null && !s.optBoolean("monitoring") && !s.optBoolean("standby") && s.optString("mode") == "OFF"))
             return "MotionCam's camera isn't running on that phone (not monitoring, standby off). Open MotionCam there or " +
-                "turn on Standby in its Live connection settings."
+                "turn on Standby in its Settings › Your phones."
         return null
     }
 
@@ -106,7 +106,7 @@ class CamRemote(private val a: Activity, val cam: String) {
     fun askPin(then: () -> Unit, cancelled: () -> Unit = {}) {
         val input = EditText(a).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; hint = "PIN" }
         AlertDialog.Builder(a).setTitle("PIN of this camera").setView(input)
-            .setMessage("Set on the camera phone (Live connection → Remote control PIN). It is remembered on this phone.")
+            .setMessage("Set on the camera phone (Settings › Your phones → Change PIN). It is remembered on this phone.")
             .setPositiveButton("OK") { _, _ -> SecretStore.put(a, "live.pin.$cam", input.text.toString().trim()); then() }
             .setNegativeButton("Cancel") { _, _ -> cancelled() }.setOnCancelListener { cancelled() }.show()
     }

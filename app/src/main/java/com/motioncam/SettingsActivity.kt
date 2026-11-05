@@ -120,7 +120,7 @@ open class SettingsActivity : Activity() {
         number("Motion must last at least", "ms", 0, 3000, prefs.minMotionMs) { prefs.minMotionMs = it }
         number("Stop recording after no motion for (0 = as soon as motion ends)", "s", 0, 600, prefs.stopDelaySec) { prefs.stopDelaySec = it }
         number("Split long events into clips of", "min", 1, 60, prefs.maxClipMin) { prefs.maxClipMin = it }
-        note("Draw detection zones with the ZONES button on the main screen: red = moving, dark = ignored. " +
+        note("Draw detection zones with the ZONES button in Camera mode: red = moving, dark = ignored. " +
             "For a peephole, mask everything outside the lens circle and pick the Strong light filter.")
 
         }
@@ -183,7 +183,7 @@ open class SettingsActivity : Activity() {
             val update = {
                 val on = com.motioncam.cloud.CloudSync.enabledKinds(this@SettingsActivity)
                 val q = com.motioncam.cloud.CloudSync.counts(this@SettingsActivity, null)
-                val t = "Open Remote Folders\n" + (if (on.isEmpty()) "Backup is off" else "Backing up to " + (if (on.size == 1) on[0].label else "${on.size} folders")) +
+                val t = "Open Remote folders\n" + (if (on.isEmpty()) "Backup is off" else "Backing up to " + (if (on.size == 1) on[0].label else "${on.size} folders")) +
                     (if (q.queued > 0) " · ${q.queued} waiting" else "") + (if (q.failed > 0) " · ${q.failed} failed" else "")
                 if (chip.text != t) chip.text = t
             }

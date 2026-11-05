@@ -104,12 +104,12 @@ limit is reached, Firebase pauses the database until the next month.
   (or `assembleRelease` with the signing environment variables from step 2).
 * GitHub: push to your fork; the *Build APK* workflow produces `MotionCam.apk`.
 
-Check: Settings → Live connection should not say "not set up in this build"; Remote Folders → ＋ Add → Back up this phone to… → Dropbox should open
+Check: Settings → Your phones should not say "not configured"; Clips → Remote folders → + Add → Dropbox should open
 Dropbox's sign-in page.
 
 ## Changing credentials later
 
-* **Firebase**: phones on the new build connect to the new project; join each phone again (Live connection) and set
+* **Firebase**: phones on the new build connect to the new project; join each phone again (Settings → Your phones) and set
   camera PINs again. Data in the old project is left behind.
 * **Dropbox**: reconnect Dropbox on each phone (folders and remote folders), since sign-ins belong to the app key.
 * **Google Drive**: a different Cloud project can't see files the old one created (`drive.file`); set backup up

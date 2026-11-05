@@ -29,9 +29,28 @@ A motion-triggered security camera for Android (built for a Galaxy S20 FE, works
 * Runs as a foreground service so it keeps working with the screen off.
 * **Remote viewing without Wi-Fi/LAN**: built-in web page with live MJPEG + clip download, reachable over USB tethering, `adb forward`, Bluetooth tethering or the phone's own hotspot.
 * Protects the phone (all optional): pauses the camera when hot, stops when the battery is low, can delete old clips.
-* **Live connection** (optional): your phones connected through the internet, also on captive / isolated networks – camera
+* **Your phones** (optional): your phones connected through the internet, also on captive / isolated networks – camera
   status and alerts, live view, remote control and instant sync between phones.
 * **Remote folders**: watch the clips another phone backs up (Google Drive, Dropbox, FTP/SFTP) in the same gallery and timeline player, and protect the ones you want kept.
+
+## How it's laid out
+Five tabs at the bottom: **Home · Activity · Camera · Clips · Settings**. Every tab comes back as you left it, and the app
+reopens where you were (Home and its last tab, or Camera mode).
+
+* **Home** (the same on every phone): this phone's **Camera mode** row with its exact state, the **camera overview** – one
+  card per camera with its latest picture (the latest clip's moment of most motion; optionally a fresh one every 15 minutes),
+  state, battery and last motion – offline warnings, and the 8 latest activities. The first time, a short welcome:
+  connect your phones, where to start (Home or Camera mode), and optionally a remote folder.
+* **Activity**: what happened at your cameras, by day and by phone, kept **forever** by default. Filters can be combined
+  (Motion & clips, Monitoring, Battery & heat: an entry shows if it matches any of them), the **calendar** jumps to a day
+  (dots on days with activity of the kinds shown), older days load as you scroll, and **⋮ → Delete activity** removes
+  exactly what you choose: when, which phones, which kinds.
+* **Camera** (the middle tab): this phone as a camera, full screen – the live preview, Pro controls and Start/Stop.
+  A red eye shows while your other phones watch it; tap it to see who. The tab's dot: green while monitoring, red while watched.
+* **Clips**: *On this phone* or *Remote folders*; Collections · Calendar · Timeline; each clip's time and length with its
+  marks – protected, backed up, favourite.
+* **Settings**: categories (Camera & recording, Motion detection, Your phones, Alerts & activity, Remote folders & backup,
+  Storage & protection, Player, Web viewer, Display, About & help, Reset).
 
 | Pro controls & focus peaking | Clips gallery | Timeline player | Collections |
 |:---:|:---:|:---:|:---:|
@@ -57,8 +76,9 @@ the values go in `credentials.properties` (local) or repository variables (GitHu
 off in your build.
 
 ## First run
-1. Open the app. The live preview starts right away (no monitoring needed), so you can set everything up first.
-2. Use the bottom strip like the Pro Video mode:
+1. Open the app: the welcome steps connect your phones (optional) and ask where to start. **Camera mode** (the middle tab)
+   shows the live preview right away (no monitoring needed), so you can set everything up first.
+2. In Camera mode, use the bottom strip like the Pro Video mode:
    * **LENS / FORMAT** – pick the exact camera and resolution/fps.
    * **EV, ISO, SPEED, FOCUS, WB, ZOOM** – yellow values are AUTO and show what the camera is currently using
      (e.g. ISO 320, 1/60). Drag the slider to switch that control to manual, starting from the current value;
@@ -71,18 +91,19 @@ off in your build.
      phone up), it is discarded and a small *Short clip discarded · UNDO* pill appears in the top-right corner for
      9 seconds. Tap it and confirm to keep the clip. The length is adjustable (slider, or type any length from 0.5
      to 10 s, e.g. 1.2). Clips that end on their own and stops from the notification are never affected.
-4. Settings → *Exempt from battery optimisation*. Set *Video rotation* explicitly if the phone is on a fixed stand.
+4. Settings → Storage & protection → *Exempt from battery optimisation*. Set *Video rotation* (Camera & recording)
+   explicitly if the phone is on a fixed stand.
 
 Clips are saved to **Movies/MotionCam** (visible in Gallery and over USB file transfer). A clip's ⋮ in the player
 (or *More* when clips are selected) has **Show in file manager** – Samsung's My Files, or the phone's Files app – and
 **Open in another app**.
-The **Clips** screen shows thumbnails by day; tapping a clip opens the **player**, which plays every following clip
+The **Clips** tab shows thumbnails by day; tapping a clip opens the **player**, which plays every following clip
 back to back like one continuous video. Below the video is a filmstrip (like modern phone gallery players): the playing clip is expanded
 into its frames (tap it to collapse/expand; one frame per second, pinch for more – down to exact frames – or fewer), drag to scrub (stops at the clip's ends while expanded; letting go at the end stays there, paused).
 Tap the video to pause/play, double-tap left/right to skip within the clip (1 s by default; the **±1s** button below the
 filmstrip or Settings → Player changes it to 0.5–10 s or **frame by frame**, and keep tapping to keep skipping); the ⋮ menu has share / open with / delete.
 
-Long-press any control button on the main screen to choose which buttons are shown and their order.
+Long-press any control button in Camera mode to choose which buttons are shown and their order.
 
 ## Motion detection tips (peephole / windows)
 * *Light filter → Strong* ignores reflections, glare and light sweeping across the scene; *Normal* ignores
@@ -91,7 +112,7 @@ Long-press any control button on the main screen to choose which buttons are sho
 * Raise *Motion must last at least* (e.g. 500 ms) to ignore brief flashes.
 
 ## Cloud backup (optional)
-Backing up and viewing are the same thing: **remote folders** (cloud folders of clips). Clips → **Remote Folders** lists
+Backing up and viewing are the same thing: **remote folders** (cloud folders of clips). Clips → **Remote folders** lists
 them; tapping one shows its clips. **＋ Add → Add remote folder**: pick **Google Drive**, **Dropbox**, a Dropbox viewer
 link, an **FTP/FTPS** or **SFTP** server, sign in, then **create a new folder** or open an existing one, and choose
 whether this phone backs up its new clips there. A folder this phone backs up to shows the **↑ cloud** icon and its
@@ -144,7 +165,7 @@ are always kept. Dropbox viewer links are fully read-only.
   to (＋ Add → Google Drive) and pick the folder. Other Google accounts aren't supported, because MotionCam's
   `drive.file` access only sees files MotionCam itself created in the signed-in account.
 * **Dropbox, same account**: ＋ Add → "my own backups".
-* **Dropbox, another account**: on the recording phone, Remote Folders → its Dropbox folder's ⋮ → Backup settings → **Create viewer link**, send it,
+* **Dropbox, another account**: on the recording phone, Remote folders → its Dropbox folder's ⋮ → Backup settings → **Create viewer link**, send it,
   and paste it on the viewing device (＋ Add → "a viewer link"). Anyone with the link can view; **Revoke link** stops it.
 * **FTP / SFTP**: enter the server login (a read-only account is best). Can be turned off under Remote folder options.
 * **Shared collections**: a remote folder's Favourites and collections are the same on every phone signed in to the
@@ -164,13 +185,14 @@ are always kept. Dropbox viewer links are fully read-only.
   **Save to phone** copies clips into this phone's Clips; those copies are never uploaded to cloud backup and are
   never deleted by the phone's automatic clean-up (age limit, size cap, low storage) – only when you delete them.
 
-## Live connection (optional)
-Settings → **Live connection** links your phones through Firebase (Google's realtime database, free tier). Phones only
+## Your phones (live connection)
+Settings → **Your phones** links your phones through Firebase (Google's realtime database, free tier). Phones only
 make outgoing connections, so it works on captive Wi-Fi and networks that block local devices.
 
 * **Join**: sign in with the same **Google account** on every phone (basic profile only), or use a **network code**
-  (no Google account; everything is encrypted with the code). The phone list shows which phones are connected.
-* **Viewer only or camera**: when turning it on, choose whether the phone only watches (it is never shown or
+  (no Google account; everything is encrypted with the code). Joining is what connects a phone (there is no separate
+  on/off switch); **Leave** disconnects it. The phone list shows which phones are connected.
+* **Viewer only or camera**: after joining, choose whether the phone only watches (it is never shown or
   controllable as a camera) or may also be a camera – which always requires a **PIN**.
 * **Camera phones** (while monitoring) share their status – monitoring / recording, battery, charging, temperature, last
   motion, lens and format – and events: motion, clip saved, monitoring stopped (and why), too hot, charger unplugged.
@@ -179,30 +201,36 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
   quiet hours, per-camera mute (also from the alert), a separate Android channel per alert type for sound/vibration.
   Alerts arrive while MotionCam is open; **Stay connected** (silent notification) keeps them coming when it is closed.
   Without it, MotionCam **checks about every 15 minutes** (connects for a few seconds; alerts can be up to ~15 min late),
-  and nothing is lost: cameras keep 7 days of events in their **Activity**, where what you haven't seen yet is marked new
-  (and a "While you were away" card says so when MotionCam opens).
+  and nothing is lost: cameras keep their events in **Activity** (forever by default; Settings → Alerts & activity →
+  *Keep activity*: forever / 1 year / 30 days), where what you haven't seen yet is marked new and counted on the tab.
+* **Busy cameras stay calm**: a motion within 5 s of the previous one counts as the same motion; after the 20th motion in
+  an hour, the rest of that hour is one entry, *Motion detected ×N · 2–3 PM* (tap it for each clip), with one alert.
+  Clips are recorded as usual.
+* **History size**: Alerts & activity shows about how much history is kept. If all cameras' history together nears the
+  database's free 1 GB, the oldest activity goes first (and Activity says so), so alerts never stop.
 * **Alerts open the clip**: once the camera saves the clip a motion alert recorded, the alert (notification, in-app card,
   Activity) says "tap to watch" and plays it from the camera's cloud backup – waiting for the upload if needed.
-  This needs the camera's backup folder added once under Clips → Remote Folders; the screen explains if it isn't.
+  This needs the camera's backup folder added once under Clips → Remote folders; the screen explains if it isn't.
   While MotionCam is on screen, alerts only show as a card in the app (no phone notification on top of it). Or choose
   **inside MotionCam only**: a card on the open screen, nothing in the notification shade. Alerts are only how this phone
   is told; the history is **Activity** (the same on every phone), so muting a camera silences it without hiding anything.
   In-app cards stack like the phone's notifications (one in front, "+N more" with layers behind): swipe a card sideways
   to dismiss it, up to dismiss all, tap to open; they hide by themselves after a few seconds.
-* **Live connection icon** (main screen): yellow while another phone is online as a camera; red with **LIVE** under the
-  cloud while this phone is sending its live picture to another phone; a white number (1–9, then 9+) for camera events you haven't
-  seen (new entries are marked with a yellow ● in Activity). A camera that was monitoring and lost its connection is shown
-  at the top of Live connection.
-* **Recent activity** (top of Live connection): the 3 latest events of all cameras – motion (with the clip it recorded,
-  tap to watch), monitoring started/stopped, heat, power, battery, PIN lock-outs – updating live. **See all activity**
-  lists 7 days of them, newest first, consecutive events of one phone grouped under its name. Each camera's own Activity
-  also has settings changes; in both, a motion and its saved clip are one entry.
-* **Remote camera**: low-rate live view (a frame every 2 s, only while watched, stops after 3 min), a **high-quality
+* **New activity**: the Activity tab shows how many camera events you haven't seen (1–9, then 9+); new entries are
+  marked with a yellow ● in Activity. A camera that was monitoring and lost its connection is shown at the top of Home.
+* **Recent activity** (Home): the 8 latest events of all cameras – motion (with the clip it recorded, tap to watch),
+  monitoring started/stopped, heat, power, battery, PIN lock-outs – updating live. The Activity tab lists all of them,
+  consecutive events of one phone grouped under its name (tap it for that phone's own Activity, which also has settings
+  changes); a motion and its saved clip are one entry.
+* **Camera cards** (Home): each camera's latest picture – the moment of most motion of its latest clip, or (Your phones →
+  *Card picture every 15 minutes*, off by default) a fresh one every 15 minutes while monitoring. With the PIN needed for
+  the live view, the picture is locked with it too: only phones that know the PIN see it.
+* **Remote camera** (tap its card; it opens paused with its last picture and when it was sent): low-rate live view (a frame every 2 s, only while watched, stops after 3 min), a **high-quality
   frame** (*Screenshot*, shown under the live view; tap for full screen, save it to Pictures/MotionCam); tap the live
   picture for the full-screen view, the camera
   controls (lens, exposure, ISO, shutter, focus, white balance, zoom), recording and motion settings, start / pause /
   resume / stop monitoring, and under the status the camera's **recent activity** (latest 3, live) with **See all
-  activity** for its 7-day log. Settings changed remotely are drafts until you
+  activity** for its full log. Settings changed remotely are drafts until you
   tap **Save** (or **Cancel**) in the bar that stays at the bottom of the screen; leaving with unsaved changes asks first.
 * **Live view in standby** too: the camera opens while someone watches and closes again after. When no new picture
   arrives, the last one stays on screen with a coloured line under it saying why (offline, MotionCam's camera not running
@@ -211,8 +239,9 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
   camera screen (unsaved changes to the same settings are kept for you to Save or Cancel) and in the Activity log.
 * **Full screen** live view: laid out like the camera screen – the picture fills the screen, status on top, and the same
   control buttons (lens, format, EV, ISO, shutter, focus, white balance, zoom) with their slider and AUTO, plus Start /
-  Stop monitoring. Changes are lined up (shown at once on the buttons) and sent together with **Save** (or dropped with
-  **Cancel**), since a remote change shows in the picture a few seconds later. Tap the value to type an exact number;
+  Stop monitoring, and when the frame shown was sent. Changes are lined up (shown at once on the buttons, with a yellow dot
+  until sent) and sent together with **Save** (or dropped with **Cancel**), since a remote change shows in the picture a
+  few seconds later. Tap the value to type an exact number;
   tap the picture to hide the controls; works in landscape.
 * **Standby** (camera phones, on by default): when monitoring stops, the phone stays connected with the camera off (a
   "standby" notification with Start / Turn off), so another phone can start monitoring again. It begins whenever

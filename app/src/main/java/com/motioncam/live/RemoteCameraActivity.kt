@@ -486,7 +486,7 @@ class RemoteCameraActivity : Activity() {
             AlertDialog.Builder(this).setTitle("Stop monitoring?")
                 .setMessage(if (standbyOn) "The camera closes and the phone goes to standby: it stays connected, and you can start monitoring again from here."
                     else "The camera phone stops completely and goes offline. It can only be started again on the phone itself " +
-                        "(or turn on Standby in its Live connection settings). Use Pause to keep it reachable.")
+                        "(or turn on Standby in its Settings › Your phones). Use Pause to keep it reachable.")
                 .setPositiveButton("Stop") { _, _ -> send("stop") }.setNegativeButton("Cancel", null).show()
         }
         when {

@@ -72,7 +72,7 @@ open class RemoteFoldersActivity : Activity() {
             addView(com.motioncam.ClipsSwitch.view(this@RemoteFoldersActivity, remote = true))
         }) else {
             val actions = Ui.chip(this, "＋ Add").apply { setOnClickListener { addSource() } }
-            root.addView(topBar(this, "Remote Folders", actions))
+            root.addView(topBar(this, "Remote folders", actions))
         }
         box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -417,7 +417,7 @@ open class RemoteFoldersActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         }
         AlertDialog.Builder(this).setTitle("Paste the viewer link").setView(input)
-            .setMessage("Made on the recording phone: Clips → Remote Folders → its Dropbox folder's ⋮ → Backup settings → Create viewer link.")
+            .setMessage("Made on the recording phone: Clips → Remote folders → its Dropbox folder's ⋮ → Backup settings → Create viewer link.")
             .setPositiveButton("Open") { _, _ ->
                 val url = input.text.toString().trim()
                 if (!url.startsWith("https://") || !url.contains("dropbox.com")) { toast("That doesn't look like a Dropbox link"); return@setPositiveButton }

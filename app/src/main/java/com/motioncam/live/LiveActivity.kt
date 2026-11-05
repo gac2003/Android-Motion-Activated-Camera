@@ -124,6 +124,9 @@ class LiveActivity : Activity() {
             f.row(f.chip("Change PIN") { NetJoin.setPin(this) { render() } })
             if (CameraLink.shortPin(this)) f.note("Your PIN is shorter than 6 characters: change it for better protection.", Ui.ACCENT)
             f.toggle("PIN also needed for the live view and frames", prefs.livePinForView) { prefs.livePinForView = it }
+            f.toggle("Card picture every 15 minutes", prefs.cardSnapshot) { prefs.cardSnapshot = it }
+            f.note("Your phones' Home shows this camera's latest clip (its moment of most motion). With this on, also a fresh picture " +
+                "every 15 minutes while monitoring. With the PIN needed for the live view, only phones that know the PIN see it.")
             f.toggle("Standby: can be started from your other phones", prefs.liveStandby) { on ->
                 prefs.liveStandby = on
                 com.motioncam.CameraService.settingsChanged(this)

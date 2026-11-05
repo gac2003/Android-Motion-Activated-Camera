@@ -64,7 +64,9 @@ object CameraLink {
         onStatus(c, StatusBus.status)
         listen(c)
         trimEvents(c)
-        main.removeCallbacks(dailyTrim); main.postDelayed(dailyTrim, 24 * 3_600_000L)
+        main.removeCallbacks(dailyTrim)
+        main.removeCallbacks(cardTick); main.postDelayed(dailyTrim, 24 * 3_600_000L)
+        main.removeCallbacks(cardTick); main.postDelayed(cardTick, 60_000L)
         // settings changed on the camera itself (its screen, Settings): other phones see them within a second
         c.getSharedPreferences("motioncam", Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(prefsL)
     }
@@ -128,6 +130,8 @@ object CameraLink {
     }
 
     @Volatile private var lastClipMs = 0L
+    /** Busy cameras send at most one card picture a minute. */
+    @Volatile private var lastCardAt = 0L
 
     /**
      * A clip was saved (and kept): tells the viewing phones its name and the backup folders it goes to, so their
@@ -146,6 +150,15 @@ object CameraLink {
                 val ms = clip.durationMs.takeIf { it > 0 } ?: lastClipMs
                 val sec = (ms / 1000).coerceAtLeast(1)
                 event(c, "clip", "Clip of ${sec}s saved", JSONObject().put("name", clip.name).put("dur", ms).put("folders", folders))
+                // the camera's card on Home: this clip's peak-motion frame
+                if (System.currentTimeMillis() - lastCardAt > 60_000L) com.motioncam.ClipThumbs.load(c, clip)?.let { bmp ->
+                    lastCardAt = System.currentTimeMillis()
+                    val out = java.io.ByteArrayOutputStream()
+                    val w = 360
+                    val sc = if (bmp.width > w) android.graphics.Bitmap.createScaledBitmap(bmp, w, (bmp.height * w / bmp.width).coerceAtLeast(1), true) else bmp
+                    sc.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, out)
+                    cardPicture(c, out.toByteArray(), clip.startMs)
+                }
             } catch (_: Exception) {}
         }.start()
     }
@@ -169,6 +182,44 @@ object CameraLink {
             return
         }
         event(ctx, "clip_up", "Clip uploaded", JSONObject().put("name", name).put("f", f))
+    }
+
+    /**
+     * The picture on this camera's card on your phones' Home (cams/<me>/thumb). When the live view needs the PIN, the
+     * picture is locked with it too: only phones that know the PIN see it.
+     */
+    fun cardPicture(ctx: Context, jpeg: ByteArray, takenAt: Long) {
+        if (!running) return
+        val p = pin(ctx)
+        val locked = p != null && Prefs(ctx).livePinForView
+        val body = if (locked) pinSeal(me(ctx), p!!, jpeg) else jpeg
+        path(ctx, "thumb")?.setValue(mapOf("t" to ServerValue.TIMESTAMP, "at" to takenAt, "pin" to locked, "img" to LiveNet.sealBytes(ctx, body)))
+    }
+
+    /** AES-GCM with the key made from the PIN (same as for signed commands). */
+    fun pinSeal(cam: String, pin: String, plain: ByteArray): ByteArray {
+        val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
+        val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(javax.crypto.Cipher.ENCRYPT_MODE, SecretKeySpec(pinKey(cam, pin), "AES"), javax.crypto.spec.GCMParameterSpec(128, iv))
+        return iv + c.doFinal(plain)
+    }
+
+    fun pinOpen(cam: String, pin: String, sealed: ByteArray): ByteArray? = try {
+        val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(javax.crypto.Cipher.DECRYPT_MODE, SecretKeySpec(pinKey(cam, pin), "AES"), javax.crypto.spec.GCMParameterSpec(128, sealed, 0, 12))
+        c.doFinal(sealed, 12, sealed.size - 12)
+    } catch (_: Exception) { null }
+
+    /** Optional: a fresh card picture every 15 minutes while the camera is open (Settings › Your phones). */
+    private val cardTick = object : Runnable {
+        override fun run() {
+            val c = app ?: return
+            if (!running) return
+            if (Prefs(c).cardSnapshot && CameraService.monitoring) Thread {
+                try { FrameHub.latest()?.let { cardPicture(c, it, System.currentTimeMillis()) } } catch (_: Exception) {}
+            }.start()
+            main.postDelayed(this, 15 * 60_000L)
+        }
     }
 
     /** Monitoring stopped by the phone itself (battery, heat, storage…). */

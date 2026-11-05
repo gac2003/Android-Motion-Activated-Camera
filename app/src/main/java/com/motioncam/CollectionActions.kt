@@ -52,7 +52,7 @@ object CollectionActions {
             val r = CloudSync.enqueueClips(a, list.map { it.id })
             a.runOnUiThread {
                 val parts = ArrayList<String>()
-                parts += if (r.queued > 0) "${plural(r.queued)} queued for upload (Clips → Remote Folders → Upload queue)."
+                parts += if (r.queued > 0) "${plural(r.queued)} queued for upload (Clips → Remote folders → Upload queue)."
                          else "Nothing new to upload."
                 if (r.already > 0) parts += "${plural(r.already)} already backed up or waiting."
                 if (r.savedCopies > 0) parts += "${plural(r.savedCopies)} skipped: copies saved from a remote folder are never uploaded."

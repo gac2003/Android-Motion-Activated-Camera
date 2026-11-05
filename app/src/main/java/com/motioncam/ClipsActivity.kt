@@ -46,6 +46,8 @@ open class ClipsActivity : Activity() {
     private var swipe: androidx.swiperefreshlayout.widget.SwipeRefreshLayout? = null
     private var favIds: Set<Long> = emptySet()
     private var backedUp: Set<Long> = emptySet()
+    /** The selection bar's Favourite button: Unfavourite when every selected clip already is one. */
+    private var favBtn: LinearLayout? = null
     /** The remote folder shown (null = this phone's clips). */
     val sourceId: String? get() = remote?.id
     /** Shown as the Clips tab: big title and the On this phone / Remote folders switch instead of a back arrow. */
@@ -218,7 +220,10 @@ open class ClipsActivity : Activity() {
         if (remote == null) act(IconDrawable.Kind.SHARE, "Share") { shareSelected() }
         else act(IconDrawable.Kind.DOWNLOAD, "Save") { saveToPhone(selectedClips()) }
         // in Favourites itself, Unlist does that
-        if (collectionId != Collections.FAVOURITES) act(IconDrawable.Kind.STAR, "Favourite") { favouriteSelected() }
+        if (collectionId != Collections.FAVOURITES) {
+            act(IconDrawable.Kind.STAR, "Favourite") { favouriteSelected() }
+            favBtn = bottomBar.getChildAt(bottomBar.childCount - 1) as? LinearLayout
+        }
         if (canMark()) act(IconDrawable.Kind.LOCK, "Protect") { protect(selectedClips(), true) }
         // this phone's clips: upload the selection to the backup folders (the counterpart of Save in remote folders)
         if (remote == null) act(IconDrawable.Kind.CLOUD_UP, "Back up") { CollectionActions.backUpAll(this, selectedClips()) { exitSelection() } }
@@ -976,6 +981,12 @@ open class ClipsActivity : Activity() {
         val sel = selectedClips().filter { it.id !in missingIds }
         selTitle.text = "${selected.size} selected"
         selAllBtn.text = if (selected.size == clips.size && clips.isNotEmpty()) "Select none" else "Select all"
+        favBtn?.let { b ->
+            val allFav = selected.isNotEmpty() && selected.all { it in favIds }
+            (b.getChildAt(0) as? ImageView)?.setImageDrawable(IconDrawable(if (allFav) IconDrawable.Kind.STAR_ON else IconDrawable.Kind.STAR))
+            (b.getChildAt(1) as? TextView)?.text = if (allFav) "Unfavourite" else "Favourite"
+            b.contentDescription = if (allFav) "Unfavourite" else "Favourite"
+        }
         val bytes = sel.sumOf { it.size }
         val dur = sel.sumOf { it.durationMs }
         selInfo.text = (if (bytes >= 1_000_000_000L) "%.2f GB".format(bytes / 1e9) else "%.0f MB".format(bytes / 1e6)) + "  ·  " + durText(dur)
@@ -1030,14 +1041,18 @@ open class ClipsActivity : Activity() {
 
     private fun selectedClips() = clips.filter { it.id in selected }
 
-    /** Favourite the selection (or, when all of it already is, un-favourite it). */
+    /**
+     * Favourite: adds the selected clips that aren't favourites yet (those that are stay). Unfavourite (shown when every
+     * selected clip already is one): takes them all out of Favourites.
+     */
     private fun favouriteSelected() {
         val ids = selectedClips().map { it.id }
         if (ids.isEmpty()) return
         val all = ids.all { it in favIds }
-        if (all) store.remove(this, Collections.FAVOURITES, ids) else store.add(this, Collections.FAVOURITES, ids)
+        val fresh = ids.filter { it !in favIds }   // only these are added; favourites already stay as they are
+        if (all) store.remove(this, Collections.FAVOURITES, ids) else store.add(this, Collections.FAVOURITES, fresh)
         favIds = store.favouriteIds(this)
-        Toast.makeText(this, if (all) "Removed from Favourites" else "Added to Favourites", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, if (all) "Unfavourited ${ids.size}" else "Added ${fresh.size} to Favourites", Toast.LENGTH_SHORT).show()
         exitSelection()
     }
 

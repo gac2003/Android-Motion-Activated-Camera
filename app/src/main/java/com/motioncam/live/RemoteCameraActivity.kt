@@ -356,8 +356,12 @@ class RemoteCameraActivity : Activity() {
         }, 15f, if (mode == "RECORDING") Ui.RED else Color.WHITE)
         val lm = s.optLong("lastMotion")
         f.line("Last motion: " + if (lm > 0) Fmt.dateTime(prefs).format(java.util.Date(lm)) else "none yet")
-        f.line("Battery ${s.optInt("battery")}%" + (if (s.optBoolean("charging")) " (charging)" else "") +
-            "  ·  %.0f °C".format(s.optDouble("tempC")) + "  ·  ${s.optString("lens")}  ·  ${s.optString("format")}")
+        f.line("").let { tv ->
+            tv.text = android.text.SpannableStringBuilder("Battery ")
+                .append(com.motioncam.BatteryDrawable.text(tv, s.optInt("battery"), s.optBoolean("charging")))
+                .append(if (s.optBoolean("charging")) " (charging)" else "")
+                .append("  ·  %.0f °C".format(s.optDouble("tempC")) + "  ·  ${s.optString("lens")}  ·  ${s.optString("format")}")
+        }
         if (s.optBoolean("pin")) f.note("This camera needs a PIN for controls" + if (pinFor() != null) " (remembered)." else ".")
 
         f.title("Monitoring")

@@ -74,6 +74,19 @@ object AlertInbox {
 
     fun unread(ctx: Context) = synchronized(this) { all(ctx).count { !it.read } }
 
+    /** Adds alerts that happened earlier (missed while not connected), each at its own time, newest first. */
+    fun addPast(ctx: Context, cam: String, past: List<Triple<Long, String, Pair<String, String>>>) {
+        if (past.isEmpty()) return
+        synchronized(this) {
+            val l = all(ctx)
+            for ((at, kind, tt) in past) l += Item(at, cam, kind, tt.first, tt.second, false)
+            l.sortByDescending { it.at }
+            while (l.size > 200) l.removeAt(l.size - 1)
+            save(ctx)
+        }
+        main.post { for (x in listeners) try { x() } catch (_: Exception) {} }
+    }
+
     fun markAllRead(ctx: Context) { synchronized(this) { all(ctx).forEach { it.read = true }; save(ctx) }; main.post { listeners.forEach { it() } } }
     fun clear(ctx: Context) { synchronized(this) { all(ctx).clear(); save(ctx) }; main.post { listeners.forEach { it() } } }
 
@@ -83,7 +96,7 @@ object AlertInbox {
     @Volatile var front: WeakReference<Activity>? = null
 
     /** A short banner at the top of the open MotionCam screen (tap = open the camera). */
-    fun banner(cam: String, title: String, text: String) {
+    fun banner(cam: String, title: String, text: String, openList: Boolean = false) {
         main.post {
             val a = front?.get() ?: return@post
             if (a.isFinishing) return@post
@@ -96,7 +109,8 @@ object AlertInbox {
                 elevation = Ui.dp(a, 6).toFloat()
                 setOnClickListener {
                     (parent as? ViewGroup)?.removeView(this)
-                    a.startActivity(Intent(a, RemoteCameraActivity::class.java).putExtra(Alerts.EXTRA_CAM, cam))
+                    if (openList) a.startActivity(Intent(a, AlertsInboxActivity::class.java))
+                    else a.startActivity(Intent(a, RemoteCameraActivity::class.java).putExtra(Alerts.EXTRA_CAM, cam))
                 }
             }
             val lp = FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = Ui.dp(a, 48) }

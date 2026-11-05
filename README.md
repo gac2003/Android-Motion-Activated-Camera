@@ -162,6 +162,8 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
   silently), battery once below a threshold, "offline" only after N minutes and only for a camera that was monitoring,
   quiet hours, per-camera mute (also from the alert), a separate Android channel per alert type for sound/vibration.
   Alerts arrive while MotionCam is open; **Stay connected** (silent notification) keeps them coming when it is closed.
+  Without it nothing is lost: cameras keep 7 days of events, and when MotionCam opens, what was missed is added to the
+  Alerts list at its own time (motion and clips summarised per camera) with a "While you were away" banner.
   Or choose **inside MotionCam only**: a banner on the open screen and the Alerts list, nothing in the notification shade.
 * **Remote camera**: low-rate live view (a frame every 2 s, only while watched, stops after 3 min), a **high-quality
   frame** on request (shown under the live view; tap for full screen, save it to Pictures/MotionCam), the camera

@@ -287,3 +287,58 @@ fun pressFeedback(v: android.view.View) {
         false   // the click still happens normally
     }
 }
+
+/**
+ * A small battery for status lines (instead of an emoji): outline in the text colour, filled to the level (red when low,
+ * green while charging) with a lightning mark while charging.
+ */
+class BatteryDrawable(private val pct: Int, private val charging: Boolean, private val tint: Int) : Drawable() {
+    private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = tint }
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val bolt = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = 0xFFFFFFFF.toInt() }
+    private val boltEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFF15171A.toInt(); strokeJoin = Paint.Join.ROUND }
+
+    override fun draw(c: Canvas) {
+        val b = bounds
+        val h = b.height().toFloat()
+        val sw = (h / 9f).coerceAtLeast(1.5f)
+        stroke.strokeWidth = sw
+        val nubW = h * 0.14f
+        val body = RectF(b.left + sw / 2, b.top + sw / 2, b.right - nubW - sw / 2, b.bottom - sw / 2)
+        val r = h * 0.18f
+        c.drawRoundRect(body, r, r, stroke)
+        fill.color = tint
+        c.drawRoundRect(RectF(body.right + sw / 2, b.top + h * 0.32f, b.right.toFloat(), b.bottom - h * 0.32f), nubW / 2, nubW / 2, fill)
+        val inset = sw * 1.4f
+        val inner = RectF(body.left + inset, body.top + inset, body.right - inset, body.bottom - inset)
+        val level = pct.coerceIn(0, 100) / 100f
+        fill.color = when { charging -> 0xFF4CAF50.toInt(); pct <= 15 -> 0xFFE53935.toInt(); else -> tint }
+        if (level > 0f) c.drawRoundRect(RectF(inner.left, inner.top, inner.left + inner.width() * level.coerceAtLeast(0.08f), inner.bottom), r / 2, r / 2, fill)
+        if (charging) {
+            val cx = body.centerX(); val cy = body.centerY(); val u = h * 0.42f
+            val p = Path().apply {
+                moveTo(cx + u * 0.15f, cy - u); lineTo(cx - u * 0.55f, cy + u * 0.12f); lineTo(cx - u * 0.02f, cy + u * 0.12f)
+                lineTo(cx - u * 0.15f, cy + u); lineTo(cx + u * 0.55f, cy - u * 0.12f); lineTo(cx + u * 0.02f, cy - u * 0.12f); close()
+            }
+            boltEdge.strokeWidth = sw * 0.9f
+            c.drawPath(p, boltEdge)
+            c.drawPath(p, bolt)
+        }
+    }
+
+    override fun setAlpha(alpha: Int) {}
+    override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
+
+    companion object {
+        /** "▭ 85%" for a status line: the battery icon (sized to the text) followed by the percentage. */
+        fun text(tv: android.widget.TextView, pct: Int, charging: Boolean, color: Int = tv.currentTextColor): CharSequence {
+            val h = (tv.textSize * 0.95f).toInt()
+            val d = BatteryDrawable(pct, charging, color).apply { setBounds(0, 0, (h * 1.9f).toInt(), h) }
+            return android.text.SpannableStringBuilder("  $pct%").apply {
+                setSpan(android.text.style.ImageSpan(d, android.text.style.ImageSpan.ALIGN_CENTER), 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+    }
+}

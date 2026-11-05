@@ -154,12 +154,14 @@ class LiveActivity : Activity() {
         val seen = if (p.online) "online" else "last seen " + (if (p.seen > 0) Fmt.t(prefs, p.seen - Live.serverOffset, seconds = false) else "—")
         texts.addView(Ui.label(ctx, listOf(roles, seen).filter { it.isNotEmpty() }.joinToString(" · "), 12f, Ui.GREY))
         Live.cams[p.id]?.status?.let { s ->
-            val parts = ArrayList<String>()
-            parts += when { s.optString("mode") == "RECORDING" -> "● recording"; s.optBoolean("monitoring") -> "monitoring"; else -> "not monitoring" }
-            if (s.optInt("battery", -1) >= 0) parts += "${s.optInt("battery")}%" + if (s.optBoolean("charging")) " ⚡" else ""
+            val line = Ui.label(ctx, "", 12f, Ui.ACCENT)
+            val parts = ArrayList<CharSequence>()
+            parts += when { s.optString("mode") == "RECORDING" -> "● recording"; s.optBoolean("monitoring") -> "monitoring"; s.optBoolean("standby") -> "standby"; else -> "not monitoring" }
+            if (s.optInt("battery", -1) >= 0) parts += com.motioncam.BatteryDrawable.text(line, s.optInt("battery"), s.optBoolean("charging"))
             parts += "%.0f °C".format(s.optDouble("tempC"))
             s.optLong("lastMotion").takeIf { it > 0 }?.let { parts += "motion " + Fmt.t(prefs, it, seconds = false) }
-            texts.addView(Ui.label(ctx, parts.joinToString(" · "), 12f, Ui.ACCENT))
+            line.text = android.text.SpannableStringBuilder().apply { parts.forEachIndexed { i, x -> if (i > 0) append(" · "); append(x) } }
+            texts.addView(line)
             val mu = Alerts.mutedUntil(ctx, p.id)
             if (mu > 0) texts.addView(Ui.label(ctx, "Alerts muted" + if (mu == Long.MAX_VALUE) "" else " until " + Fmt.t(prefs, mu, seconds = false), 12f, Ui.GREY))
         }

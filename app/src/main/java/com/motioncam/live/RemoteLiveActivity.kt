@@ -290,13 +290,13 @@ class RemoteLiveActivity : Activity() {
             else -> r.name() + " · not monitoring"
         }
         if (s == null) { infoTv.text = ""; return }
-        val parts = ArrayList<String>()
+        val parts = ArrayList<CharSequence>()
         parts += s.optString("lens").substringBefore(" [").removePrefix("Rear ").replace(" · multi-cam", "").replaceFirstChar { it.uppercase() }
         parts += s.optString("format")
         parts += "%.0f°C".format(s.optDouble("tempC"))
-        parts += "${s.optInt("battery")}%" + if (s.optBoolean("charging")) " ⚡" else ""
+        if (s.optInt("battery", -1) >= 0) parts += com.motioncam.BatteryDrawable.text(infoTv, s.optInt("battery"), s.optBoolean("charging"))
         s.optLong("lastMotion").takeIf { it > 0 }?.let { parts += "motion " + Fmt.t(prefs, it, seconds = false) }
-        infoTv.text = parts.filter { it.isNotBlank() }.joinToString(" · ")
+        infoTv.text = android.text.SpannableStringBuilder().apply { parts.filter { it.isNotBlank() }.forEachIndexed { i, x -> if (i > 0) append(" · "); append(x) } }
     }
 
     private fun renderStart() {

@@ -201,6 +201,7 @@ object Live {
                 if (t < attachedAt - 60_000 + serverOffset) return     // older events: only shown in Activity, not alerted
                 val d = LiveNet.open(ctx, s.child("d").value as? String) ?: return
                 try { Alerts.onEvent(ctx, id, t, JSONObject(d)) } catch (_: Exception) {}
+                markSeen(ctx, id, t)
             }
             override fun onChildChanged(s: DataSnapshot, prev: String?) {}
             override fun onChildRemoved(s: DataSnapshot) {}
@@ -210,6 +211,40 @@ object Live {
         ref(ctx, "cams/$id/status")?.addValueEventListener(st)
         ref(ctx, "cams/$id/events")?.orderByChild("t")?.limitToLast(1)?.addChildEventListener(ev)
         camListeners[id] = Pair(st, ev)
+        catchUp(ctx, id, attachedAt - 60_000 + serverOffset)
+    }
+
+    // ------------------------------------------------------------------ alerts missed while not connected
+
+    private fun seen(ctx: Context) = ctx.getSharedPreferences("alert_seen", Context.MODE_PRIVATE)
+
+    /** Remembers the newest camera event this phone has handled (server time). */
+    private fun markSeen(ctx: Context, cam: String, t: Long) {
+        val sp = seen(ctx)
+        if (t > sp.getLong(cam, 0)) sp.edit().putLong(cam, t).apply()
+    }
+
+    /**
+     * Reads the events a camera recorded since this phone last handled one (up to [until], where live alerts take over)
+     * and adds them to the Alerts list. The camera keeps 7 days of events; the first time, nothing old is shown.
+     */
+    private fun catchUp(ctx: Context, cam: String, until: Long) {
+        val last = seen(ctx).getLong(cam, 0)
+        if (last == 0L) { markSeen(ctx, cam, until); return }
+        if (last >= until) return
+        ref(ctx, "cams/$cam/events")?.orderByChild("t")?.startAt((last + 1).toDouble())?.endAt((until - 1).toDouble())
+            ?.addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onDataChange(s: DataSnapshot) {
+                    val list = s.children.mapNotNull { c ->
+                        val t = (c.child("t").value as? Number)?.toLong() ?: return@mapNotNull null
+                        val d = LiveNet.open(ctx, c.child("d").value as? String) ?: return@mapNotNull null
+                        try { t to JSONObject(d) } catch (_: Exception) { null }
+                    }.sortedBy { it.first }
+                    markSeen(ctx, cam, until - 1)
+                    try { Alerts.catchUp(ctx, cam, list) } catch (_: Exception) {}
+                }
+                override fun onCancelled(e: DatabaseError) {}
+            })
     }
 
     /** Another phone removed this one from the network. */

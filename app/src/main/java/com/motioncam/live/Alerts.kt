@@ -144,6 +144,61 @@ object Alerts {
         }
     }
 
+    /**
+     * Alerts missed while this phone wasn't connected (MotionCam closed, no "Stay connected"): the camera keeps 7 days of
+     * events in the live connection, so they are read when the connection starts and added to the Alerts list at their
+     * own times. Motion and clips are summarised per camera; nothing rings (they are old news), a banner or one silent
+     * notification says what was missed.
+     */
+    fun catchUp(ctx: Context, cam: String, events: List<Pair<Long, JSONObject>>) {
+        val p = Prefs(ctx)
+        if (!p.alertsOn || mutedUntil(ctx, cam) > 0 || events.isEmpty()) return
+        val name = camName(cam)
+        fun at(t: Long) = t - Live.serverOffset
+        fun tm(t: Long) = Fmt.t(p, at(t), seconds = false) + dayNote(at(t))
+        val out = ArrayList<Triple<Long, String, Pair<String, String>>>()
+        val motions = if (p.alertMotion) events.filter { it.second.optString("type") == "motion" }.map { it.first } else emptyList()
+        if (motions.isNotEmpty()) out += Triple(at(motions.max()), "motion", "Motion · $name" to
+            if (motions.size == 1) "Motion detected at ${tm(motions[0])}" else "Motion ${motions.size} times between ${tm(motions.min())} and ${tm(motions.max())}")
+        val clips = if (p.alertClip) events.filter { it.second.optString("type") == "clip" }.map { it.first } else emptyList()
+        if (clips.isNotEmpty()) out += Triple(at(clips.max()), "clip", "New clips · $name" to
+            (if (clips.size == 1) "1 clip saved at ${tm(clips[0])}" else "${clips.size} clips saved between ${tm(clips.min())} and ${tm(clips.max())}"))
+        for ((t, d) in events) {
+            val (kind, title, ok) = when (d.optString("type")) {
+                "hot" -> Triple("hot", "Camera too hot · $name", p.alertHot)
+                "unplugged" -> Triple("power", "Charger unplugged · $name", p.alertCharger)
+                "monitor_off", "monitor_paused", "safety_stop" -> Triple("monitor", "Monitoring stopped · $name", p.alertMonitoring)
+                else -> Triple("", "", false)
+            }
+            if (ok) out += Triple(at(t), kind, title to (d.optString("text") + " (" + tm(t) + ")"))
+        }
+        if (out.isEmpty()) return
+        AlertInbox.addPast(ctx, cam, out)
+        val summary = listOfNotNull(
+            motions.size.takeIf { it > 0 }?.let { "motion ×$it" },
+            clips.size.takeIf { it > 0 }?.let { "$it clip${if (it == 1) "" else "s"}" },
+            (out.size - (if (motions.isNotEmpty()) 1 else 0) - (if (clips.isNotEmpty()) 1 else 0)).takeIf { it > 0 }?.let { "$it other" },
+        ).joinToString(" · ")
+        val title = "While you were away · $name"
+        if (AlertInbox.front?.get() != null || p.alertsInApp) { AlertInbox.banner(cam, title, "$summary — tap to see the list", openList = true); return }
+        try {
+            channels(ctx)
+            val open = PendingIntent.getActivity(ctx, nid(cam, "missed"),
+                Intent(ctx, AlertsInboxActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
+            ctx.getSystemService(NotificationManager::class.java).notify(nid(cam, "missed"), Notification.Builder(ctx, CH_QUIET)
+                .setSmallIcon(android.R.drawable.ic_menu_camera).setContentTitle(title).setContentText(summary)
+                .setContentIntent(open).setAutoCancel(true).setGroup("cam_$cam").build())
+        } catch (_: Exception) {}
+    }
+
+    /** " (Mon)" for an earlier day, so a summary spanning days reads right. */
+    private fun dayNote(ms: Long): String {
+        val c = Calendar.getInstance(); val today = c.get(Calendar.DAY_OF_YEAR) to c.get(Calendar.YEAR)
+        c.timeInMillis = ms
+        return if ((c.get(Calendar.DAY_OF_YEAR) to c.get(Calendar.YEAR)) == today) ""
+            else " (" + java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()).format(java.util.Date(ms)) + ")"
+    }
+
     // ------------------------------------------------------------------ status (battery)
 
     private val batteryAlerted = HashMap<String, Boolean>()

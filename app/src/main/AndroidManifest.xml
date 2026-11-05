@@ -45,6 +45,7 @@
         <activity android:name=".cloud.CloudActivity" android:exported="false" />
         <activity android:name=".cloud.UploadQueueActivity" android:exported="false" />
         <activity android:name=".remote.RemoteFoldersActivity" android:exported="false" />
+        <activity android:name=".remote.FolderSettingsActivity" android:exported="false" />
         <activity android:name=".cloud.ProtectedActivity" android:exported="false" />
         <activity android:name=".remote.SyncStatusActivity" android:exported="false" />
         <activity android:name=".live.LiveActivity" android:exported="false" />

@@ -162,10 +162,10 @@ class SettingsActivity : Activity() {
             }
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
 
-        // backup of this phone's clips, upload rules and other phones' folders now live together in Clips → Remote Folders
+        // cloud folders: a link to the folders themselves, and their settings right here (same code as Remote Folders → ⚙)
         title("Remote folders (cloud backup)", Prefs.CLOUD_KEYS + Prefs.REMOTE_FOLDER_KEYS)
-        note("Cloud folders of clips (Google Drive, Dropbox, FTP, SFTP): the one this phone backs up to and other phones' " +
-            "folders, with the upload queue and upload rules, are all in Clips → Remote Folders.")
+        note("The folders themselves (the one this phone backs up to, other phones' folders, the upload queue) are in " +
+            "Clips → Remote Folders.")
         box.addView(Ui.chip(this, "").apply {
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             val chip = this
@@ -178,11 +178,11 @@ class SettingsActivity : Activity() {
             }
             update()
             live += update
-            setOnClickListener {
-                startActivity(Intent(this@SettingsActivity, com.motioncam.remote.RemoteFoldersActivity::class.java)
-                    .putExtra(com.motioncam.remote.RemoteFoldersActivity.EXTRA_BACKUP, true))
-            }
+            setOnClickListener { startActivity(Intent(this@SettingsActivity, com.motioncam.remote.RemoteFoldersActivity::class.java)) }
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
+        com.motioncam.remote.FolderSettings.build(this, form, { s ->
+            box.addView(Ui.label(this, s, 14f, Ui.ACCENT).apply { setPadding(0, Ui.dp(this@SettingsActivity, 14), 0, 0) })
+        }, { note(it) })
 
         title("Reset", null)
         box.addView(Ui.chip(this, "Reset ALL settings to default").apply {

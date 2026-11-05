@@ -93,8 +93,9 @@ Backing up and viewing are the same thing: **cloud folders** of clips. Clips →
 folder this phone backs up to (↑) and other phones' folders – and tapping one shows its clips. **＋ Add → Back up this
 phone to…** copies every new clip to **Google Drive**, **Dropbox**, an **FTP/FTPS** server or an **SFTP** server, so
 footage survives if the phone is damaged or stolen (one folder per service; a folder you already view can become it via
-⋮ → *Back up this phone here*). The same screen has the upload queue and rules (Wi-Fi only, while charging, quality,
-delete the phone copy, thumbnails). Each folder's ⋮ → *Backup settings* has its account, clean-up rules and viewer link.
+⋮ → *Back up this phone here*). The screen also has the **Upload queue** and **Clear downloaded clips**; its ⚙ opens the folder
+settings (upload only on Wi-Fi / while charging, quality, delete the phone copy, thumbnails, FTP/SFTP, keep a copy),
+which are also in the app's Settings. Each folder's ⋮ → *Backup settings* has its account, clean-up rules and viewer link.
 
 * **Back up older clips**: select them in Clips and tap **Back up** (or *Back up all* in a collection).
 

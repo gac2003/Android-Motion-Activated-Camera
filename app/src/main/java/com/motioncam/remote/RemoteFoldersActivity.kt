@@ -62,8 +62,14 @@ class RemoteFoldersActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
-        val add = Ui.chip(this, "＋ Add").apply { setOnClickListener { addSource() } }
-        root.addView(topBar(this, "Remote Folders", add))
+        // title bar: ⚙ folder settings (a page of their own) and ＋ Add
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        actions.addView(iconButton(this, IconDrawable.Kind.SETTINGS, 44, 11) {
+            startActivity(Intent(this, FolderSettingsActivity::class.java))
+        }.apply { contentDescription = "Remote folder settings"; tooltipText = "Remote folder settings" },
+            LinearLayout.LayoutParams(-2, -2).apply { rightMargin = Ui.dp(this@RemoteFoldersActivity, 6) })
+        actions.addView(Ui.chip(this, "＋ Add").apply { setOnClickListener { addSource() } })
+        root.addView(topBar(this, "Remote Folders", actions))
         box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@RemoteFoldersActivity, 14)
@@ -141,23 +147,8 @@ class RemoteFoldersActivity : Activity() {
         }
         for (f in shown) box.addView(folderRow(f))
         val hidden = list.size - shown.size
-        if (hidden > 0) note("$hidden FTP/SFTP folder${if (hidden == 1) " is" else "s are"} hidden (turn on \"Allow FTP / SFTP servers\" below).")
-        uploadSection()
-        optionsSection()
-        title("How it works")
-        note("This device never renames clips in other phones' folders, and deletes them only when you choose " +
-            "\"Delete from cloud\" (protected clips are always kept). It also writes small \"protected\" marks and the shared " +
-            "collections (Collections → Protected in cloud shows all marks). Clips stream " +
-            "when you play them and are kept in a cache (Options above) so replaying and scrubbing are instant. " +
-            "Favourites and collections you make here stay on this device.")
-        title("Which account to use")
-        note("• Google Drive: sign in with the same Google account the recording phone backs up to. " +
-            "Other Google accounts can't be used: MotionCam's Drive access only sees files MotionCam created in that account.\n" +
-            "• Dropbox, same account: ＋ Add → Dropbox: my own backups.\n" +
-            "• Dropbox, another account: on the recording phone open its folder's ⋮ → Backup settings → Create viewer link, " +
-            "and send the link to this device. Then here: ＋ Add → Dropbox: a viewer link.\n" +
-            "Thumbnails show the moment with the most motion when the recording phone has \"Upload thumbnails for other " +
-            "devices\" on (default).")
+        if (hidden > 0) note("$hidden FTP/SFTP folder${if (hidden == 1) " is" else "s are"} hidden (⚙ → Allow FTP / SFTP servers).")
+        quickActions()
     }
 
     private fun backupDescribe(k: CloudKind, c: CloudConfig) = when (k) {
@@ -279,56 +270,34 @@ class RemoteFoldersActivity : Activity() {
         else go()
     }
 
-    // ------------------------------------------------------------------ uploading (applies to every folder this phone backs up to)
+    // ------------------------------------------------------------------ the two things used often here (settings: ⚙)
 
-    private fun uploadSection() {
+    private fun quickActions() {
         val ctx = this
-        backupTitle = title("Uploading")
-        note("For the folders this phone backs up to (↑). New clips upload by themselves and resume if the internet drops; " +
-            "to upload older clips, select them in Clips → Back up.")
-        box.addView(Ui.chip(ctx, "").apply {
+        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, Ui.dp(ctx, 18), 0, 0) }
+        backupTitle = row
+        row.addView(Ui.chip(ctx, "").apply {
             val chip = this
             val update = {
                 val c = com.motioncam.cloud.CloudSync.counts(ctx, null)
-                val t = "Upload queue  ·  ${c.queued} waiting" + if (c.failed > 0) " · ${c.failed} failed" else ""
+                val t = "Upload queue · ${c.queued}" + if (c.failed > 0) " · ${c.failed} failed" else ""
                 if (chip.text != t) chip.text = t
             }
             update(); liveLines += update
             setOnClickListener { startActivity(Intent(ctx, com.motioncam.cloud.UploadQueueActivity::class.java)) }
-        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(ctx, 10) })
-        val sf = com.motioncam.SettingsForm(this, box)
-        sf.toggle("Upload only on Wi-Fi (not mobile data)", prefs.cloudWifiOnly) { prefs.cloudWifiOnly = it; com.motioncam.cloud.CloudSync.kick(ctx) }
-        sf.toggle("Upload only while charging", prefs.cloudChargingOnly) { prefs.cloudChargingOnly = it; com.motioncam.cloud.CloudSync.kick(ctx) }
-        sf.choice("Upload quality", listOf("Original (largest, best quality)", "720p (about 1/3 the size)", "480p (smallest)"), prefs.cloudQuality) {
-            prefs.cloudQuality = it
-        }
-        note("Smaller copies are made on the phone before uploading (uses some extra power; original stays on the phone).")
-        sf.toggle("Delete the phone copy after it is backed up everywhere (clips in collections are kept)", prefs.cloudDeleteLocal) { prefs.cloudDeleteLocal = it }
-        sf.toggle("Upload thumbnails for other devices", prefs.cloudThumbs) { prefs.cloudThumbs = it; com.motioncam.cloud.CloudSync.kick(ctx) }
-        note("A small peak-motion picture (about 20 KB) per clip, in a \".thumbnails\" subfolder, so another device viewing " +
-            "the folder sees the right frame and clip length without downloading videos.")
-    }
-
-    // ------------------------------------------------------------------ options for viewing folders
-
-    private fun optionsSection() {
-        val ctx = this
-        title("Options")
-        val sf = com.motioncam.SettingsForm(this, box)
-        sf.toggle("Allow FTP / SFTP servers as remote folders", prefs.remoteFtp) { prefs.remoteFtp = it; render() }
-        note("When off, other phones' FTP/SFTP folders are hidden and cannot be added. Clips from servers are downloaded " +
-            "fully before they play (cloud folders stream).")
-        sf.toggle("Keep a copy on this phone when a clip in my collections loses its cloud protection", prefs.remoteKeepCopy) { prefs.remoteKeepCopy = it }
-        note("Clips you favourite or add to a collection in another phone's folder are protected from that phone's clean-up. " +
-            "Anyone signed in to the account can remove that protection; this saves such clips to this phone the next time " +
-            "the folder is checked, so your collection keeps them.")
-        box.addView(Ui.chip(ctx, "").apply {
+        }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = Ui.dp(ctx, 8) })
+        row.addView(Ui.chip(ctx, "").apply {
             val chip = this
-            val update = { chip.text = "Clear downloaded remote clips  ·  ${StreamCache.cacheBytes(ctx) / 1_000_000} MB" }
+            val update = { chip.text = "Clear downloaded clips · ${StreamCache.cacheBytes(ctx) / 1_000_000} MB" }
             update(); liveLines += update
-            setOnClickListener { StreamCache.clearAll(ctx); Toast.makeText(ctx, "Cleared", Toast.LENGTH_SHORT).show(); update() }
-        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(ctx, 8) })
-        note("Played remote clips are kept (up to 1.5 GB) so replaying and scrubbing are instant. Android may also clear them when storage is low.")
+            setOnClickListener {
+                AlertDialog.Builder(ctx).setTitle("Clear downloaded clips?")
+                    .setMessage("Frees the space used by clips played from cloud folders. They stream again the next time you play them.")
+                    .setPositiveButton("Clear") { _, _ -> StreamCache.clearAll(ctx); Toast.makeText(ctx, "Cleared", Toast.LENGTH_SHORT).show(); update() }
+                    .setNegativeButton("Cancel", null).show()
+            }
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        box.addView(row)
     }
 
     private fun open(s: RemoteSource) {

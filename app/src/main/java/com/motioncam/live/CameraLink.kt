@@ -64,12 +64,24 @@ object CameraLink {
         onStatus(c, StatusBus.status)
         listen(c)
         trimEvents(c)
+        // settings changed on the camera itself (its screen, Settings): other phones see them within a second
+        c.getSharedPreferences("motioncam", Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(prefsL)
+    }
+
+    private val SETTING_KEYS = setOf("camera", "resHeight", "fps", "hevc", "bitrateMbps", "audio", "preRecordMs", "stopDelaySec",
+        "maxClipMin", "sensitivity", "lightFilter", "minAreaPct", "minMotionMs", "exposureAuto", "evIndex", "iso", "shutterNs",
+        "focusAuto", "focusPos", "wbAuto", "wbKelvin", "zoom")
+    private val publishSoon = Runnable { app?.let { if (running) try { publishStatus(it) } catch (_: Exception) {} } }
+    private val prefsL = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (running && key in SETTING_KEYS) { main.removeCallbacks(publishSoon); main.postDelayed(publishSoon, 800) }
     }
 
     fun stop(ctx: Context) {
         val c = ctx.applicationContext
         if (!running) return
         running = false
+        c.getSharedPreferences("motioncam", Context.MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(prefsL)
+        main.removeCallbacks(publishSoon)
         statusListener?.let { StatusBus.remove(it) }
         statusListener = null
         try { publishStatus(c, StatusBus.status.copy(monitoring = false, mode = Mode.OFF)) } catch (_: Exception) {}

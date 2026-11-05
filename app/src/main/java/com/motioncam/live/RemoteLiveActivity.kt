@@ -173,7 +173,7 @@ class RemoteLiveActivity : Activity() {
             setPadding(d(12), 0, d(12), d(6))
             visibility = View.GONE
         }
-        valueTv = Ui.label(this, "", 14f).apply { minWidth = d(104) }
+        valueTv = Ui.label(this, "", 14f).apply { minWidth = d(104); setOnClickListener { askExact() } }
         seek = SeekBar(this)
         autoBtn = Ui.chip(this, "AUTO").apply { setOnClickListener { onAuto() } }
         panel.addView(valueTv)
@@ -356,6 +356,8 @@ class RemoteLiveActivity : Activity() {
     }
 
     private fun onChip(name: String) {
+        // never act on defaults: wait until the camera has said what its settings are
+        if (status()?.has("settings") != true) { Toast.makeText(this, "Loading the camera's settings…", Toast.LENGTH_SHORT).show(); return }
         when (name) {
             "LENS" -> { showLensDialog(); return }
             "FORMAT" -> { showFormatDialog(); return }
@@ -553,6 +555,47 @@ class RemoteLiveActivity : Activity() {
                 undo(a.keys().asSequence().toList() - applied.toSet())
             } else pendingAt = System.currentTimeMillis()
         }
+    }
+
+    /** Tap the value: type the exact number (as on the camera screen). */
+    private fun askExact() {
+        val sel = selected ?: return
+        val st = st(); val c = caps(); val lv = live()
+        if (sel == "EV" && !st.optBoolean("exposureAuto", true)) return
+        val evStep = c.optDouble("evStep", 0.1667)
+        val (title, cur) = when (sel) {
+            "EV" -> "Exposure compensation (EV)" to "%.1f".format(st.optInt("evIndex") * evStep)
+            "ISO" -> "ISO (${isoLo.roundToInt()}–${isoHi.roundToInt()})" to "${lv.optInt("iso").takeIf { it > 0 && st.optBoolean("exposureAuto", true) } ?: st.optInt("iso", 400)}"
+            "SPEED" -> "Shutter speed: 1 / …" to "${(1e9 / (lv.optLong("shutterNs").takeIf { it > 0 && st.optBoolean("exposureAuto", true) } ?: st.optLong("shutterNs", 16_666_666L))).roundToInt()}"
+            "FOCUS" -> "Focus distance in cm (empty = infinity)" to ""
+            "WB" -> "White balance in Kelvin (snaps to the nearest preset)" to "${st.optInt("wbKelvin", 5200)}"
+            "ZOOM" -> "Zoom (%.1f–%.1f)".format(zMin, zMax) to "%.1f".format(st.optDouble("zoom", 1.0))
+            else -> return
+        }
+        val input = android.widget.EditText(this).apply {
+            setText(cur); setSelectAllOnFocus(true)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL or android.text.InputType.TYPE_NUMBER_FLAG_SIGNED
+        }
+        AlertDialog.Builder(this).setTitle(title).setView(input).setPositiveButton("Set") { _, _ ->
+            val t = input.text.toString().trim().replace(',', '.')
+            val v = t.toDoubleOrNull()
+            val a = JSONObject()
+            when (sel) {
+                "EV" -> v?.let { a.put("evIndex", (it / evStep).roundToInt().coerceIn(c.optInt("evMin", -12), c.optInt("evMax", 12))) }
+                "ISO" -> v?.let { if (st.optBoolean("exposureAuto", true)) seedExposure(a, st, lv); a.put("iso", it.coerceIn(isoLo, isoHi).roundToInt()) }
+                "SPEED" -> v?.takeIf { it > 0 }?.let {
+                    if (st.optBoolean("exposureAuto", true)) seedExposure(a, st, lv)
+                    val (lo, hi) = shutterRange(st); a.put("shutterNs", (1e9 / it).coerceIn(lo, hi).toLong())
+                }
+                "FOCUS" -> if (minFocus > 0) {
+                    if (t.isEmpty()) a.put("focusAuto", false).put("focusPos", 1.0)
+                    else v?.takeIf { it > 0 }?.let { a.put("focusAuto", false).put("focusPos", (1 - (100 / it) / minFocus).coerceIn(0.0, 1.0)) }
+                }
+                "WB" -> v?.let { a.put("wbAuto", false).put("wbKelvin", ProCaps.wbPresets[ProCaps.nearestPreset(it.roundToInt())].second) }
+                "ZOOM" -> v?.let { a.put("zoom", it.coerceIn(zMin, zMax)) }
+            }
+            if (a.length() > 0) apply(a) else Toast.makeText(this, "Not a valid number", Toast.LENGTH_SHORT).show()
+        }.setNegativeButton("Cancel", null).show()
     }
 
     private fun showLensDialog() {

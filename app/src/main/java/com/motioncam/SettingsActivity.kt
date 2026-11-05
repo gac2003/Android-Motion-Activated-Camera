@@ -283,145 +283,25 @@ class SettingsActivity : Activity() {
         box.addView(Ui.label(this, s, 12f, 0xFFB0B4BA.toInt()).apply { setPadding(0, Ui.dp(this@SettingsActivity, 6), 0, Ui.dp(this@SettingsActivity, 6)) })
     }
 
-    private fun toggle(label: String, value: Boolean, set: (Boolean) -> Unit) {
-        box.addView(Switch(this).apply {
-            text = label
-            setTextColor(Color.WHITE)
-            isChecked = value
-            setOnCheckedChangeListener { _, b -> set(b) }
-            setPadding(0, Ui.dp(this@SettingsActivity, 8), 0, Ui.dp(this@SettingsActivity, 8))
-        })
-    }
+    /** Rows shared with a camera's remote settings (same look, slider + exact value, knob-only sliders). */
+    private val form by lazy { SettingsForm(this, box) }
+
+    private fun toggle(label: String, value: Boolean, set: (Boolean) -> Unit) { form.toggle(label, value) { set(it) } }
 
     private fun button(label: String, click: () -> Unit) {
         box.addView(Ui.chip(this, label).apply { setOnClickListener { click() } },
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
     }
 
-    private fun numberField(initial: String, decimal: Boolean): EditText = EditText(this).apply {
-        setText(initial)
-        setTextColor(Color.WHITE)
-        gravity = Gravity.END
-        inputType = if (decimal) InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL else InputType.TYPE_CLASS_NUMBER
-        imeOptions = EditorInfo.IME_ACTION_DONE
-        setSingleLine()
-        setSelectAllOnFocus(true)
-        minWidth = Ui.dp(this@SettingsActivity, 72)
-    }
-
-    /**
-     * Integer setting with slider + exact text entry. If [offLabel] is given, 0 means "off" and
-     * values between 1 and [minActive]-1 are raised to [minActive].
-     */
     private fun number(
         label: String, unit: String, min: Int, max: Int, value: Int,
         offLabel: String? = null, minActive: Int = 1, slider: Boolean = true, set: (Int) -> Unit,
-    ) {
-        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val t = Ui.label(this, label, 14f)
-        val u = Ui.label(this, unit, 13f, Ui.GREY)
-        val field = numberField(if (offLabel != null && value == 0) "" else "$value", false)
-        if (offLabel != null) field.hint = offLabel
-        head.addView(t, LinearLayout.LayoutParams(0, -2, 1f))
-        head.addView(field)
-        head.addView(u)
-        head.setPadding(0, Ui.dp(this, 10), 0, 0)
-        box.addView(head)
+    ) = form.number(label, unit, min, max, value, offLabel, minActive, slider, set = set)
 
-        var sb: SeekBar? = null
-        var syncing = false
-        fun normalise(v: Int): Int {
-            if (offLabel != null && v <= 0) return 0
-            return v.coerceIn(maxOf(min, if (offLabel != null) minActive else min), max)
-        }
-        fun show(v: Int) {
-            syncing = true
-            field.setText(if (offLabel != null && v == 0) "" else "$v")
-            sb?.progress = (if (offLabel != null && v == 0) min else v) - min
-            syncing = false
-        }
-        if (slider) {
-            sb = SeekBar(this).apply {
-                this.max = max - min
-                progress = (value - min).coerceIn(0, max - min)
-                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) {
-                        if (!fromUser || syncing) return
-                        val v = normalise(p + min)
-                        set(v)
-                        syncing = true
-                        field.setText(if (offLabel != null && v == 0) "" else "$v")
-                        syncing = false
-                    }
-                    override fun onStartTrackingTouch(s: SeekBar) {}
-                    override fun onStopTrackingTouch(s: SeekBar) {}
-                })
-            }
-            box.addView(sb)
-        }
-        fun commit() {
-            if (syncing) return
-            val v = normalise(field.text.toString().trim().toIntOrNull() ?: if (offLabel != null) 0 else value)
-            set(v)
-            show(v)
-        }
-        field.setOnEditorActionListener { _, _, _ -> commit(); field.clearFocus(); false }
-        field.setOnFocusChangeListener { _, has -> if (!has) commit() }
-    }
+    private fun decimal(label: String, unit: String, min: Float, max: Float, value: Float, set: (Float) -> Unit) =
+        form.decimal(label, unit, min, max, value, set = set)
 
-    /** Decimal setting (one decimal place) with slider + exact text entry. */
-    private fun decimal(label: String, unit: String, min: Float, max: Float, value: Float, set: (Float) -> Unit) {
-        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val field = numberField("%.1f".format(value), true)
-        head.addView(Ui.label(this, label, 14f), LinearLayout.LayoutParams(0, -2, 1f))
-        head.addView(field)
-        head.addView(Ui.label(this, unit, 13f, Ui.GREY))
-        head.setPadding(0, Ui.dp(this, 10), 0, 0)
-        box.addView(head)
-        var syncing = false
-        val sb = SeekBar(this).apply {
-            this.max = ((max - min) * 10).roundToInt()
-            progress = ((value - min) * 10).roundToInt().coerceIn(0, this.max)
-        }
-        sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) {
-                if (!fromUser || syncing) return
-                val v = min + p / 10f
-                set(v)
-                syncing = true; field.setText("%.1f".format(v)); syncing = false
-            }
-            override fun onStartTrackingTouch(s: SeekBar) {}
-            override fun onStopTrackingTouch(s: SeekBar) {}
-        })
-        box.addView(sb)
-        fun commit() {
-            if (syncing) return
-            val v = (field.text.toString().trim().replace(',', '.').toFloatOrNull() ?: value).coerceIn(min, max)
-            set(v)
-            syncing = true
-            field.setText("%.1f".format(v))
-            sb.progress = ((v - min) * 10).roundToInt()
-            syncing = false
-        }
-        field.setOnEditorActionListener { _, _, _ -> commit(); field.clearFocus(); false }
-        field.setOnFocusChangeListener { _, has -> if (!has) commit() }
-    }
-
-    private fun choice(label: String, options: List<String>, current: Int, set: (Int) -> Unit) {
-        box.addView(Ui.label(this, label, 14f).apply { setPadding(0, Ui.dp(this@SettingsActivity, 10), 0, 0) })
-        val sp = Spinner(this)
-        sp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
-        sp.setSelection(current)
-        var first = true
-        sp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                if (first) { first = false; return }
-                set(pos)
-            }
-            override fun onNothingSelected(p: AdapterView<*>?) {}
-        }
-        box.addView(sp)
-    }
+    private fun choice(label: String, options: List<String>, current: Int, set: (Int) -> Unit) = form.choice(label, options, current, set = set)
 
     private fun text(label: String, value: String, set: (String) -> Unit) {
         box.addView(Ui.label(this, label, 14f).apply { setPadding(0, Ui.dp(this@SettingsActivity, 10), 0, 0) })

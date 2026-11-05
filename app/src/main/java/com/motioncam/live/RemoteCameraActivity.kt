@@ -332,8 +332,16 @@ class RemoteCameraActivity : Activity() {
         val key = (status()?.toString() ?: "") + "|" + (caps()?.toString()?.length ?: 0) + "|" + online()
         // controls are rebuilt only when the camera's state changed (not while the user drags something)
         if (key == lastSettings) return
+        // someone is typing a value: rebuild once they're done (their text would be lost otherwise)
+        if ((currentFocus as? android.widget.EditText)?.let { isInside(it) } == true) { ui.postDelayed({ renderIfChanged() }, 1500); return }
         lastSettings = key
         render()
+    }
+
+    private fun isInside(v: android.view.View): Boolean {
+        var p = v.parent
+        while (p != null) { if (p === f.box) return true; p = p.parent }
+        return false
     }
 
     private fun render() {
@@ -379,12 +387,16 @@ class RemoteCameraActivity : Activity() {
             else -> f.row(f.chip("Resume monitoring") { send("resume") }, stopChip)
         }
 
+        // never show (or send) defaults: the controls appear only once the camera has said what its settings are
+        if (!s.has("settings")) { f.title("Settings"); f.note("Loading the camera's settings…"); return }
+        val sf = com.motioncam.SettingsForm(this, f.box)
         f.title("Camera")
-        f.note("Changes below are sent to the camera when you tap Save.")
+        f.note("These are the camera's own settings" + (Live.cams[cam]?.statusAt?.takeIf { it > 0 }?.let { " (as of " + Fmt.t(prefs, it - Live.serverOffset, seconds = false) + ")" } ?: "") +
+            ". Changes are sent when you tap Save. Drag a slider's knob, or type the exact value.")
         val lenses = c.optJSONArray("lenses")
         val lensLabel = (0 until (lenses?.length() ?: 0)).map { lenses!!.getJSONObject(it) }.firstOrNull { it.optString("key") == st.optString("camera") }?.optString("label")
             ?: s.optString("lens")
-        f.row(f.chip("Lens: $lensLabel") {
+        f.row(f.chip("Lens: ${lensLabel.substringBefore(" [")}") {
             val list = (0 until (lenses?.length() ?: 0)).map { lenses!!.getJSONObject(it) }
             if (list.isEmpty()) return@chip
             com.motioncam.OptionSheet.show(this, "Lens", list.map { l ->
@@ -393,49 +405,75 @@ class RemoteCameraActivity : Activity() {
                     checked = l.optString("key") == st.optString("camera")) { set("camera", l.optString("key")) }
             })
         })
-        val evStep = c.optDouble("evStep", 0.5)
-        f.toggle("Exposure: automatic", st.optBoolean("exposureAuto", true), enabled) { set("exposureAuto", it) }
+        // exposure: as on the camera screen (EV while automatic; ISO + shutter when manual)
+        val evStep = c.optDouble("evStep", 1.0 / 6)
+        sf.toggle("Exposure: automatic", st.optBoolean("exposureAuto", true), enabled) { set("exposureAuto", it) }
         if (st.optBoolean("exposureAuto", true)) {
-            f.slider("Exposure compensation", c.optInt("evMin", -8), c.optInt("evMax", 8), st.optInt("evIndex"), { "EV %+.1f".format(it * evStep) }, enabled) { set("evIndex", it) }
+            val lo = c.optInt("evMin", -12); val hi = c.optInt("evMax", 12)
+            sf.scaled("Exposure compensation", "EV", st.optInt("evIndex") * evStep, hi - lo,
+                toPos = { (it / evStep).roundToInt() - lo }, fromPos = { (it + lo) * evStep },
+                format = { (if (it > 0.001) "+" else "") + "%.1f".format(it) },
+                parse = { t -> t.replace(',', '.').replace("+", "").toDoubleOrNull()?.let { ((it / evStep).roundToInt().coerceIn(lo, hi)) * evStep } },
+                signed = true, enabled = enabled) { set("evIndex", (it / evStep).roundToInt()) }
         } else {
-            val isoMin = c.optInt("isoMin", 50); val isoMax = c.optInt("isoMax", 3200)
-            f.slider("ISO", 0, 1000, toLog(st.optInt("iso", 400).toDouble(), isoMin.toDouble(), isoMax.toDouble()),
-                { "ISO " + fromLog(it, isoMin.toDouble(), isoMax.toDouble()).roundToInt() }, enabled) { set("iso", fromLog(it, isoMin.toDouble(), isoMax.toDouble()).roundToInt()) }
-            val eMin = c.optLong("expMinNs", 100_000L).coerceAtLeast(125_000L).toDouble(); val eMax = c.optLong("expMaxNs", 250_000_000L).toDouble()
-            f.slider("Shutter", 0, 1000, toLog(st.optLong("shutterNs", 16_666_666L).toDouble(), eMin, eMax),
-                { shutterText(fromLog(it, eMin, eMax)) }, enabled) { set("shutterNs", fromLog(it, eMin, eMax).toLong()) }
+            val isoLo = c.optInt("isoMin", 50).toDouble(); val isoHi = c.optInt("isoMax", 3200).toDouble()
+            sf.scaled("ISO", "", st.optInt("iso", 400).toDouble(), 1000, toPos = { toLog(it, isoLo, isoHi) }, fromPos = { fromLog(it, isoLo, isoHi).roundToInt().toDouble() },
+                format = { "${it.roundToInt()}" }, parse = { it.toDoubleOrNull()?.coerceIn(isoLo, isoHi)?.roundToInt()?.toDouble() },
+                decimalInput = false, enabled = enabled) { set("iso", it.roundToInt()) }
+            val eMin = c.optLong("expMinNs", 100_000L).coerceAtLeast(125_000L).toDouble()
+            val eMax = minOf(c.optLong("expMaxNs", 250_000_000L), 1_000_000_000L / st.optInt("fps", 30).coerceAtLeast(1)).toDouble().coerceAtLeast(eMin * 2)
+            // the box takes the "1/…" number (60 = 1/60 s), like the camera screen's exact entry
+            sf.scaled("Shutter speed  1 /", "s", st.optLong("shutterNs", 16_666_666L).toDouble(), 1000,
+                toPos = { toLog(it, eMin, eMax) }, fromPos = { fromLog(it, eMin, eMax) },
+                format = { ns -> val den = 1e9 / ns; if (den >= 10) "${den.roundToInt()}" else "%.2f".format(den).trimEnd('0').trimEnd('.') },
+                parse = { t -> t.replace(',', '.').removePrefix("1/").toDoubleOrNull()?.takeIf { it > 0 }?.let { (1e9 / it).coerceIn(eMin, eMax) } },
+                enabled = enabled) { set("shutterNs", it.toLong()) }
         }
+        // focus: the same distance scale as the camera screen (slider: near → far ∞; box in cm, empty = ∞)
         val minFocus = c.optDouble("minFocus", 0.0)
         if (minFocus > 0) {
-            f.toggle("Focus: automatic", st.optBoolean("focusAuto", true), enabled) { set("focusAuto", it) }
-            // focusPos: 1 = far (∞) … 0 = closest; the slider runs far → close
-            if (!st.optBoolean("focusAuto", true)) f.slider("Focus distance", 0, 100, ((1 - st.optDouble("focusPos", 1.0).coerceIn(0.0, 1.0)) * 100).roundToInt(),
-                { if (it == 0) "far (∞)" else "%.2f m".format(1 / (minFocus * it / 100)) }, enabled) { set("focusPos", 1 - it / 100.0) }
+            sf.toggle("Focus: automatic", st.optBoolean("focusAuto", true), enabled) { set("focusAuto", it) }
+            if (!st.optBoolean("focusAuto", true)) {
+                fun cmOf(pos: Double): Double { val d = (1 - pos) * minFocus; return if (d < 0.1) Double.POSITIVE_INFINITY else 100 / d }
+                sf.scaled("Focus distance", "cm", st.optDouble("focusPos", 1.0).coerceIn(0.0, 1.0), 1000,
+                    toPos = { (it * 1000).roundToInt() }, fromPos = { it / 1000.0 },
+                    format = { pos -> cmOf(pos).let { if (it.isInfinite()) "" else "${it.roundToInt()}" } },
+                    parse = { t -> if (t.isEmpty() || t == "∞") 1.0 else t.replace(',', '.').toDoubleOrNull()?.takeIf { it > 0 }?.let { cm ->
+                        (1 - (100 / cm) / minFocus).coerceIn(0.0, 1.0) } },
+                    hint = "∞", enabled = enabled) { set("focusPos", it) }
+                f.note("Closest: about ${(100 / minFocus).roundToInt()} cm. Leave the box empty for infinity (∞).")
+            }
         }
-        f.toggle("White balance: automatic", st.optBoolean("wbAuto", true), enabled) { set("wbAuto", it) }
-        if (!st.optBoolean("wbAuto", true)) f.slider("White balance", 20, 100, st.optInt("wbKelvin", 5200) / 100, { "${it * 100} K" }, enabled) { set("wbKelvin", it * 100) }
+        // white balance: automatic or one of the camera screen's presets
+        val presets = com.motioncam.ProCaps.wbPresets
+        val wbIdx = if (st.optBoolean("wbAuto", true)) 0 else com.motioncam.ProCaps.nearestPreset(st.optInt("wbKelvin", 5200)) + 1
+        sf.choice("White balance", listOf("Automatic") + presets.map { "${it.first} (${it.second} K)" }, wbIdx, enabled) { i ->
+            if (i == 0) set("wbAuto", true) else { set("wbAuto", false); set("wbKelvin", presets[i - 1].second) }
+        }
         val zMin = c.optDouble("zoomMin", 1.0); val zMax = c.optDouble("zoomMax", 1.0)
-        if (zMax > zMin + 0.01) f.slider("Zoom", (zMin * 10).roundToInt(), (zMax * 10).roundToInt(), (st.optDouble("zoom", 1.0) * 10).roundToInt(),
-            { "%.1f×".format(it / 10.0) }, enabled) { set("zoom", it / 10.0) }
+        if (zMax > zMin + 0.01) sf.decimal("Zoom", "×", zMin.toFloat(), zMax.toFloat(), st.optDouble("zoom", 1.0).toFloat(), enabled) { set("zoom", (it * 10).roundToInt() / 10.0) }
 
+        // recording and motion detection: exactly as in the app's Settings (same labels, units, ranges)
         f.title("Recording")
-        f.toggle("Record audio", st.optBoolean("audio"), enabled) { set("audio", it) }
-        f.choice("Codec", listOf("H.264", "HEVC (smaller)"), if (st.optBoolean("hevc")) 1 else 0, enabled) { set("hevc", it == 1) }
         val heights = listOf(720, 1080, 2160)
-        f.choice("Resolution", listOf("720p", "1080p", "4K"), heights.indexOf(st.optInt("resHeight", 1080)).coerceAtLeast(0), enabled) { set("resHeight", heights[it]) }
-        val fpsList = c.optJSONArray("fps")?.let { a -> (0 until a.length()).map { a.getInt(it) } } ?: listOf(24, 30, 60)
-        f.choice("Frame rate", fpsList.map { "$it fps" }, fpsList.indexOf(st.optInt("fps", 30)).coerceAtLeast(0), enabled) { set("fps", fpsList[it]) }
-        f.slider("Bitrate", 0, 100, st.optInt("bitrateMbps"), { if (it == 0) "auto" else "$it Mbps" }, enabled) { set("bitrateMbps", it) }
+        sf.choice("Resolution", listOf("720p", "1080p (FHD)", "4K"), heights.indexOf(st.optInt("resHeight", 1080)).coerceAtLeast(1), enabled) { set("resHeight", heights[it]) }
+        val rates = listOf(24, 30, 60)
+        sf.choice("Frame rate", listOf("24 fps", "30 fps", "60 fps"), rates.indexOf(st.optInt("fps", 30)).coerceAtLeast(1), enabled) { set("fps", rates[it]) }
+        sf.choice("Codec", listOf("H.264 (most compatible)", "HEVC / H.265 (smaller files)"), if (st.optBoolean("hevc")) 1 else 0, enabled) { set("hevc", it == 1) }
+        sf.number("Bitrate", "Mbps", 0, 100, st.optInt("bitrateMbps"), offLabel = "auto", enabled = enabled) { set("bitrateMbps", it) }
+        sf.toggle("Record audio", st.optBoolean("audio"), enabled) { set("audio", it) }
         val pre = listOf(0, 500, 1000, 2000, 3000)
-        f.choice("Pre-record", listOf("Off", "0.5 s", "1 s", "2 s", "3 s"), pre.indexOf(st.optInt("preRecordMs")).coerceAtLeast(0), enabled) { set("preRecordMs", pre[it]) }
-        f.slider("Stop after no motion for", 0, 120, st.optInt("stopDelaySec", 30), { "$it s" }, enabled) { set("stopDelaySec", it) }
-        f.slider("Longest clip", 0, 60, st.optInt("maxClipMin", 10), { if (it == 0) "no limit" else "$it min" }, enabled) { set("maxClipMin", it) }
+        sf.choice("Pre-record (video from before the motion)", listOf("Off", "0.5 s", "1 s", "2 s", "3 s"), pre.indexOf(st.optInt("preRecordMs")).coerceAtLeast(0), enabled) { set("preRecordMs", pre[it]) }
 
         f.title("Motion detection")
-        f.slider("Sensitivity", 1, c.optInt("maxSensitivity", 14), st.optInt("sensitivity", 5), { "$it" }, enabled) { set("sensitivity", it) }
-        f.choice("Light filter", listOf("Off", "Normal", "Strong (peepholes, windows)"), st.optInt("lightFilter", 2), enabled) { set("lightFilter", it) }
-        f.slider("Minimum moving area", 2, 200, (st.optDouble("minAreaPct", 5.0) * 10).roundToInt(), { "%.1f %%".format(it / 10.0) }, enabled) { set("minAreaPct", it / 10.0) }
-        f.slider("Motion must last at least", 0, 40, st.optInt("minMotionMs", 250) / 50, { "${it * 50} ms" }, enabled) { set("minMotionMs", it * 50) }
+        sf.number("Sensitivity (1 = least, ${c.optInt("maxSensitivity", com.motioncam.MotionDetector.MAX_SENSITIVITY)} = most; default 5)", "", 1,
+            c.optInt("maxSensitivity", com.motioncam.MotionDetector.MAX_SENSITIVITY), st.optInt("sensitivity", 5), enabled = enabled) { set("sensitivity", it) }
+        sf.choice("Light filter", listOf("Off (any brightness change)", "Normal — ignore lights turning on/off, exposure changes",
+            "Strong — also ignore glare and reflections (peepholes, windows)"), st.optInt("lightFilter", 2), enabled) { set("lightFilter", it) }
+        sf.decimal("Minimum moving area", "% of frame", 0.2f, 20f, st.optDouble("minAreaPct", 5.0).toFloat(), enabled) { set("minAreaPct", (it * 10).roundToInt() / 10.0) }
+        sf.number("Motion must last at least", "ms", 0, 3000, st.optInt("minMotionMs", 250), enabled = enabled) { set("minMotionMs", it) }
+        sf.number("Stop recording after no motion for (0 = as soon as motion ends)", "s", 0, 600, st.optInt("stopDelaySec", 30), enabled = enabled) { set("stopDelaySec", it) }
+        sf.number("Split long events into clips of", "min", 1, 60, st.optInt("maxClipMin", 10), enabled = enabled) { set("maxClipMin", it) }
         if (!enabled) f.note("Controls work while the camera is connected.")
     }
 

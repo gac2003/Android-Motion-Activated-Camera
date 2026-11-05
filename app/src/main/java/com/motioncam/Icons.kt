@@ -12,7 +12,7 @@ import android.widget.ImageView
 
 /** Small vector icons drawn in code (24x24 design grid), always crisp and white. */
 class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.toInt()) : Drawable() {
-    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, SCREEN, VIDEOCAM, NETWORK, LIVE, CLOSE, SHARE, TRASH, ADD_TO, REMOVE, SELECT_ALL }
+    enum class Kind { PLAY, PAUSE, PREV, NEXT, VOLUME, MUTE, BACK, MORE, ZOOM_RESET, CALENDAR, FOLDER, CLOUD, REFRESH, DOWNLOAD, SETTINGS, CLIPS, SCREEN, VIDEOCAM, NETWORK, LIVE, CLOSE, SHARE, TRASH, ADD_TO, REMOVE, SELECT_ALL, FULLSCREEN }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = tint }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -92,6 +92,15 @@ class IconDrawable(private val kind: Kind, private val tint: Int = 0xFFFFFFFF.to
                 stroke.strokeWidth = 2f
                 c.drawCircle(12f, 12f, 6.4f, stroke)
                 c.drawCircle(12f, 12f, 2.4f, stroke)
+            }
+            Kind.FULLSCREEN -> {
+                // four corner brackets
+                stroke.strokeWidth = 2.2f
+                path.moveTo(4f, 9.5f); path.lineTo(4f, 4f); path.lineTo(9.5f, 4f)
+                path.moveTo(14.5f, 4f); path.lineTo(20f, 4f); path.lineTo(20f, 9.5f)
+                path.moveTo(20f, 14.5f); path.lineTo(20f, 20f); path.lineTo(14.5f, 20f)
+                path.moveTo(9.5f, 20f); path.lineTo(4f, 20f); path.lineTo(4f, 14.5f)
+                c.drawPath(path, stroke)
             }
             Kind.CLIPS -> {
                 // a folder of videos: folder outline (softly rounded corners) holding a film strip

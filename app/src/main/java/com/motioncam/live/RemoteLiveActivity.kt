@@ -89,6 +89,7 @@ class RemoteLiveActivity : Activity() {
         prefs = Prefs(this)
         cam = intent.getStringExtra(Alerts.EXTRA_CAM) ?: run { finish(); return }
         r = CamRemote(this, cam)
+        r.busy = { draft.length() > 0 || saving }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         buildUi()
         // the last picture seen of this camera stays on screen (dimmed) until a new one arrives
@@ -119,6 +120,7 @@ class RemoteLiveActivity : Activity() {
     override fun onPause() {
         Live.listeners -= refresh
         Live.eventListeners -= events
+        r.leave()   // gives the remote back
         if (::feed.isInitialized) feed.stop()
         ui.removeCallbacks(tick)
         super.onPause()
@@ -349,7 +351,7 @@ class RemoteLiveActivity : Activity() {
         s.optLong("lastMotion").takeIf { it > 0 }?.let { parts += "motion " + Fmt.t(prefs, it, seconds = false) }
         infoTv.text = android.text.SpannableStringBuilder().apply {
             parts.filter { it.isNotBlank() }.forEachIndexed { i, x -> if (i > 0) append(" · "); append(x) }
-            if (r.holder() != null) append("\n").append(r.remoteText(prefs))
+            r.lockText()?.let { append("\n").append(it) }
         }
     }
 
@@ -369,7 +371,7 @@ class RemoteLiveActivity : Activity() {
     private fun onStartStop() {
         val s = status() ?: return
         if (!r.online()) { Toast.makeText(this, "The camera is offline", Toast.LENGTH_SHORT).show(); return }
-        if (r.lockedOut()) { r.take { refreshAll() }; return }
+        if (r.lockedOut()) { r.touch(); return }
         when {
             s.optBoolean("monitoring") -> AlertDialog.Builder(this).setTitle("Stop monitoring?")
                 .setMessage(if (s.optBoolean("standbyOn")) "The camera closes and the phone goes to standby: you can start monitoring again from here."
@@ -388,7 +390,8 @@ class RemoteLiveActivity : Activity() {
         set("LENS", lensLabel(st, c), false)
         val h = st.optInt("resHeight", 1080)
         set("FORMAT", "${if (h >= 2160) "4K" else "${h}p"}${st.optInt("fps", 30)}", false)
-        if (st.optBoolean("exposureAuto", true)) set("EV", evText(st.optInt("evIndex")), false) else set("EV", "—", false, enabled = false)
+        if (st.optBoolean("exposureAuto", true)) set("EV", evText(st.optInt("evIndex")), false)
+        else set("EV", (lv.opt("meter") as? Number)?.let { meterText(it.toDouble()) } ?: "—", false)
         if (st.optBoolean("exposureAuto", true)) {
             set("ISO", lv.optInt("iso").takeIf { it > 0 }?.toString() ?: "AUTO", true)
             set("SPEED", lv.optLong("shutterNs").takeIf { it > 0 }?.let { shutterText(it) } ?: "AUTO", true)
@@ -414,7 +417,7 @@ class RemoteLiveActivity : Activity() {
         // never act on defaults: wait until the camera has said what its settings are
         if (status()?.has("settings") != true) { Toast.makeText(this, "Loading the camera's settings…", Toast.LENGTH_SHORT).show(); return }
         // another phone has the remote: offer to take it over (it is told) instead of changing anything
-        if (r.lockedOut()) { r.take { refreshAll() }; return }
+        if (r.lockedOut()) { r.touch(); return }
         when (name) {
             "LENS" -> { showLensDialog(); return }
             "FORMAT" -> { showFormatDialog(); return }
@@ -497,7 +500,8 @@ class RemoteLiveActivity : Activity() {
         var auto = false
         var follow = -1
         val text = when (sel) {
-            "EV" -> if (st.optBoolean("exposureAuto", true)) "EV " + evText(st.optInt("evIndex")) else "EV (manual exposure)"
+            "EV" -> if (st.optBoolean("exposureAuto", true)) "EV " + evText(st.optInt("evIndex"))
+                else "Meter " + ((lv.opt("meter") as? Number)?.let { meterText(it.toDouble()) } ?: "—") + " EV"
             "ISO" -> if (st.optBoolean("exposureAuto", true)) {
                 auto = true
                 val v = lv.optInt("iso")
@@ -597,6 +601,7 @@ class RemoteLiveActivity : Activity() {
     private fun apply(a: JSONObject) = stage(a, refresh = true)
 
     private fun stage(a: JSONObject, refresh: Boolean) {
+        if (!r.touch()) { refreshAll(); return }   // claims the camera's remote (or says who is changing it)
         val server = status()?.optJSONObject("settings") ?: JSONObject()
         for (k in a.keys()) {
             // back to what the camera already has: nothing to send for it
@@ -733,6 +738,7 @@ class RemoteLiveActivity : Activity() {
         val v = idx * caps().optDouble("evStep", 0.1667)
         return (if (v > 0.001) "+" else "") + "%.1f".format(v)
     }
+    private fun meterText(v: Double) = (if (v > 0.05) "+" else "") + "%.1f".format(v)
     private fun shutterText(ns: Long): String {
         if (ns <= 0) return "—"
         val den = 1_000_000_000.0 / ns

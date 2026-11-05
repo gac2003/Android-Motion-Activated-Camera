@@ -59,26 +59,48 @@ class CamRemote(private val a: Activity, val cam: String) {
     /** Another phone holds the remote: this one can watch but not change anything. */
     fun lockedOut() = holder()?.let { it.optString("id") != Device.id(a) } == true
 
-    /** Takes the remote; asks first when another phone has it (that phone is told). */
-    fun take(done: () -> Unit = {}) {
+    /**
+     * The remote is automatic: the first change made here claims it (when nobody else is changing this camera), it is
+     * kept alive while changes keep coming or are waiting to be saved ([busy]), and given back about 4 s after the last
+     * one, or when the screen is left ([leave]). Returns false (and says who) when another phone is changing it.
+     */
+    fun touch(): Boolean {
         val h = holder()
         if (h != null && h.optString("id") != Device.id(a)) {
-            AlertDialog.Builder(a).setTitle("Take over the remote?")
-                .setMessage("${h.optString("name").ifEmpty { "Another phone" }} has the remote of ${name()}. If you take it, that phone can only " +
-                    "watch until it takes it back, and it is told.")
-                .setPositiveButton("Take over") { _, _ -> send("take") { ok, _ -> if (ok) done() } }
-                .setNegativeButton("Cancel", null).show()
-        } else send("take") { ok, _ -> if (ok) done() }
+            Toast.makeText(a, "${h.optString("name").ifEmpty { "Another phone" }} is changing this camera right now — try again in a few seconds",
+                Toast.LENGTH_SHORT).show()
+            return false
+        }
+        val now = System.currentTimeMillis()
+        lastTouch = now
+        if (now - lastTake > 2500) { lastTake = now; claim() }
+        if (!holding) { holding = true; ui.postDelayed(keep, 3000) }
+        return true
     }
 
-    fun release(done: () -> Unit = {}) = send("release", quiet = true) { _, _ -> done() }
+    /** The screen has unsent or sending changes: keep the remote meanwhile. */
+    var busy: () -> Boolean = { false }
+    private var lastTouch = 0L
+    private var lastTake = 0L
+    private var holding = false
+    private fun claim() { if (online()) send("take", quiet = true, silent = true) }
+    private val keep = object : Runnable {
+        override fun run() {
+            if (!holding) return
+            if (busy() || System.currentTimeMillis() - lastTouch < 4000) { lastTake = System.currentTimeMillis(); claim(); ui.postDelayed(this, 3000) }
+            else { holding = false; if (online()) send("release", quiet = true, silent = true) }
+        }
+    }
 
-    /** One line about the remote, for status areas. */
-    fun remoteText(prefs: com.motioncam.Prefs): String {
-        val h = holder() ?: return "Remote: free — your first change takes it"
-        val until = com.motioncam.Fmt.t(prefs, h.optLong("until") - Live.serverOffset, seconds = false)
-        return if (iHold()) "You have the remote (until $until unless you keep using it)"
-            else "${h.optString("name").ifEmpty { "Another phone" }} has the remote — you can watch, not change"
+    /** Leaving the camera's screen gives the remote back. */
+    fun leave() {
+        ui.removeCallbacks(keep)
+        if (holding) { holding = false; if (online()) send("release", quiet = true, silent = true) }
+    }
+
+    /** One line when another phone is changing this camera (null otherwise). */
+    fun lockText(): String? = holder()?.takeIf { it.optString("id") != Device.id(a) }?.let {
+        "🔒 ${it.optString("name").ifEmpty { "Another phone" }} is changing this camera — controls unlock when they're done"
     }
 
     fun askPin(then: () -> Unit, cancelled: () -> Unit = {}) {
@@ -93,10 +115,10 @@ class CamRemote(private val a: Activity, val cam: String) {
      * Sends a signed command; [done] gets the camera's answer. [quiet] = only failures are shown (for quick controls).
      * [onFail] runs when it could not be sent (offline, PIN prompt cancelled) or got no answer within 20 s.
      */
-    fun send(type: String, args: JSONObject? = null, quiet: Boolean = false, onFail: () -> Unit = {},
+    fun send(type: String, args: JSONObject? = null, quiet: Boolean = false, onFail: () -> Unit = {}, silent: Boolean = false,
              done: (Boolean, JSONObject?) -> Unit = { _, _ -> }) {
-        if (!online()) { Toast.makeText(a, "The camera is offline", Toast.LENGTH_SHORT).show(); onFail(); return }
-        if (status()?.optBoolean("pin") == true && pinFor() == null) { askPin({ send(type, args, quiet, onFail, done) }, onFail); return }
+        if (!online()) { if (!silent) Toast.makeText(a, "The camera is offline", Toast.LENGTH_SHORT).show(); onFail(); return }
+        if (status()?.optBoolean("pin") == true && pinFor() == null) { askPin({ send(type, args, quiet, onFail, silent, done) }, onFail); return }
         val ref = Live.ref(a, "cams/$cam/cmd")?.push() ?: run { onFail(); return }
         val id = ref.key ?: run { onFail(); return }
         val d = JSONObject().put("type", type).put("by", Device.id(a)).put("byName", Device.name(a)).put("at", Live.now())
@@ -115,7 +137,7 @@ class CamRemote(private val a: Activity, val cam: String) {
                 val msg = r.optString("msg")
                 val ok = r.optBoolean("ok")
                 if (msg == "Wrong PIN") SecretStore.put(a, "live.pin.$cam", null)
-                if (!quiet || !ok) Toast.makeText(a, msg, Toast.LENGTH_SHORT).show()
+                if (!silent && (!quiet || !ok)) Toast.makeText(a, msg, Toast.LENGTH_SHORT).show()
                 done(ok, r)
             }
             override fun onCancelled(e: DatabaseError) {}
@@ -125,7 +147,7 @@ class CamRemote(private val a: Activity, val cam: String) {
         ui.postDelayed({
             if (!answered) {
                 res.removeEventListener(l)
-                Toast.makeText(a, "No answer from the camera", Toast.LENGTH_SHORT).show()
+                if (!silent) Toast.makeText(a, "No answer from the camera", Toast.LENGTH_SHORT).show()
                 onFail()
             }
         }, 20_000)

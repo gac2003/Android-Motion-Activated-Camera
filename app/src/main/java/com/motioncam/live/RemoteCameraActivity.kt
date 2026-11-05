@@ -71,12 +71,13 @@ class RemoteCameraActivity : Activity() {
         prefs = Prefs(this)
         cam = intent.getStringExtra(Alerts.EXTRA_CAM) ?: run { finish(); return }
         r = CamRemote(this, cam)
+        r.busy = { draft.length() > 0 || saving }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
         root.addView(topBar(this, Live.phones[cam]?.name?.ifEmpty { null } ?: "Camera"))
         val frame = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         image = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
         frame.addView(image, FrameLayout.LayoutParams(-1, -1))
-        imageLabel = Ui.label(this, "Tap Live view or Frame to see the camera", 12f).apply {
+        imageLabel = Ui.label(this, "Tap Live view or Screenshot to see the camera", 12f).apply {
             setBackgroundColor(0x99000000.toInt()); setPadding(Ui.dp(this@RemoteCameraActivity, 8), Ui.dp(this@RemoteCameraActivity, 3), Ui.dp(this@RemoteCameraActivity, 8), Ui.dp(this@RemoteCameraActivity, 3))
         }
         frame.addView(imageLabel, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START))
@@ -87,23 +88,22 @@ class RemoteCameraActivity : Activity() {
             visibility = android.view.View.GONE
         }
         root.addView(liveNote)
-        // row 1: watching (live view, full screen) and the Activity log; row 2: the high-quality frame on its own
+        // tap the picture: full screen with the camera controls
+        image.setOnClickListener { startActivity(Intent(this@RemoteCameraActivity, RemoteLiveActivity::class.java).putExtra(Alerts.EXTRA_CAM, cam)) }
+        image.contentDescription = "Camera picture (tap for full screen with controls)"
+        // live view · screenshot (one high-quality picture, shown below) · activity log
         val gap = Ui.dp(this, 6)
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; val p = Ui.dp(this@RemoteCameraActivity, 8); setPadding(p, p, p, 0) }
         liveBtn = Ui.chip(this, "▶ Live view").apply { setOnClickListener { if (feed.watching) stopWatching() else startWatching() } }
         buttons.addView(liveBtn, LinearLayout.LayoutParams(0, -2, 1f))
-        buttons.addView(Ui.chip(this, "⛶ Full screen").apply {
-            contentDescription = "Full-screen live view with camera controls"
-            setOnClickListener { startActivity(Intent(this@RemoteCameraActivity, RemoteLiveActivity::class.java).putExtra(Alerts.EXTRA_CAM, cam)) }
+        buttons.addView(Ui.chip(this, "Screenshot").apply {
+            contentDescription = "Ask the camera for one high-quality picture (shown below)"
+            setOnClickListener { requestFrame() }
         }, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = gap })
         buttons.addView(Ui.chip(this, "Activity").apply {
             setOnClickListener { startActivity(Intent(this@RemoteCameraActivity, ActivityLogActivity::class.java).putExtra(Alerts.EXTRA_CAM, cam)) }
         }, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = gap })
         root.addView(buttons)
-        root.addView(Ui.chip(this, "High-quality frame").apply {
-            contentDescription = "Ask the camera for one high-quality picture (shown below)"
-            setOnClickListener { requestFrame() }
-        }, LinearLayout.LayoutParams(-1, -2).apply { val p = Ui.dp(this@RemoteCameraActivity, 8); setMargins(p, gap, p, 0) })
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; val p = Ui.dp(this@RemoteCameraActivity, 16); setPadding(p, 0, p, p * 2) }
         hqBox = hqPanel()
         content.addView(hqBox)
@@ -116,7 +116,6 @@ class RemoteCameraActivity : Activity() {
         root.addView(saveBar)
         setContentView(root)
         f = Form(this, box)
-        image.setOnClickListener { if (!feed.watching) startWatching() }
         feed = r.Feed(3 * 60_000L, { bmp, at ->
             image.setImageBitmap(bmp)
             imageLabel.text = "Live (every 2 s) · " + Fmt.t(prefs, at)
@@ -156,7 +155,7 @@ class RemoteCameraActivity : Activity() {
         }
     }
 
-    // ------------------------------------------------------------------ high-quality frame (under the live view)
+    // ------------------------------------------------------------------ screenshot: one high-quality frame (under the live view)
 
     private fun hqPanel(): LinearLayout {
         val ctx = this
@@ -174,7 +173,7 @@ class RemoteCameraActivity : Activity() {
             addView(head)
             hqImage = ImageView(ctx).apply {
                 adjustViewBounds = true; scaleType = ImageView.ScaleType.FIT_CENTER; setBackgroundColor(Color.BLACK)
-                contentDescription = "High-quality frame (tap to view full screen)"
+                contentDescription = "Screenshot (tap to view full screen)"
                 setOnClickListener { showFrameFull() }
             }
             addView(hqImage, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(ctx, 6) })
@@ -234,7 +233,7 @@ class RemoteCameraActivity : Activity() {
         saveInfo.text = if (saving) "Saving…" else "$n unsaved change${if (n == 1) "" else "s"}"
         val can = !saving && !r.lockedOut()
         saveBtn.isEnabled = can; saveBtn.alpha = if (can) 1f else 0.5f
-        if (r.lockedOut() && !saving) saveInfo.text = "Another phone has the remote" 
+        if (r.lockedOut() && !saving) saveInfo.text = "Another phone is changing this camera"
         if (show == (saveBar.visibility == android.view.View.VISIBLE)) return
         if (show) {
             saveBar.visibility = android.view.View.VISIBLE
@@ -292,6 +291,7 @@ class RemoteCameraActivity : Activity() {
     override fun onPause() {
         Live.listeners -= refresh
         Live.eventListeners -= events
+        r.leave()   // gives the remote back
         ui.removeCallbacks(liveTick)
         if (::feed.isInitialized) stopWatching()
         super.onPause()
@@ -324,7 +324,7 @@ class RemoteCameraActivity : Activity() {
         val m = HashMap<String, Any>(); m["by"] = Device.id(this); m["at"] = at
         pinFor()?.let { m["sig"] = CameraLink.sign(cam, it, "snap:$id:$at") }
         hqBox.visibility = android.view.View.VISIBLE
-        hqLabel.text = "Asking for a high-quality frame…"
+        hqLabel.text = "Taking a screenshot…"
         scroll.post { scroll.smoothScrollTo(0, 0) }
         val out = Live.ref(this, "cams/$cam/snap/$id") ?: return
         val l = object : ValueEventListener {
@@ -337,7 +337,7 @@ class RemoteCameraActivity : Activity() {
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { hqImage.setImageBitmap(it) } ?: return
                 hqBytes = bytes
                 hqTime = System.currentTimeMillis()
-                hqLabel.text = "High-quality frame · " + Fmt.t(prefs, hqTime)
+                hqLabel.text = "Screenshot · " + Fmt.t(prefs, hqTime)
             }
             override fun onCancelled(e: DatabaseError) {}
         }
@@ -348,14 +348,18 @@ class RemoteCameraActivity : Activity() {
 
     // ------------------------------------------------------------------ PIN + commands
 
-    private fun send(type: String, args: JSONObject? = null, onFail: () -> Unit = {}, done: (Boolean, JSONObject?) -> Unit = { _, _ -> }) =
+    private fun send(type: String, args: JSONObject? = null, onFail: () -> Unit = {}, done: (Boolean, JSONObject?) -> Unit = { _, _ -> }) {
+        // changing the camera (monitoring, Save) claims its remote like any change
+        if (type in setOf("set", "pause", "resume", "stop", "start") && !r.touch()) { onFail(); return }
         r.send(type, args, onFail = onFail, done = done)
+    }
 
     /** Settings that show or hide other controls: the screen is rebuilt right away when they change. */
     private val STRUCTURAL = setOf("exposureAuto", "focusAuto", "wbAuto", "camera")
 
-    /** A setting changed here: kept as a draft until Save. */
+    /** A setting changed here: kept as a draft until Save (and claims the camera's remote meanwhile). */
     private fun set(key: String, value: Any) {
+        if (!r.touch()) { lastSettings = ""; ui.post { renderIfChanged() }; return }
         val server = status()?.optJSONObject("settings")?.opt(key)
         if (server != null && server.toString() == value.toString()) draft.remove(key) else draft.put(key, value)
         updateBar()
@@ -376,7 +380,9 @@ class RemoteCameraActivity : Activity() {
     // ------------------------------------------------------------------ screen
 
     private fun renderIfChanged() {
-        val key = (status()?.toString() ?: "") + "|" + (caps()?.toString()?.length ?: 0) + "|" + online()
+        // the camera's live values (meter, auto ISO…) change every few seconds while watching: they don't rebuild the list
+        val key = (status()?.let { JSONObject(it.toString()).apply { remove("live") } }?.toString() ?: "") + "|" +
+            (caps()?.toString()?.length ?: 0) + "|" + online()
         // controls are rebuilt only when the camera's state changed (not while the user drags something)
         if (key == lastSettings) return
         // someone is typing a value: rebuild once they're done (their text would be lost otherwise)
@@ -420,14 +426,8 @@ class RemoteCameraActivity : Activity() {
         }
         if (s.optBoolean("pin")) f.note("This camera needs a PIN for controls" + if (pinFor() != null) " (remembered)." else ".")
 
-        f.title("Remote")
-        f.line(r.remoteText(prefs), 14f, if (r.lockedOut()) Ui.ACCENT else Color.WHITE)
-        when {
-            r.iHold() -> f.row(f.chip("Give the remote back") { r.release { lastSettings = ""; renderIfChanged() } })
-            r.lockedOut() -> f.row(f.chip("Take over the remote") { r.take() }.apply { Ui.setChipState(this, true) })
-            else -> f.row(f.chip("Take the remote") { r.take() })
-        }
-        f.note("Only one phone at a time can change this camera, so changes don't clash. Others can still watch and get alerts.")
+        // another phone is changing this camera: one line, controls locked until it's done (a few seconds)
+        r.lockText()?.let { f.line(it, 13f, Ui.ACCENT) }
 
         f.title("Monitoring")
         val stopChip = f.chip("Stop monitoring") {
@@ -473,6 +473,10 @@ class RemoteCameraActivity : Activity() {
                 parse = { t -> t.replace(',', '.').replace("+", "").toDoubleOrNull()?.let { ((it / evStep).roundToInt().coerceIn(lo, hi)) * evStep } },
                 signed = true, enabled = enabled) { set("evIndex", (it / evStep).roundToInt()) }
         } else {
+            // manual exposure: the camera's light meter (0 = what automatic exposure would aim for)
+            s.optJSONObject("live")?.opt("meter")?.let { it as? Number }?.let { m ->
+                f.line("Meter: " + (if (m.toDouble() > 0.05) "+" else "") + "%.1f EV".format(m.toDouble()), 13f, Ui.ACCENT)
+            }
             val isoLo = c.optInt("isoMin", 50).toDouble(); val isoHi = c.optInt("isoMax", 3200).toDouble()
             sf.scaled("ISO", "", st.optInt("iso", 400).toDouble(), 1000, toPos = { toLog(it, isoLo, isoHi) }, fromPos = { fromLog(it, isoLo, isoHi).roundToInt().toDouble() },
                 format = { "${it.roundToInt()}" }, parse = { it.toDoubleOrNull()?.coerceIn(isoLo, isoHi)?.roundToInt()?.toDouble() },
@@ -501,11 +505,16 @@ class RemoteCameraActivity : Activity() {
                 f.note("Closest: about %.2f m. Leave the box empty for infinity (∞).".format(1 / minFocus))
             }
         }
-        // white balance: automatic or one of the camera screen's presets
+        // white balance: as on the camera screen — automatic, or a slider over its presets (type Kelvin: nearest preset)
         val presets = com.motioncam.ProCaps.wbPresets
-        val wbIdx = if (st.optBoolean("wbAuto", true)) 0 else com.motioncam.ProCaps.nearestPreset(st.optInt("wbKelvin", 5200)) + 1
-        sf.choice("White balance", listOf("Automatic") + presets.map { "${it.first} (${it.second} K)" }, wbIdx, enabled) { i ->
-            if (i == 0) set("wbAuto", true) else { set("wbAuto", false); set("wbKelvin", presets[i - 1].second) }
+        sf.toggle("White balance: automatic", st.optBoolean("wbAuto", true), enabled) { set("wbAuto", it) }
+        if (!st.optBoolean("wbAuto", true)) {
+            val idx = com.motioncam.ProCaps.nearestPreset(st.optInt("wbKelvin", 5200))
+            sf.scaled("White balance", "K", idx.toDouble(), presets.size - 1,
+                toPos = { it.roundToInt() }, fromPos = { it.toDouble() },
+                format = { "${presets[it.roundToInt().coerceIn(0, presets.size - 1)].second}" },
+                parse = { t -> t.toIntOrNull()?.let { com.motioncam.ProCaps.nearestPreset(it).toDouble() } },
+                decimalInput = false, enabled = enabled) { set("wbKelvin", presets[it.roundToInt().coerceIn(0, presets.size - 1)].second) }
         }
         val zMin = c.optDouble("zoomMin", 1.0); val zMax = c.optDouble("zoomMax", 1.0)
         if (zMax > zMin + 0.01) sf.decimal("Zoom", "×", zMin.toFloat(), zMax.toFloat(), st.optDouble("zoom", 1.0).toFloat(), enabled) { set("zoom", (it * 10).roundToInt() / 10.0) }

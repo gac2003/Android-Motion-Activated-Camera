@@ -188,12 +188,14 @@ object CameraLink {
             .put("pin", pin(ctx) != null).put("pinForView", pin(ctx) != null && p.livePinForView)
             .put("settings", settings(p))
             .put("live", JSONObject().put("iso", e?.liveIso ?: 0).put("shutterNs", e?.liveShutterNs ?: 0L)
-                .put("kelvin", e?.liveKelvin ?: 0).put("focus", (e?.liveFocusDiopter ?: -1f).toDouble()))
+                .put("kelvin", e?.liveKelvin ?: 0).put("focus", (e?.liveFocusDiopter ?: -1f).toDouble())
+                .put("meter", e?.liveMeterEv?.takeIf { !it.isNaN() }?.toDouble() ?: JSONObject.NULL))
         val m = HashMap<String, Any>()
         m["at"] = ServerValue.TIMESTAMP
         m["d"] = LiveNet.seal(ctx, o.toString())
         val lensKey = p.camera
-        if (lensKey != lastLens || lastLens.isEmpty()) { lastLens = lensKey; caps(ctx)?.let { m["caps"] = LiveNet.seal(ctx, it.toString()) } }
+        // what the controls may offer: sent once the camera knows it (in standby it may not be open yet)
+        if (lensKey != lastLens || lastLens.isEmpty()) caps(ctx)?.let { m["caps"] = LiveNet.seal(ctx, it.toString()); lastLens = lensKey }
         path(ctx, "status")?.updateChildren(m)
     }
 
@@ -327,6 +329,7 @@ object CameraLink {
                     if (f != null) {
                         seq = f.first
                         path(ctx, "live")?.setValue(mapOf("at" to ServerValue.TIMESTAMP, "img" to LiveNet.sealBytes(ctx, f.second)))
+                        liveValuesIfChanged(ctx)
                     }
                     Thread.sleep(2000)
                 }
@@ -336,6 +339,17 @@ object CameraLink {
         liveThread = t
         t.isDaemon = true
         t.start()
+    }
+
+    private var lastLiveValues = ""
+    private var lastLiveValuesAt = 0L
+
+    /** While someone watches: the automatic values (ISO, shutter, white balance, focus, meter) every few seconds when they change. */
+    private fun liveValuesIfChanged(ctx: Context) {
+        val e = EngineHost.peek() ?: return
+        val v = "${e.liveIso}|${e.liveShutterNs}|${e.liveKelvin}|${"%.1f".format(e.liveFocusDiopter)}|${"%.1f".format(e.liveMeterEv)}"
+        val now = System.currentTimeMillis()
+        if (v != lastLiveValues && now - lastLiveValuesAt >= 3000) { lastLiveValues = v; lastLiveValuesAt = now; main.post { publishStatus(ctx) } }
     }
 
     private fun stopLive() {
@@ -372,8 +386,12 @@ object CameraLink {
 
     // ------------------------------------------------------------------ the remote (one controlling phone at a time)
 
-    /** The remote is kept while its holder uses it; 15 minutes without a change frees it. */
-    private const val LEASE_MS = 15 * 60_000L
+    /**
+     * The remote is automatic: a viewer's change claims it, the viewer keeps it alive every few seconds while it is
+     * changing things, and it frees itself 8 s after the last renewal (or when given back). No alerts: it changes hands
+     * often; open camera screens show who is changing the camera.
+     */
+    private const val LEASE_MS = 8_000L
     @Volatile private var holderId: String? = null
     @Volatile private var holderName = ""
     @Volatile private var holderUntil = 0L
@@ -381,15 +399,10 @@ object CameraLink {
     private fun holder(): String? = holderId?.takeIf { Live.now() < holderUntil }
     private fun holderJson(): Any = holder()?.let { JSONObject().put("id", it).put("name", holderName).put("until", holderUntil) } ?: JSONObject.NULL
 
-    /** [by] takes the remote (or keeps it); tells everyone when it changes hands. */
+    /** [by] claims (or keeps) the remote; the status tells the other phones. */
     private fun giveRemote(ctx: Context, by: String, name: String) {
-        val prev = holder()
         holderId = by; holderName = name; holderUntil = Live.now() + LEASE_MS
-        if (prev != by) {
-            event(ctx, "remote_taken", "$name has the remote" + if (prev != null) " (taken from ${holderNameOf(prev)})" else "",
-                JSONObject().put("by", by).put("byName", name).put("from", prev ?: "").put("fromName", if (prev != null) holderNameOf(prev) else ""))
-            main.post { publishStatus(ctx) }
-        }
+        main.post { publishStatus(ctx) }
     }
     private var lastHolderName = HashMap<String, String>()
     private fun holderNameOf(id: String) = lastHolderName[id] ?: "another phone"
@@ -416,14 +429,14 @@ object CameraLink {
         val who = d.optString("byName", "another phone")
         val by = d.optString("by")
         if (by.isNotEmpty()) lastHolderName[by] = who
-        // one controller at a time: the first change takes a free remote; someone else's remote must be taken over
-        if (type in CONTROL) {
+        // one phone changes a camera at a time: a change claims a free remote; while another phone holds it, wait
+        if (type in CONTROL || type == "take") {
             val h = holder()
-            if (h != null && h != by) { reply(false, "$holderName has the remote. Take it over to make changes."); return }
+            if (h != null && h != by) { reply(false, "$holderName is changing this camera right now — try again in a few seconds"); return }
             if (by.isNotEmpty()) giveRemote(ctx, by, who)
         }
         when (type) {
-            "take" -> { giveRemote(ctx, by, who); reply(true, "You have the remote") }
+            "take" -> reply(true, "You have the remote")
             "release" -> {
                 if (holder() == by) { holderId = null; holderUntil = 0; main.post { publishStatus(ctx) } }
                 reply(true, "Remote given back")

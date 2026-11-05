@@ -188,7 +188,8 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
   In-app cards stack like the phone's notifications (one in front, "+N more" with layers behind): swipe a card sideways
   to dismiss it, up to dismiss all, tap to open; they hide by themselves after a few seconds.
 * **Remote camera**: low-rate live view (a frame every 2 s, only while watched, stops after 3 min), a **high-quality
-  frame** on request (shown under the live view; tap for full screen, save it to Pictures/MotionCam), the camera
+  frame** (*Screenshot*, shown under the live view; tap for full screen, save it to Pictures/MotionCam); tap the live
+  picture for the full-screen view, the camera
   controls (lens, exposure, ISO, shutter, focus, white balance, zoom), recording and motion settings, start / pause /
   resume / stop monitoring, and the camera's **Activity** log (7 days). Settings changed remotely are drafts until you
   tap **Save** (or **Cancel**) in the bar that stays at the bottom of the screen; leaving with unsaved changes asks first.
@@ -205,9 +206,9 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
 * **Standby** (camera phones, on by default): when monitoring stops, the phone stays connected with the camera off (a
   "standby" notification with Start / Turn off), so another phone can start monitoring again. It begins whenever
   MotionCam is opened on the camera phone. Most reliable while charging (Android may delay messages to a sleeping phone).
-* **The remote**: only one phone at a time can change a camera (settings, start/pause/stop). The first change takes a
-  free remote; another phone can **take it over** (the previous holder and the others are told). It frees itself after
-  15 minutes without changes, or with *Give the remote back*. Everyone can still watch and get alerts.
+* **The remote** is automatic: only one phone at a time can change a camera. Your first change claims it (when nobody
+  else is changing that camera); it is given back about 4 s after your last change or when you leave the camera's
+  screen. Meanwhile other phones see "🔒 … is changing this camera" with their controls locked; they can still watch.
 * **PIN**: every camera phone has one (6+ characters); it protects controls and settings and, by default, the live view
   and frames. Requests are signed with it (never sent; slow hashing against offline guessing); 5 wrong PINs lock remote
   control for 10 minutes, doubling each time. Network codes are always made by the app (20 random characters, ~99 bits).

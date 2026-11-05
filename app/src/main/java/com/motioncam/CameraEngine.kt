@@ -826,7 +826,8 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         // the hardware preview is only on screen if the session uses the UI's *current* surface
         val hw = hwPreview && sessionSt != null && sessionSt === previewSt
         val motionDue = (monitoringNow || showMotion) && now - lastMotionRun >= (if (m == Mode.RECORDING && !showMotion) 250 else 125)
-        val meterDue = sink != null && now - lastMeter >= 250
+        // the light meter: for this phone's EV display, and for viewers watching it live (their EV display)
+        val meterDue = (sink != null || FrameHub.clients > 0) && now - lastMeter >= 250
         val overlayWanted = sink != null && (!hw || peaking || showMotion)
         val overlayDue = overlayWanted && now - lastOverlayRun >= (if (hw) 100 else 66)
         val jpegDue = FrameHub.clients > 0 && now - lastJpegRun >= 200

@@ -190,7 +190,7 @@ class ClipsActivity : Activity() {
 
         bottomBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(Ui.PANEL)
+            setBackgroundColor(0xFF15171B.toInt())   // solid: the clips underneath must not show through
             elevation = Ui.dp(this@ClipsActivity, 8).toFloat()
             val p = Ui.dp(this@ClipsActivity, 4)
             setPadding(p, p, p, p * 2)
@@ -244,8 +244,8 @@ class ClipsActivity : Activity() {
         }.also { pressFeedback(it) }
         bottomBar.addView(more, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(selBar)
-        summary = Ui.label(this, "", 12f, Ui.GREY).apply { setPadding(Ui.dp(this@ClipsActivity, 52), 0, Ui.dp(this@ClipsActivity, 12), Ui.dp(this@ClipsActivity, 4)) }
-        root.addView(summary)
+        // the count / size / state line lives in the list's title row (scrolls away), not in a line of its own
+        summary = Ui.label(this, "", 12f, Ui.GREY)
         root.addView(actionRow)
         banner = Ui.label(this, "Clips from earlier installs are hidden. Tap to show them.", 13f, Ui.ACCENT).apply {
             setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8))
@@ -253,7 +253,7 @@ class ClipsActivity : Activity() {
             setOnClickListener { if (remote != null) removeMissing() else requestPermissions(arrayOf(videoPermission()), 7) }
             visibility = View.GONE
         }
-        if (remote != null) summary.setOnClickListener { lastError?.let { AlertDialog.Builder(this).setTitle("Could not refresh").setMessage(it).setPositiveButton("OK", null).show() } }
+
         root.addView(banner)
         list = ListView(this).apply {
             divider = null
@@ -339,11 +339,11 @@ class ClipsActivity : Activity() {
                 clips = all
                 buildRows()
                 val total = all.sumOf { it.size }
-                summary.text = when {
+                setSummary(when {
                     all.isEmpty() && collectionId != null -> "No clips in this collection yet. In Clips, hold a clip to select it, then Add to…"
                     all.isEmpty() -> "No clips yet"
-                    else -> "${all.size} clips · %.1f GB".format(total / 1e9) + legend()
-                }
+                    else -> "${all.size} clip${if (all.size == 1) "" else "s"} · ${sizeText(total)}" + legend()
+                })
             }
         }.start()
     }
@@ -407,6 +407,15 @@ class ClipsActivity : Activity() {
         if (res.any { r -> r.marks[c.name]?.protected == true }) return "\uD83D\uDD12"
         if (collectionId != null && remote == null && res.none { c.name in it.existing }) return "☁✕"
         return null
+    }
+
+    private fun sizeText(b: Long) = if (b >= 1_000_000_000L) "%.1f GB".format(b / 1e9) else "%.0f MB".format(b / 1e6)
+
+    /** The count / size / state line of the list's title row. */
+    private fun setSummary(t: CharSequence) {
+        if (summary.text.toString() == t.toString()) return
+        summary.text = t
+        adapter.notifyDataSetChanged()
     }
 
     private fun legend(): String =
@@ -492,14 +501,14 @@ class ClipsActivity : Activity() {
         val total = all.sumOf { it.size }
         // the clock time of the last check (it changes visibly with every automatic check, unlike "just now")
         val ago = if (src.lastRefresh == 0L) "" else " · checked " + checkedAt(src.lastRefresh)
-        summary.text = when {
+        setSummary(when {
             all.isEmpty() && lastError == null && (refreshing || src.lastRefresh == 0L) -> "Loading…"
             all.isEmpty() && cid != null -> "No clips in this collection yet. Hold a clip to select it, then Add to…"
             all.isEmpty() -> if (lastError != null) "Could not load this folder (tap for details)" else "No MotionCam clips in this folder yet$ago"
-            else -> "${all.size - missing} clips · %.1f GB".format(total / 1e9) + ago +
+            else -> "${all.size - missing} clips · ${sizeText(total)}" + ago +
                 (if (missing > 0) " · $missing missing from the cloud" else "") +
                 (if (lastError != null) " · offline, showing the last list (tap for details)" else "") + legend()
-        }
+        })
     }
 
     private fun checkedAt(t: Long): String {
@@ -521,7 +530,7 @@ class ClipsActivity : Activity() {
         val wDp = resources.displayMetrics.widthPixels / resources.displayMetrics.density
         cols = maxOf(2, (wDp / 170).toInt())
         val out = ArrayList<Row>()
-        if (collectionId == null && remote == null) out += Row.Title
+        out += Row.Title
         for ((day, items) in clips.groupBy { dayStart(it.startMs) }.toSortedMap(compareByDescending { it })) {
             out += Row.Header(day, items)
             if (day !in collapsed) items.chunked(cols).forEach { out += Row.Items(it) }
@@ -617,15 +626,18 @@ class ClipsActivity : Activity() {
 
     // ------------------------------------------------------------------ day headers (list + sticky copy)
 
-    /** "LOCAL CLIPS · N clips on this phone": small, in the accent colour, so it is clear what this list is. */
+    /**
+     * The list's first row: what it is ("LOCAL CLIPS", "REMOTE FOLDER", "COLLECTION") in the accent colour, then its
+     * count and size (and a remote folder's state). Scrolls away with the list.
+     */
     private fun titleView(): LinearLayout {
         val ctx = this
         return LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(Ui.dp(ctx, 12), Ui.dp(ctx, 10), Ui.dp(ctx, 12), Ui.dp(ctx, 2))
-            addView(Ui.label(ctx, "LOCAL CLIPS", 15f, Ui.ACCENT).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); letterSpacing = 0.06f })
-            addView(Ui.label(ctx, "", 12f, Ui.GREY).apply { setPadding(Ui.dp(ctx, 10), 0, 0, 0) })
+            addView(Ui.label(ctx, "", 15f, Ui.ACCENT).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); letterSpacing = 0.06f })
+            addView(Ui.label(ctx, "", 12f, Ui.GREY).apply { setPadding(Ui.dp(ctx, 10), 0, 0, 0) }, LinearLayout.LayoutParams(0, -2, 1f))
         }
     }
 
@@ -796,7 +808,13 @@ class ClipsActivity : Activity() {
             val row = rows[position]
             if (row is Row.Title) {
                 val v = (convertView as? LinearLayout)?.takeIf { it.tag == "title" } ?: titleView().apply { tag = "title" }
-                (v.getChildAt(1) as TextView).text = "${clips.size} clip${if (clips.size == 1) "" else "s"} on this phone"
+                (v.getChildAt(0) as TextView).text = when { collectionId != null -> "COLLECTION"; remote != null -> "REMOTE FOLDER"; else -> "LOCAL CLIPS" }
+                (v.getChildAt(1) as TextView).text = summary.text
+                // remote folder that could not be refreshed: tap for the reason
+                v.setOnClickListener(if (remote != null && lastError != null) View.OnClickListener {
+                    AlertDialog.Builder(this@ClipsActivity).setTitle("Could not refresh").setMessage(lastError).setPositiveButton("OK", null).show()
+                } else null)
+                v.isClickable = remote != null && lastError != null
                 return v
             }
             if (row is Row.Header) {

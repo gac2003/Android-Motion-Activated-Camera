@@ -279,47 +279,15 @@ class RemoteFoldersActivity : Activity() {
         com.motioncam.cloud.CloudSync.kick(this)
     }
 
-    // ------------------------------------------------------------------ top rows: upload queue, downloaded clips, settings
-
-    /** A tall (two-line) tappable row: title and a live subtitle. */
-    private fun navRow(title: String, subtitle: () -> String, icon: IconDrawable.Kind, click: () -> Unit): View {
-        val ctx = this
-        val r = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = Ui.dp(ctx, 60)
-            setPadding(Ui.dp(ctx, 12), Ui.dp(ctx, 8), Ui.dp(ctx, 12), Ui.dp(ctx, 8))
-            background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30FFFFFF),
-                GradientDrawable().apply { setColor(0xFF2A2D33.toInt()); cornerRadius = Ui.dp(ctx, 12).toFloat() }, null)
-            isClickable = true
-            setOnClickListener { click() }
-        }
-        r.addView(android.widget.ImageView(ctx).apply { setImageDrawable(IconDrawable(icon)) }, LinearLayout.LayoutParams(Ui.dp(ctx, 24), Ui.dp(ctx, 24)))
-        val texts = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(Ui.dp(ctx, 14), 0, 0, 0) }
-        texts.addView(Ui.label(ctx, title, 16f))
-        val sub = Ui.label(ctx, subtitle(), 12f, Ui.GREY)
-        texts.addView(sub)
-        liveLines += { val t = subtitle(); if (sub.text != t) sub.text = t }
-        r.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
-        r.addView(Ui.label(ctx, "›", 22f, Ui.GREY))
-        return LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(0, Ui.dp(ctx, 8), 0, 0); addView(r) }
-    }
+    // ------------------------------------------------------------------ top row: settings (with the upload queue and downloaded clips)
 
     private fun quickActions() {
         val ctx = this
-        box.addView(navRow("Upload queue", {
+        box.addView(FolderSettings.navRow(this, "Remote folder settings", {
             val c = com.motioncam.cloud.CloudSync.counts(ctx, null)
-            (if (c.queued == 0) "Nothing waiting" else "${c.queued} waiting") + (if (c.failed > 0) " · ${c.failed} failed" else "")
-        }, IconDrawable.Kind.CLOUD_UP) { startActivity(Intent(ctx, com.motioncam.cloud.UploadQueueActivity::class.java)) }.also { backupTitle = it })
-        box.addView(navRow("Clear downloaded clips", { "${StreamCache.cacheBytes(ctx) / 1_000_000} MB used by clips played from remote folders" },
-            IconDrawable.Kind.TRASH) {
-            AlertDialog.Builder(ctx).setTitle("Clear downloaded clips?")
-                .setMessage("Frees the space used by clips played from cloud folders. They stream again the next time you play them.")
-                .setPositiveButton("Clear") { _, _ -> StreamCache.clearAll(ctx); Toast.makeText(ctx, "Cleared", Toast.LENGTH_SHORT).show(); render() }
-                .setNegativeButton("Cancel", null).show()
-        })
-        box.addView(navRow("Remote folder settings", { "Upload rules (Wi-Fi, charging, quality), FTP/SFTP, keeping copies" },
-            IconDrawable.Kind.SETTINGS) { startActivity(Intent(ctx, FolderSettingsActivity::class.java)) })
+            "Upload queue (" + (if (c.queued == 0) "nothing waiting" else "${c.queued} waiting") + (if (c.failed > 0) ", ${c.failed} failed" else "") +
+                "), downloaded clips, upload rules"
+        }, IconDrawable.Kind.SETTINGS, liveLines) { startActivity(Intent(ctx, FolderSettingsActivity::class.java)) }.also { backupTitle = it })
     }
 
     private fun open(s: RemoteSource) {

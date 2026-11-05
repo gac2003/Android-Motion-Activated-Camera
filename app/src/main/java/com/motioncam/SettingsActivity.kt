@@ -180,6 +180,7 @@ class SettingsActivity : Activity() {
             live += update
             setOnClickListener { startActivity(Intent(this@SettingsActivity, com.motioncam.remote.RemoteFoldersActivity::class.java)) }
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
+        com.motioncam.remote.FolderSettings.storageRows(this, box, live)
         com.motioncam.remote.FolderSettings.build(this, form, { s ->
             box.addView(Ui.label(this, s, 14f, Ui.ACCENT).apply { setPadding(0, Ui.dp(this@SettingsActivity, 14), 0, 0) })
         }, { note(it) })

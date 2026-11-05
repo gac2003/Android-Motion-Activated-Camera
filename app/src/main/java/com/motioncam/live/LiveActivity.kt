@@ -44,8 +44,36 @@ class LiveActivity : Activity() {
         f = Form(this, box)
     }
 
-    override fun onResume() { super.onResume(); Live.listeners += refresh; Live.viewerActive = true; Live.refresh(this); render() }
-    override fun onPause() { Live.listeners -= refresh; super.onPause() }
+    /** Recent activity across all cameras (top of the screen), updating live. */
+    private var dash: ActivityFeed? = null
+    private var dashBox: LinearLayout? = null
+
+    override fun onResume() {
+        super.onResume()
+        Live.listeners += refresh
+        Live.viewerActive = true
+        Live.refresh(this)
+        dash = ActivityFeed(this, 12) { fillDash() }
+        render()
+    }
+    override fun onPause() { Live.listeners -= refresh; dash?.stop(); dash = null; super.onPause() }
+
+    /** The latest few notable events of all cameras (motion with its clip as one entry); the rest is in Activity. */
+    private fun fillDash() {
+        val box = dashBox ?: return
+        if (isFinishing) return
+        box.removeAllViews()
+        val d = dash ?: return
+        val list = d.events().take(6)
+        if (list.isEmpty()) {
+            box.addView(Ui.label(this, if (d.loaded) "No camera activity in the last 7 days." else "Loading…", 13f, Ui.GREY).apply {
+                setPadding(0, Ui.dp(this@LiveActivity, 4), 0, Ui.dp(this@LiveActivity, 4))
+            })
+            return
+        }
+        val prefs = Prefs(this)
+        for (e in list) box.addView(ActivityLogActivity.eventRow(this, prefs, e, showCam = true))
+    }
 
     private fun render() {
         val box = f.box
@@ -67,6 +95,16 @@ class LiveActivity : Activity() {
         if (!prefs.liveOn) return
         f.line(if (prefs.liveCamera) "This phone: camera and viewer" else "This phone: viewer only (it can't be watched or controlled)",
             13f, Ui.GREY)
+
+        // recent activity of all cameras, near the top (a few entries, so the rest of the screen stays close)
+        if (LiveNet.mode(this) != null && LiveNet.ready(this)) {
+            f.title("Recent activity")
+            dashBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            box.addView(dashBox)
+            dash?.sync()
+            fillDash()
+            f.button("See all activity", full = false) { startActivity(Intent(this, ActivityLogActivity::class.java)) }
+        } else dashBox = null
 
         f.title("Your phones' network")
         val mode = LiveNet.mode(this)

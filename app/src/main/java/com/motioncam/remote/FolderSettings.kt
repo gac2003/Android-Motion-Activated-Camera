@@ -15,6 +15,47 @@ import com.motioncam.topBar
  * Built by the same code in the app's Settings and in Remote Folders → ⚙, so both always show the same thing.
  */
 object FolderSettings {
+    /** A tall (two-line) tappable row: icon, title, a live subtitle (refreshed through [live]) and ›. */
+    fun navRow(a: Activity, title: String, subtitle: () -> String, icon: com.motioncam.IconDrawable.Kind,
+               live: MutableList<() -> Unit>, click: () -> Unit): android.view.View {
+        val r = LinearLayout(a).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = Ui.dp(a, 60)
+            setPadding(Ui.dp(a, 12), Ui.dp(a, 8), Ui.dp(a, 12), Ui.dp(a, 8))
+            background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30FFFFFF),
+                android.graphics.drawable.GradientDrawable().apply { setColor(0xFF2A2D33.toInt()); cornerRadius = Ui.dp(a, 12).toFloat() }, null)
+            isClickable = true
+            setOnClickListener { click() }
+        }
+        r.addView(android.widget.ImageView(a).apply { setImageDrawable(com.motioncam.IconDrawable(icon)) }, LinearLayout.LayoutParams(Ui.dp(a, 24), Ui.dp(a, 24)))
+        val texts = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(Ui.dp(a, 14), 0, 0, 0) }
+        texts.addView(Ui.label(a, title, 16f))
+        val sub = Ui.label(a, subtitle(), 12f, Ui.GREY)
+        texts.addView(sub)
+        live += { val t = subtitle(); if (sub.text != t) sub.text = t }
+        r.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+        r.addView(Ui.label(a, "›", 22f, Ui.GREY))
+        return LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(0, Ui.dp(a, 8), 0, 0); addView(r) }
+    }
+
+    /** The upload queue and the downloaded (played) clips: on top of the folder settings. */
+    fun storageRows(a: Activity, box: LinearLayout, live: MutableList<() -> Unit>) {
+        box.addView(navRow(a, "Upload queue", {
+            val c = CloudSync.counts(a, null)
+            (if (c.queued == 0) "Nothing waiting" else "${c.queued} waiting") + (if (c.failed > 0) " · ${c.failed} failed" else "")
+        }, com.motioncam.IconDrawable.Kind.CLOUD_UP, live) { a.startActivity(android.content.Intent(a, com.motioncam.cloud.UploadQueueActivity::class.java)) })
+        box.addView(navRow(a, "Clear downloaded clips", { "${StreamCache.cacheBytes(a) / 1_000_000} MB used by clips played from remote folders" },
+            com.motioncam.IconDrawable.Kind.TRASH, live) {
+            android.app.AlertDialog.Builder(a).setTitle("Clear downloaded clips?")
+                .setMessage("Frees the space used by clips played from cloud folders. They stream again the next time you play them.")
+                .setPositiveButton("Clear") { _, _ ->
+                    StreamCache.clearAll(a); android.widget.Toast.makeText(a, "Cleared", android.widget.Toast.LENGTH_SHORT).show(); live.forEach { it() }
+                }
+                .setNegativeButton("Cancel", null).show()
+        })
+    }
+
     fun build(a: Activity, form: SettingsForm, title: (String) -> Unit, note: (String) -> Unit, changed: () -> Unit = {}) {
         val p = Prefs(a)
         title("Uploading")
@@ -73,7 +114,14 @@ class FolderSettingsActivity : Activity() {
         setContentView(root)
         val title: (String) -> Unit = { s -> box.addView(Ui.label(this, s.uppercase(), 13f, Ui.ACCENT).apply { setPadding(0, Ui.dp(this@FolderSettingsActivity, 22), 0, Ui.dp(this@FolderSettingsActivity, 4)) }) }
         val note: (String) -> Unit = { s -> box.addView(Ui.label(this, s, 12f, 0xFFB0B4BA.toInt()).apply { setPadding(0, Ui.dp(this@FolderSettingsActivity, 6), 0, Ui.dp(this@FolderSettingsActivity, 6)) }) }
+        FolderSettings.storageRows(this, box, live)
         FolderSettings.build(this, SettingsForm(this, box), title, note)
         FolderSettings.help(title, note)
     }
+
+    private val live = ArrayList<() -> Unit>()
+    private val ui = android.os.Handler(android.os.Looper.getMainLooper())
+    private val tick = object : Runnable { override fun run() { live.forEach { try { it() } catch (_: Exception) {} }; ui.postDelayed(this, 2000) } }
+    override fun onResume() { super.onResume(); ui.post(tick) }
+    override fun onPause() { ui.removeCallbacks(tick); super.onPause() }
 }

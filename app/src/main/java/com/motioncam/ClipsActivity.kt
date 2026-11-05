@@ -46,9 +46,13 @@ class ClipsActivity : Activity() {
     private var swipe: androidx.swiperefreshlayout.widget.SwipeRefreshLayout? = null
     private var favIds: Set<Long> = emptySet()
     private sealed class Row {
+        /** "Local clips" at the top of this phone's own clips (scrolls away with the list). */
+        object Title : Row()
         class Header(val dayStart: Long, val clips: List<Clip>) : Row()
         class Items(val clips: List<Clip>) : Row()
     }
+
+    private lateinit var selAllBtn: TextView
 
     private var clips: List<Clip> = emptyList()
     private var rows: List<Row> = emptyList()
@@ -175,10 +179,14 @@ class ClipsActivity : Activity() {
         selInfo = Ui.label(this, "", 12f, 0xFFCFC6AE.toInt()).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
         selTexts.addView(selTitle); selTexts.addView(selInfo)
         selBar.addView(selTexts, LinearLayout.LayoutParams(0, -2, 1f))
-        selBar.addView(iconButton(this, IconDrawable.Kind.SELECT_ALL, 48, 12) {
-            if (selected.size == clips.size) selected.clear() else clips.forEach { selected += it.id }
-            if (selected.isEmpty()) exitSelection() else updateSelection()
-        }.apply { contentDescription = "Select all"; tooltipText = "Select all / none" })
+        selAllBtn = Ui.chip(this, "Select all").apply {
+            setOnClickListener {
+                if (selected.size == clips.size) selected.clear() else clips.forEach { selected += it.id }
+                if (selected.isEmpty()) exitSelection() else updateSelection()
+            }
+            pressFeedback(this)
+        }
+        selBar.addView(selAllBtn, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = Ui.dp(this@ClipsActivity, 8) })
 
         bottomBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -513,6 +521,7 @@ class ClipsActivity : Activity() {
         val wDp = resources.displayMetrics.widthPixels / resources.displayMetrics.density
         cols = maxOf(2, (wDp / 170).toInt())
         val out = ArrayList<Row>()
+        if (collectionId == null && remote == null) out += Row.Title
         for ((day, items) in clips.groupBy { dayStart(it.startMs) }.toSortedMap(compareByDescending { it })) {
             out += Row.Header(day, items)
             if (day !in collapsed) items.chunked(cols).forEach { out += Row.Items(it) }
@@ -607,6 +616,18 @@ class ClipsActivity : Activity() {
     }
 
     // ------------------------------------------------------------------ day headers (list + sticky copy)
+
+    /** "LOCAL CLIPS · N clips on this phone": small, in the accent colour, so it is clear what this list is. */
+    private fun titleView(): LinearLayout {
+        val ctx = this
+        return LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(Ui.dp(ctx, 12), Ui.dp(ctx, 10), Ui.dp(ctx, 12), Ui.dp(ctx, 2))
+            addView(Ui.label(ctx, "LOCAL CLIPS", 15f, Ui.ACCENT).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); letterSpacing = 0.06f })
+            addView(Ui.label(ctx, "", 12f, Ui.GREY).apply { setPadding(Ui.dp(ctx, 10), 0, 0, 0) })
+        }
+    }
 
     private fun headerView(): LinearLayout {
         val ctx = this
@@ -768,11 +789,16 @@ class ClipsActivity : Activity() {
         override fun getCount() = rows.size
         override fun getItem(position: Int) = rows[position]
         override fun getItemId(position: Int) = position.toLong()
-        override fun getViewTypeCount() = 2
-        override fun getItemViewType(position: Int) = if (rows[position] is Row.Header) 0 else 1
+        override fun getViewTypeCount() = 3
+        override fun getItemViewType(position: Int) = when (rows[position]) { is Row.Header -> 0; is Row.Items -> 1; Row.Title -> 2 }
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
             val row = rows[position]
+            if (row is Row.Title) {
+                val v = (convertView as? LinearLayout)?.takeIf { it.tag == "title" } ?: titleView().apply { tag = "title" }
+                (v.getChildAt(1) as TextView).text = "${clips.size} clip${if (clips.size == 1) "" else "s"} on this phone"
+                return v
+            }
             if (row is Row.Header) {
                 val v = (convertView as? LinearLayout)?.takeIf { it.tag == "header" } ?: headerView().apply { tag = "header" }
                 bindHeader(v, row)
@@ -889,6 +915,7 @@ class ClipsActivity : Activity() {
         if (switching) animateBars(selecting)
         val sel = selectedClips().filter { it.id !in missingIds }
         selTitle.text = "${selected.size} selected"
+        selAllBtn.text = if (selected.size == clips.size && clips.isNotEmpty()) "Select none" else "Select all"
         val bytes = sel.sumOf { it.size }
         val dur = sel.sumOf { it.durationMs }
         selInfo.text = (if (bytes >= 1_000_000_000L) "%.2f GB".format(bytes / 1e9) else "%.0f MB".format(bytes / 1e6)) + "  ·  " + durText(dur)

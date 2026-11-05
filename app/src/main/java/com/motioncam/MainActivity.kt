@@ -219,6 +219,7 @@ class MainActivity : Activity() {
         super.onConfigurationChanged(newConfig)
         arrangeBottom()
         frame.post { updateGeometry() }
+        Ui.statusBarForOrientation(this)
     }
 
     /**
@@ -314,6 +315,9 @@ class MainActivity : Activity() {
     private lateinit var shutterLabel: TextView
     private lateinit var fillBtn: ImageView
     private val LAND_COL = 148
+    private lateinit var stage: FrameLayout
+    /** The landscape column's width in px: at least 148 dp, wider when the picture leaves room (up to 240 dp). */
+    private var colPx = 0
 
     private fun pillBg(round: Boolean) = android.graphics.drawable.GradientDrawable().apply {
         if (round) shape = android.graphics.drawable.GradientDrawable.OVAL else cornerRadius = Ui.dp(this@MainActivity, 16).toFloat()
@@ -329,12 +333,25 @@ class MainActivity : Activity() {
     private fun applyFill() {
         val land = compact == true
         val f = fill()
-        frame.cover = land && f
-        frame.layoutParams = FrameLayout.LayoutParams(-1, -1, Gravity.CENTER).apply { if (land && !f) rightMargin = Ui.dp(this@MainActivity, LAND_COL) }
+        val d = { v: Int -> Ui.dp(this, v) }
+        frame.cover = false
+        if (land) {
+            // the column takes the room the picture leaves at full height (its text then fits on one line)
+            val dm = resources.displayMetrics
+            val picW = (dm.heightPixels * (if (imageRotation() % 180 != 0) 9f / 16f else 16f / 9f)).toInt()
+            colPx = (dm.widthPixels - picW).coerceIn(d(LAND_COL), d(240))
+            landCol.layoutParams = FrameLayout.LayoutParams(colPx, -1, Gravity.END)
+            chipColumn.layoutParams = LinearLayout.LayoutParams(colPx - d(68), -1)
+            (landTop.layoutParams as FrameLayout.LayoutParams).rightMargin = colPx + d(8)
+            (bottomBox.layoutParams as? FrameLayout.LayoutParams)?.rightMargin = colPx + d(8)
+        }
+        // FILL: the picture uses the whole screen as if the controls weren't there (never cropped);
+        // FIT: it stays clear of them. Either way it is centred in its space.
+        stage.layoutParams = FrameLayout.LayoutParams(-1, -1).apply { if (land && !f) rightMargin = colPx }
         landCol.setBackgroundColor(if (f) 0x6B15171B else 0xFF15171B.toInt())
         fillBtn.setImageDrawable(IconDrawable(if (f) IconDrawable.Kind.FULLSCREEN else IconDrawable.Kind.FIT_IN, if (f) Ui.ACCENT else Color.WHITE))
-        fillBtn.contentDescription = if (f) "Picture fills the screen, behind the controls. Tap to fit it beside them"
-            else "Picture fits beside the controls. Tap to fill the screen"
+        fillBtn.contentDescription = if (f) "Picture uses the whole screen, behind the controls. Tap to keep it clear of them"
+            else "Picture stays clear of the controls. Tap to use the whole screen"
         frame.post { updateGeometry() }
     }
 
@@ -355,6 +372,7 @@ class MainActivity : Activity() {
         ctrl.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
         // a round shutter: green circle to start, red square to stop (its name under it; centred on the circle)
         val sbox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(0, d(19), 0, 0) }
+        ctrl.gravity = Gravity.CENTER_HORIZONTAL
         shutter = FrameLayout(this).apply {
             background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setStroke(d(3), Color.WHITE) }
             isClickable = true
@@ -364,9 +382,9 @@ class MainActivity : Activity() {
         shutterCore = View(this)
         shutter.addView(shutterCore, FrameLayout.LayoutParams(d(46), d(46), Gravity.CENTER))
         sbox.addView(shutter, LinearLayout.LayoutParams(d(60), d(60)))
-        shutterLabel = Ui.label(this, "START", 11f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); letterSpacing = 0.04f; setPadding(0, d(5), 0, 0) }
-        sbox.addView(shutterLabel)
-        ctrl.addView(sbox)
+        shutterLabel = Ui.label(this, "START", 11f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); gravity = Gravity.CENTER; setPadding(0, d(5), 0, 0) }
+        sbox.addView(shutterLabel, LinearLayout.LayoutParams(-1, -2))
+        ctrl.addView(sbox, LinearLayout.LayoutParams(-1, -2))
         ctrl.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
         val fbox = FrameLayout(this)
         fillBtn = ImageView(this).apply {
@@ -516,7 +534,7 @@ class MainActivity : Activity() {
         }
         rootLayout.addView(pill, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
             topMargin = (if (compact == true) landTop.bottom else topBarView?.bottom ?: 0) + Ui.dp(this@MainActivity, 8)
-            rightMargin = Ui.dp(this@MainActivity, if (compact == true) LAND_COL + 8 else 8)
+            rightMargin = if (compact == true) colPx + Ui.dp(this@MainActivity, 8) else Ui.dp(this@MainActivity, 8)
         })
         pill.alpha = 0f
         pill.animate().alpha(1f).setDuration(150).start()
@@ -553,7 +571,7 @@ class MainActivity : Activity() {
         }
         rootLayout.addView(pill, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
             topMargin = (if (compact == true) landTop.bottom else topBarView?.bottom ?: 0) + Ui.dp(this@MainActivity, 8)
-            rightMargin = Ui.dp(this@MainActivity, if (compact == true) LAND_COL + 8 else 8)
+            rightMargin = if (compact == true) colPx + Ui.dp(this@MainActivity, 8) else Ui.dp(this@MainActivity, 8)
         })
         pill.alpha = 0f
         pill.animate().alpha(1f).setDuration(150).start()
@@ -585,7 +603,10 @@ class MainActivity : Activity() {
         overlay = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_XY }
         frame.addView(texture, FrameLayout.LayoutParams(-1, -1))
         frame.addView(overlay, FrameLayout.LayoutParams(-1, -1))
-        root.addView(frame, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+        // the picture is centred in its stage: the whole screen, or (landscape FIT) the space left of the controls
+        stage = FrameLayout(this)
+        stage.addView(frame, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+        root.addView(stage, FrameLayout.LayoutParams(-1, -1))
         offLabel = Ui.label(this, "", 15f, Ui.GREY).apply { gravity = Gravity.CENTER; visibility = View.GONE }
         root.addView(offLabel, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
 
@@ -763,7 +784,12 @@ class MainActivity : Activity() {
             background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = Ui.dp(ctx, 26).toFloat(); setColor(0xF21B1C20.toInt()) }
             isClickable = true   // taps inside the panel must not count as "outside"
         }
-        val grid = GridLayout(ctx).apply { columnCount = if (Ui.widthDp(ctx) < 360f) 3 else 4; minimumHeight = Ui.dp(ctx, 150) }
+        val landEd = compact == true
+        // landscape: the hidden buttons in one or two wide rows, so Save / Default / Cancel stay on screen
+        val grid = GridLayout(ctx).apply {
+            columnCount = if (landEd) ((Ui.widthDp(ctx) - 60) / 96).toInt().coerceIn(5, 9) else if (Ui.widthDp(ctx) < 360f) 3 else 4
+            minimumHeight = Ui.dp(ctx, if (landEd) 60 else 150)
+        }
         panel.addView(grid, LinearLayout.LayoutParams(-1, -2))
         panel.addView(Ui.label(ctx, "· · ·", 14f, Ui.GREY).apply { gravity = Gravity.CENTER; setPadding(0, Ui.dp(ctx, 4), 0, Ui.dp(ctx, 4)) },
             LinearLayout.LayoutParams(-1, -2))
@@ -786,7 +812,8 @@ class MainActivity : Activity() {
         panel.addView(stripScroll, LinearLayout.LayoutParams(-1, -2))
         val foot = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, Ui.dp(ctx, 12), 0, 0) }
         panel.addView(foot, LinearLayout.LayoutParams(-1, -2))
-        col.addView(panel, LinearLayout.LayoutParams(-1, -2).apply { setMargins(Ui.dp(ctx, 12), 0, Ui.dp(ctx, 12), Ui.dp(ctx, 24)) })
+        if (landEd) { header.setPadding(Ui.dp(ctx, 20), 0, Ui.dp(ctx, 12), Ui.dp(ctx, 4)); panel.setPadding(Ui.dp(ctx, 12), Ui.dp(ctx, 8), Ui.dp(ctx, 12), Ui.dp(ctx, 10)); foot.setPadding(0, Ui.dp(ctx, 8), 0, 0) }
+        col.addView(panel, LinearLayout.LayoutParams(-1, -2).apply { setMargins(Ui.dp(ctx, 12), 0, Ui.dp(ctx, 12), Ui.dp(ctx, if (landEd) 8 else 24)) })
         overlay.addView(col, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
 
         var dragging: String? = null

@@ -501,6 +501,7 @@ class PlayerActivity : Activity() {
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         arrange()
+        Ui.statusBarForOrientation(this)
     }
 
     /**

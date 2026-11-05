@@ -31,6 +31,15 @@ object Ui {
     const val RED = 0xFFE53935.toInt()
     const val GREY = 0xFF8A8F96.toInt()
 
+    /** Landscape: the phone's status bar (time, icons, battery) hides for more height; swipe down shows it briefly. */
+    fun statusBarForOrientation(a: android.app.Activity) {
+        val c = a.window?.insetsController ?: return
+        if (a.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            c.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            c.hide(android.view.WindowInsets.Type.statusBars())
+        } else c.show(android.view.WindowInsets.Type.statusBars())
+    }
+
     fun dp(ctx: Context, v: Int): Int = (v * ctx.resources.displayMetrics.density + 0.5f).toInt()
 
     fun label(ctx: Context, s: String, sp: Float = 14f, color: Int = Color.WHITE): TextView =

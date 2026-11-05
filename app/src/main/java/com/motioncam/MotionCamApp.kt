@@ -40,7 +40,10 @@ class MotionCamApp : Application() {
                 if (started == 0) ui.postDelayed(idle, 20_000)   // brief app switches keep the connection
             }
             override fun onActivityCreated(a: Activity, b: Bundle?) {}
-            override fun onActivityResumed(a: Activity) { com.motioncam.live.AlertInbox.front = java.lang.ref.WeakReference(a) }
+            override fun onActivityResumed(a: Activity) {
+                com.motioncam.live.AlertInbox.front = java.lang.ref.WeakReference(a)
+                Ui.statusBarForOrientation(a)
+            }
             override fun onActivityPaused(a: Activity) { if (com.motioncam.live.AlertInbox.front?.get() === a) com.motioncam.live.AlertInbox.front = null }
             override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}
             override fun onActivityDestroyed(a: Activity) {}

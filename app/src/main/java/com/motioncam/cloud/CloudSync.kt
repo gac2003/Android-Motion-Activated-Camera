@@ -129,6 +129,9 @@ object CloudSync {
 
     // ------------------------------------------------------------------ public API
 
+    /** This phone's clips that are in at least one backup folder. */
+    fun backedUpIds(ctx: Context): Set<Long> = synchronized(lock) { load(ctx); index!!.map { it.clipId }.toSet() }
+
     fun enabledKinds(ctx: Context) = Dest.all(ctx).filter { CloudConfig(ctx, it).let { c -> c.enabled && c.isConfigured } }
 
     /** Called when a clip has been saved: queue it for every enabled destination. */

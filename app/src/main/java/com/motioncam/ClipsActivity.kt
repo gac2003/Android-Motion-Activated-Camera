@@ -45,6 +45,11 @@ open class ClipsActivity : Activity() {
     private lateinit var actionRow: LinearLayout
     private var swipe: androidx.swiperefreshlayout.widget.SwipeRefreshLayout? = null
     private var favIds: Set<Long> = emptySet()
+    private var backedUp: Set<Long> = emptySet()
+    /** Shown as the Clips tab: big title and the On this phone / Remote folders switch instead of a back arrow. */
+    protected open val asTab = false
+    /** The selection bar takes the tab bar's place (tab screens hide their tab bar meanwhile). */
+    protected open fun onSelecting(on: Boolean) {}
     private sealed class Row {
         /** "Local clips" at the top of this phone's own clips (scrolls away with the list). */
         object Title : Row()
@@ -128,9 +133,15 @@ open class ClipsActivity : Activity() {
             val p = Ui.dp(this@ClipsActivity, 8)
             setPadding(p, 0, p, Ui.dp(this@ClipsActivity, 4))
             fun add(kind: IconDrawable.Kind, label: String, tint: Int = 0xFFFFFFFF.toInt(), click: () -> Unit) =
-                addView(labeledButton(this@ClipsActivity, kind, label, tint, click), LinearLayout.LayoutParams(0, -2, 1f))
+                addView(labeledButton(this@ClipsActivity, kind, label, tint, click).apply {
+                    // a tile: icon above its name on a rounded card
+                    background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x30FFFFFF),
+                        GradientDrawable().apply { setColor(0xFF1E2126.toInt()); cornerRadius = Ui.dp(this@ClipsActivity, 12).toFloat() }, null)
+                    val pv = Ui.dp(this@ClipsActivity, 10)
+                    setPadding(pv / 2, pv, pv / 2, pv - 2)
+                }, LinearLayout.LayoutParams(0, -2, 1f).apply { val m = Ui.dp(this@ClipsActivity, 4); setMargins(m, m, m, m) })
             if (remote != null) add(IconDrawable.Kind.REFRESH, "Refresh") { refreshRemote(quiet = false) }
-            if (collectionId == null) add(IconDrawable.Kind.FOLDER, "Collections") {
+            if (collectionId == null) add(IconDrawable.Kind.COLLECTIONS, "Collections") {
                 startActivity(Intent(this@ClipsActivity, CollectionsActivity::class.java).putExtra(CollectionsActivity.EXTRA_REMOTE, remote?.id))
             }
             // a collection: get all of it here (remote) or into the cloud (phone)
@@ -141,7 +152,7 @@ open class ClipsActivity : Activity() {
                 CollectionActions.backUpAll(this@ClipsActivity, clips)
             }
             add(IconDrawable.Kind.CALENDAR, "Calendar") { showCalendar() }
-            add(IconDrawable.Kind.PLAY, "Timeline") {
+            add(IconDrawable.Kind.PLAY_LINE, "Timeline") {
                 // newest day, from its first clip
                 val h = rows.firstOrNull { it is Row.Header } as Row.Header?
                 h?.clips?.minByOrNull { it.startMs }?.let { play(it) }
@@ -149,7 +160,7 @@ open class ClipsActivity : Activity() {
         }
         val title = collectionId?.let { store.get(this, it)?.name } ?: remote?.name ?: "Clips"
         // Remote folders is a destination of its own: a wide button in the title bar (phone's own clips only)
-        val remoteBtn = if (collectionId == null && remote == null) Ui.chip(this, "Remote Folders").apply {
+        val remoteBtn = if (collectionId == null && remote == null && !asTab) Ui.chip(this, "Remote Folders").apply {
             // a bigger cloud (the glyph is wide and short), with less vertical padding so the bar keeps its height
             val d = Ui.dp(this@ClipsActivity, 28)
             setPadding(Ui.dp(this@ClipsActivity, 10), Ui.dp(this@ClipsActivity, 3), Ui.dp(this@ClipsActivity, 14), Ui.dp(this@ClipsActivity, 3))
@@ -161,7 +172,7 @@ open class ClipsActivity : Activity() {
             setOnClickListener { startActivity(Intent(this@ClipsActivity, com.motioncam.remote.RemoteFoldersActivity::class.java)) }
             pressFeedback(this)
         } else null
-        normalBar = topBar(this, title, remoteBtn)
+        normalBar = if (asTab) tabHeader() else topBar(this, title, remoteBtn)
         root.addView(normalBar)
         // selection mode, like Google Photos / Files: the top bar shows what is selected (count, size, length),
         // the actions slide up in a bar at the bottom (icon + label, ⋮ More for the rest)
@@ -202,9 +213,11 @@ open class ClipsActivity : Activity() {
                 LinearLayout.LayoutParams(0, -2, 1f))
         if (remote == null) act(IconDrawable.Kind.SHARE, "Share") { shareSelected() }
         else act(IconDrawable.Kind.DOWNLOAD, "Save") { saveToPhone(selectedClips()) }
-        // this phone's clips: upload the selection to the backup destinations (the counterpart of Save in remote folders)
-        if (remote == null) act(IconDrawable.Kind.CLOUD, "Back up") { CollectionActions.backUpAll(this, selectedClips()) { exitSelection() } }
-        if (canEditShared()) act(IconDrawable.Kind.ADD_TO, "Add to") { addSelectedTo() }
+        act(IconDrawable.Kind.STAR, "Favourite") { favouriteSelected() }
+        if (canMark()) act(IconDrawable.Kind.LOCK, "Protect") { protect(selectedClips(), true) }
+        // this phone's clips: upload the selection to the backup folders (the counterpart of Save in remote folders)
+        if (remote == null) act(IconDrawable.Kind.CLOUD_UP, "Back up") { CollectionActions.backUpAll(this, selectedClips()) { exitSelection() } }
+        else if (canEditShared()) act(IconDrawable.Kind.ADD_TO, "Add to") { addSelectedTo() }
         when {
             collectionId != null && canEditShared() -> act(IconDrawable.Kind.REMOVE, "Remove") { removeSelectedFromCollection() }
             remote == null -> act(IconDrawable.Kind.TRASH, "Delete", danger = true) { deleteSelected() }
@@ -213,6 +226,7 @@ open class ClipsActivity : Activity() {
         lateinit var more: View
         more = labeledButton(this, IconDrawable.Kind.MORE, "More") {
             val pm = PopupMenu(this, more)
+            if (remote == null && canEditShared()) pm.menu.add(0, 10, 49, "Add to collection…")
             if (collectionId != null && remote == null) pm.menu.add(0, 2, 51, "Delete from phone")
             if (remote == null) {
                 pm.menu.add(0, 8, 50, "Open in another app").isEnabled = selected.size == 1
@@ -220,7 +234,6 @@ open class ClipsActivity : Activity() {
             }
             if (collectionId != null && CloudDelete.canDelete(remote)) pm.menu.add(0, 7, 52, "Delete from cloud")
             if (canMark()) {
-                pm.menu.add(0, 4, 53, "Protect in cloud")
                 pm.menu.add(0, 5, 54, "Remove cloud protection")
                 pm.menu.add(0, 6, 55, "Protected in cloud…")
             }
@@ -237,6 +250,7 @@ open class ClipsActivity : Activity() {
                         catch (_: Exception) { Toast.makeText(this, "No other app can play it", Toast.LENGTH_SHORT).show() }
                     }
                     9 -> FileReveal.show(this, selectedClips().singleOrNull())
+                    10 -> addSelectedTo()
                 }
                 true
             }
@@ -246,6 +260,7 @@ open class ClipsActivity : Activity() {
         root.addView(selBar)
         // the count / size / state line lives in the list's title row (scrolls away), not in a line of its own
         summary = Ui.label(this, "", 12f, Ui.GREY)
+        if (asTab) root.addView(summary.apply { setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 2), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 2)) })
         root.addView(actionRow)
         banner = Ui.label(this, "Clips from earlier installs are hidden. Tap to show them.", 13f, Ui.ACCENT).apply {
             setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8))
@@ -334,8 +349,10 @@ open class ClipsActivity : Activity() {
                 all = all.filter { it.id in ids }
             }
             val favs = Collections.favouriteIds(this)
+            val ups = try { com.motioncam.cloud.CloudSync.backedUpIds(this) } catch (_: Exception) { emptySet() }
             runOnUiThread {
                 favIds = favs
+                backedUp = ups
                 clips = all
                 buildRows()
                 val total = all.sumOf { it.size }
@@ -415,6 +432,7 @@ open class ClipsActivity : Activity() {
     private fun setSummary(t: CharSequence) {
         if (summary.text.toString() == t.toString()) return
         summary.text = t
+        summary.visibility = if (t.isEmpty()) View.GONE else View.VISIBLE
         adapter.notifyDataSetChanged()
     }
 
@@ -530,7 +548,7 @@ open class ClipsActivity : Activity() {
         val wDp = resources.displayMetrics.widthPixels / resources.displayMetrics.density
         cols = maxOf(2, (wDp / 170).toInt())
         val out = ArrayList<Row>()
-        out += Row.Title
+        if (!asTab) out += Row.Title
         for ((day, items) in clips.groupBy { dayStart(it.startMs) }.toSortedMap(compareByDescending { it })) {
             out += Row.Header(day, items)
             if (day !in collapsed) items.chunked(cols).forEach { out += Row.Items(it) }
@@ -834,19 +852,27 @@ open class ClipsActivity : Activity() {
                 val c = row.clips.getOrNull(i)
                 cell.visibility = if (c == null) View.INVISIBLE else View.VISIBLE
                 if (c == null) continue
-                val iv = cell.getChildAt(0) as ImageView
-                val label = cell.getChildAt(1) as TextView
-                val check = cell.getChildAt(2) as TextView
-                cell.getChildAt(3).visibility = if (c.id in favIds) View.VISIBLE else View.GONE
+                val h = cell.tag as CellViews
+                val iv = h.iv
+                h.star.visibility = if (c.id in favIds) View.VISIBLE else View.GONE
                 val b = badge(c)
-                (cell.getChildAt(4) as TextView).apply { text = b ?: ""; visibility = if (b == null) View.GONE else View.VISIBLE }
+                val locked = b == "\uD83D\uDD12"
+                h.lock.visibility = if (locked) View.VISIBLE else View.GONE
+                h.status.apply { text = if (locked) "" else b ?: ""; visibility = if (b == null || locked) View.GONE else View.VISIBLE }
+                h.cloud.visibility = if (remote == null && c.id in backedUp) View.VISIBLE else View.GONE
                 bindThumb(iv, c)
-                label.text = "${timeFmt.format(Date(c.startMs))}  ·  ${durText(c.durationMs)}"
+                h.label.text = "${timeFmt.format(Date(c.startMs))}  ·  ${durText(c.durationMs)}"
+                cell.contentDescription = h.label.text.toString() + (if (locked) ", protected" else "") +
+                    (if (h.cloud.visibility == View.VISIBLE) ", backed up" else "") + if (c.id in favIds) ", favourite" else ""
                 val sel = c.id in selected
+                val check = h.check
                 check.visibility = if (selecting) View.VISIBLE else View.GONE
                 check.text = if (sel) "✓" else ""
                 (check.background as GradientDrawable).setColor(if (sel) Ui.ACCENT else 0x66000000)
-                cell.foreground = if (sel) selFrame else null
+                h.pic.foreground = if (sel) selFrame else null
+                // a selected clip shrinks a little, like in a photo gallery
+                val sc = if (sel) 0.94f else 1f
+                if (h.pic.scaleX != sc) h.pic.animate().scaleX(sc).scaleY(sc).setDuration(140).start()
                 iv.alpha = if (selecting && !sel) 0.75f else 1f
                 cell.setOnClickListener {
                     if (selecting) { if (!selected.remove(c.id)) selected += c.id; updateSelection() }
@@ -869,50 +895,51 @@ open class ClipsActivity : Activity() {
         }
     }
 
+    /** One clip tile's views. */
+    private class CellViews(val pic: FrameLayout, val iv: ImageView, val check: TextView, val label: TextView,
+                            val status: TextView, val lock: ImageView, val cloud: ImageView, val star: ImageView)
+
+    /**
+     * A clip tile: the picture (a ✓ circle while selecting), and under it its time · length with its marks on the same
+     * line, in this order: protected, backed up, favourite (always last).
+     */
     private fun cell(): FrameLayout {
         val ctx = this
         val w = resources.displayMetrics.widthPixels / cols - Ui.dp(ctx, 10)
         return FrameLayout(ctx).apply {
             val p = Ui.dp(ctx, 3)
             setPadding(p, p, p, p)
+            val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+            val pic = FrameLayout(ctx)
             val iv = ImageView(ctx).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
-                background = GradientDrawable().apply { setColor(0xFF22252A.toInt()); cornerRadius = Ui.dp(ctx, 6).toFloat() }
+                background = GradientDrawable().apply { setColor(0xFF22252A.toInt()); cornerRadius = Ui.dp(ctx, 8).toFloat() }
                 clipToOutline = true
             }
-            addView(iv, FrameLayout.LayoutParams(-1, w * 9 / 16))
-            val tv = Ui.label(ctx, "", 11f, Color.WHITE).apply {
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                // light backing + text shadow: readable on bright frames without hiding much of the picture
-                setBackgroundColor(0x4D000000)
-                setShadowLayer(3f, 0f, 1f, Color.BLACK)
-                setPadding(Ui.dp(ctx, 6), Ui.dp(ctx, 2), Ui.dp(ctx, 6), Ui.dp(ctx, 2))
-            }
-            addView(tv, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START))
+            pic.addView(iv, FrameLayout.LayoutParams(-1, w * 9 / 16))
             val check = Ui.label(ctx, "", 13f, Color.BLACK).apply {
                 gravity = Gravity.CENTER
                 background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x66000000); setStroke(Ui.dp(ctx, 2), Color.WHITE) }
                 visibility = View.GONE
             }
-            addView(check, FrameLayout.LayoutParams(Ui.dp(ctx, 24), Ui.dp(ctx, 24), Gravity.TOP or Gravity.END).apply {
-                setMargins(0, Ui.dp(ctx, 6), Ui.dp(ctx, 6), 0)
+            pic.addView(check, FrameLayout.LayoutParams(Ui.dp(ctx, 24), Ui.dp(ctx, 24), Gravity.TOP or Gravity.START).apply {
+                setMargins(Ui.dp(ctx, 6), Ui.dp(ctx, 6), 0, 0)
             })
-            val star = Ui.label(ctx, "★", 14f, Ui.ACCENT).apply {
-                setShadowLayer(4f, 0f, 0f, Color.BLACK)
-                visibility = View.GONE
-            }
-            addView(star, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
-                setMargins(Ui.dp(ctx, 8), Ui.dp(ctx, 4), 0, 0)
-            })
-            // cloud protection badge (bottom-right, next to the time label)
-            // small badge without a box (a shadow keeps it visible on any frame)
-            val status = Ui.label(ctx, "", 10f, Color.WHITE).apply {
-                setShadowLayer(4f, 0f, 0f, Color.BLACK)
-                setPadding(Ui.dp(ctx, 4), Ui.dp(ctx, 2), Ui.dp(ctx, 6), Ui.dp(ctx, 3))
-                visibility = View.GONE
-            }
-            addView(status, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END))
+            col.addView(pic)
+            val line = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(Ui.dp(ctx, 2), Ui.dp(ctx, 4), Ui.dp(ctx, 2), 0) }
+            val tv = Ui.label(ctx, "", 12f, 0xFFB0B4BA.toInt()).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
+            line.addView(tv, LinearLayout.LayoutParams(0, -2, 1f))
+            // "missing" / "protection removed" states (text); the marks are icons
+            val status = Ui.label(ctx, "", 11f, Ui.ACCENT).apply { visibility = View.GONE; setPadding(Ui.dp(ctx, 4), 0, 0, 0) }
+            line.addView(status)
+            fun mark(kind: IconDrawable.Kind, tint: Int) = ImageView(ctx).apply { setImageDrawable(IconDrawable(kind, tint)); visibility = View.GONE }
+            val lock = mark(IconDrawable.Kind.LOCK, Ui.ACCENT)
+            val cloud = mark(IconDrawable.Kind.CLOUD, 0xFFC4C8CE.toInt())
+            val star = mark(IconDrawable.Kind.STAR_ON, Ui.ACCENT)
+            for (m in listOf(lock, cloud, star)) line.addView(m, LinearLayout.LayoutParams(Ui.dp(ctx, 15), Ui.dp(ctx, 15)).apply { leftMargin = Ui.dp(ctx, 5) })
+            col.addView(line)
+            addView(col, FrameLayout.LayoutParams(-1, -2))
+            tag = CellViews(pic, iv, check, tv, status, lock, cloud, star)
         }
     }
 
@@ -930,7 +957,7 @@ open class ClipsActivity : Activity() {
         normalBar.visibility = if (selecting) View.GONE else View.VISIBLE
         actionRow.visibility = normalBar.visibility
         selBar.visibility = if (selecting) View.VISIBLE else View.GONE
-        if (switching) animateBars(selecting)
+        if (switching) { onSelecting(selecting); animateBars(selecting) }
         val sel = selectedClips().filter { it.id !in missingIds }
         selTitle.text = "${selected.size} selected"
         selAllBtn.text = if (selected.size == clips.size && clips.isNotEmpty()) "Select none" else "Select all"
@@ -987,6 +1014,25 @@ open class ClipsActivity : Activity() {
     }
 
     private fun selectedClips() = clips.filter { it.id in selected }
+
+    /** Favourite the selection (or, when all of it already is, un-favourite it). */
+    private fun favouriteSelected() {
+        val ids = selectedClips().map { it.id }
+        if (ids.isEmpty()) return
+        val all = ids.all { it in favIds }
+        if (all) store.remove(this, Collections.FAVOURITES, ids) else store.add(this, Collections.FAVOURITES, ids)
+        favIds = store.favouriteIds(this)
+        Toast.makeText(this, if (all) "Removed from Favourites" else "Added to Favourites", Toast.LENGTH_SHORT).show()
+        exitSelection()
+    }
+
+    /** The Clips tab's header: its title and the On this phone / Remote folders switch. */
+    private fun tabHeader(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8))
+        addView(Ui.label(this@ClipsActivity, "Clips", 26f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 0, 0, Ui.dp(this@ClipsActivity, 10)) })
+        addView(ClipsSwitch.view(this@ClipsActivity, remote = false))
+    }
 
     private fun deleteSelected() {
         val list = selectedClips()

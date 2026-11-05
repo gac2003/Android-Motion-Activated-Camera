@@ -64,7 +64,7 @@ object Nav {
         setBackgroundColor(Ui.BG)
         (content.parent as? android.view.ViewGroup)?.removeView(content)
         addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
-        addView(bar(a, tab), LinearLayout.LayoutParams(-1, -2))
+        addView(bar(a, tab).apply { tag = "tabbar" }, LinearLayout.LayoutParams(-1, -2))
     }
 
     /** The tab bar; the Activity tab shows how many camera events haven't been looked at yet. */
@@ -177,5 +177,36 @@ object Nav {
         if (tab == Tab.HOME) { a.moveTaskToBack(true); return true }
         go(a, Tab.HOME)
         return true
+    }
+}
+
+/** The Clips tab's switch between this phone's clips and the remote folders (it remembers which was shown). */
+object ClipsSwitch {
+    fun view(a: Activity, remote: Boolean): View {
+        val ctx: Context = a
+        val box = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(Ui.dp(ctx, 3), Ui.dp(ctx, 3), Ui.dp(ctx, 3), Ui.dp(ctx, 3))
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF1E2126.toInt()); cornerRadius = Ui.dp(ctx, 22).toFloat() }
+        }
+        for ((label, isRemote) in listOf("On this phone" to false, "Remote folders" to true)) {
+            val on = isRemote == remote
+            box.addView(Ui.label(ctx, label, 14f, if (on) 0xFF15171B.toInt() else 0xFFFFFFFF.toInt()).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, Ui.dp(ctx, 8), 0, Ui.dp(ctx, 8))
+                if (on) {
+                    setTypeface(typeface, Typeface.BOLD)
+                    background = android.graphics.drawable.GradientDrawable().apply { setColor(Ui.ACCENT); cornerRadius = Ui.dp(ctx, 20).toFloat() }
+                }
+                isClickable = true
+                contentDescription = label + if (on) " (shown)" else ""
+                setOnClickListener {
+                    if (on) return@setOnClickListener
+                    Nav.setClipsRemote(a, isRemote)
+                    Nav.open(a, if (isRemote) RemoteTabActivity::class.java else ClipsTabActivity::class.java)
+                }
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        return box
     }
 }

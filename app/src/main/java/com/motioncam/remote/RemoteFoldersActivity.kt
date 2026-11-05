@@ -57,13 +57,23 @@ open class RemoteFoldersActivity : Activity() {
 
     private lateinit var box: LinearLayout
     private lateinit var prefs: Prefs
+    /** Shown as the Clips tab's Remote folders (title and the switch; + Add next to Your folders). */
+    protected open val asTab = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
-        val actions = Ui.chip(this, "＋ Add").apply { setOnClickListener { addSource() } }
-        root.addView(topBar(this, "Remote Folders", actions))
+        if (asTab) root.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = Ui.dp(this@RemoteFoldersActivity, 16)
+            setPadding(p, p, p, Ui.dp(this@RemoteFoldersActivity, 4))
+            addView(Ui.label(this@RemoteFoldersActivity, "Clips", 26f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 0, 0, Ui.dp(this@RemoteFoldersActivity, 10)) })
+            addView(com.motioncam.ClipsSwitch.view(this@RemoteFoldersActivity, remote = true))
+        }) else {
+            val actions = Ui.chip(this, "＋ Add").apply { setOnClickListener { addSource() } }
+            root.addView(topBar(this, "Remote Folders", actions))
+        }
         box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@RemoteFoldersActivity, 14)
@@ -138,8 +148,22 @@ open class RemoteFoldersActivity : Activity() {
         quickActions()
         val list = folders()
         val shown = list.filter { it.backingUp || prefs.remoteFtp || !isServer(it.kind) }
-        note("Cloud folders of MotionCam clips. Tap one to see its clips. ↑ marks a folder this phone backs up its new clips " +
-            "to (⋮ → Back up new clips here).")
+        // "Your folders", with + Add beside it
+        box.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, Ui.dp(this@RemoteFoldersActivity, 18), 0, Ui.dp(this@RemoteFoldersActivity, 6))
+            addView(Ui.label(this@RemoteFoldersActivity, "YOUR FOLDERS", 13f, Ui.ACCENT).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); letterSpacing = 0.06f },
+                LinearLayout.LayoutParams(0, -2, 1f))
+            addView(Ui.label(this@RemoteFoldersActivity, "+ Add", 13f, 0xFF15171B.toInt()).apply {
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setPadding(Ui.dp(this@RemoteFoldersActivity, 14), Ui.dp(this@RemoteFoldersActivity, 6), Ui.dp(this@RemoteFoldersActivity, 14), Ui.dp(this@RemoteFoldersActivity, 6))
+                background = GradientDrawable().apply { setColor(Ui.ACCENT); cornerRadius = Ui.dp(this@RemoteFoldersActivity, 16).toFloat() }
+                isClickable = true
+                contentDescription = "Add remote folder"
+                setOnClickListener { addSource() }
+            })
+        })
         if (shown.isEmpty()) {
             box.addView(Ui.label(this, "No remote folders yet. Tap ＋ Add to create one (and back up this phone's clips to it) or to open one another phone uses.", 15f).apply {
                 setPadding(0, Ui.dp(this@RemoteFoldersActivity, 16), 0, Ui.dp(this@RemoteFoldersActivity, 8))
@@ -148,6 +172,7 @@ open class RemoteFoldersActivity : Activity() {
         for (f in shown) box.addView(folderRow(f))
         val hidden = list.size - shown.size
         if (hidden > 0) note("$hidden FTP/SFTP folder${if (hidden == 1) " is" else "s are"} hidden (Remote folder settings → Allow FTP / SFTP servers).")
+        note("Tap a folder to watch its clips. A yellow cloud means this phone backs up its new clips there; ⋮ turns that on or off.")
     }
 
     private fun folderRow(f: Folder): View {

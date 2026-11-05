@@ -69,8 +69,19 @@ class CloudConfig(private val ctx: Context, val dest: Dest) {
         CloudKind.SFTP -> host.isNotEmpty() && user.isNotEmpty() && (if (useKey) privateKey != null else password != null)
     }
 
-    /** Reset: "when full", size cap, delete-after-days and protected collections back to defaults (account, folder, on/off kept). */
-    fun resetPolicies() { sp.edit().remove("fullPolicy").remove("maxGb").remove("keepDays").remove("protect").apply() }
+    /** When this phone's copy of a folder-wide setting was set (see [SharedFolderSettings]); 0 = never shared. */
+    fun sharedAt(key: String): Long = sp.getLong("at:$key", 0)
+    fun setSharedAt(key: String, at: Long) = sp.edit().putLong("at:$key", at).apply()
+
+    /**
+     * Reset: this phone's protected collections back to the default; the folder-wide clean-up rules are taken from the
+     * folder again (they belong to every phone backing up there). Account, folder and on/off are kept.
+     */
+    fun resetPolicies() {
+        val e = sp.edit().remove("fullPolicy").remove("maxGb").remove("keepDays").remove("protect")
+        for (k in SharedFolderSettings.KEYS) e.remove("at:$k")
+        e.apply()
+    }
 
     /** Forget the account / credentials (keeps the folder choice and policies). */
     fun disconnect() {

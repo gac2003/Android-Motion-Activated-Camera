@@ -890,6 +890,8 @@ object CloudSync {
      */
     private fun ensureSpace(ctx: Context, p: CloudProvider, cfg: CloudConfig, folder: String, need: Long) =
         synchronized(spaceLock(cfg.dest)) {
+            // the folder's own size cap / when-full rule (shared by every phone backing up there)
+            try { SharedFolderSettings.pull(ctx, cfg, p, folder) } catch (_: Exception) {}
             var mustFree = 0L
             if (cfg.maxGb > 0) {
                 val used = listing(cfg, p, folder).values.filter { isOurClip(it.name) }.sumOf { it.size }
@@ -941,6 +943,9 @@ object CloudSync {
         cfg.lastRetentionAt = now
         try {
             val folder = cfg.folderId ?: return
+            // the folder's own "delete after N days" (another phone may have changed it)
+            try { SharedFolderSettings.pull(ctx, cfg, p, folder) } catch (_: Exception) {}
+            if (cfg.keepDays <= 0) return
             val shared = CollectionFiles(p, folder, true)
             val keep = protectedNames(ctx, cfg, p, folder, shared)
             val marks = MarkStore.forProvider(p, folder)

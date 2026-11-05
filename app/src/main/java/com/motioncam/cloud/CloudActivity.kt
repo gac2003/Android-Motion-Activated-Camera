@@ -57,8 +57,12 @@ class CloudActivity : Activity() {
         Ui.capWidth(box)
         setContentView(root)
         build()
+        // the folder's own clean-up rules (another phone may have changed them)
+        SharedFolderSettings.refresh(this, dest) { runOnUiThread { sharedLoaded = true; if (!isFinishing) build() } }
     }
 
+    /** The folder-wide settings were read from the folder (the values shown are the current ones). */
+    private var sharedLoaded = false
     private var resumedOnce = false
 
     /** Back from the queue, protected clips or a sign-in page: show the current state (account, errors, collections). */
@@ -120,10 +124,18 @@ class CloudActivity : Activity() {
             }
         }
 
-        title("When ${kind.label} is full")
-        choice(listOf("Delete the oldest backed-up clips to make room", "Pause uploads and notify me"), cfg.fullPolicy) { cfg.fullPolicy = it }
-        number("Use at most (0 = no limit)", "GB", cfg.maxGb) { cfg.maxGb = it }
-        number("Delete cloud copies older than (0 = never)", "days", cfg.keepDays) { cfg.keepDays = it }
+        // clean-up rules belong to the folder: every phone backing up there uses the same ones (kept in the folder)
+        title("Folder settings · all phones")
+        note("Kept in the folder itself and used by every phone that backs up to it; a change here reaches the others " +
+            "within seconds (or at their next upload). " + if (sharedLoaded) "" else "Checking the folder's current values…")
+        box.addView(Ui.label(this, "When ${kind.label} is full", 14f).apply { setPadding(0, Ui.dp(this@CloudActivity, 8), 0, 0) })
+        choice(listOf("Delete the oldest backed-up clips to make room", "Pause uploads and notify me"), cfg.fullPolicy) {
+            SharedFolderSettings.set(this, dest, "fullPolicy", it)
+        }
+        number("Use at most (0 = no limit)", "GB", cfg.maxGb) { SharedFolderSettings.set(this, dest, "maxGb", it) }
+        number("Delete cloud copies older than (0 = never)", "days", cfg.keepDays) { SharedFolderSettings.set(this, dest, "keepDays", it) }
+
+        title("This phone")
         val prot = Collections.all(this).filter { it.id in cfg.protectedCollections }.joinToString { it.name }.ifEmpty { "none" }
         box.addView(Ui.label(this, "Never delete clips in these collections: $prot", 14f).apply { setPadding(0, Ui.dp(this@CloudActivity, 12), 0, 0) })
         box.addView(button("Choose protected collections…") { chooseProtected() })

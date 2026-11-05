@@ -58,9 +58,10 @@ object FolderSettings {
 
     fun build(a: Activity, form: SettingsForm, title: (String) -> Unit, note: (String) -> Unit, changed: () -> Unit = {}) {
         val p = Prefs(a)
-        title("Uploading")
-        note("For the folders this phone backs up to (↑ in Clips → Remote folders). New clips upload by themselves and resume if the " +
-            "internet drops; to upload older clips, select them in Clips → Back up.")
+        title("Uploading · this phone")
+        note("How this phone uploads to the folders it backs up to (↑ in Clips → Remote folders). New clips upload by themselves and " +
+            "resume if the internet drops; to upload older clips, select them in Clips → Back up. A folder's clean-up rules (delete " +
+            "after N days, size cap, when full) belong to the folder and are the same for every phone: the folder's ⋮ → Backup settings.")
         form.toggle("Upload only on Wi-Fi (not mobile data)", p.cloudWifiOnly) { p.cloudWifiOnly = it; CloudSync.kick(a) }
         form.toggle("Upload only while charging", p.cloudChargingOnly) { p.cloudChargingOnly = it; CloudSync.kick(a) }
         form.choice("Upload quality", listOf("Original (largest, best quality)", "720p (about 1/3 the size)", "480p (smallest)"), p.cloudQuality) {

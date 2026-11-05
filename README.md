@@ -133,6 +133,10 @@ Wi-Fi / while charging, quality, delete the phone copy, thumbnails, FTP/SFTP, ke
 * **Folder**: created automatically ("MotionCam"), or choose / create another one.
 * **When full**: delete the oldest backed-up clips to make room, or pause and notify. Optional size cap and
   "delete cloud copies after N days". **Protected** clips are never deleted (see below).
+* **Folder settings are shared**: those clean-up rules belong to the folder, so they are kept in it (a hidden
+  `.settings` folder) and every phone backing up there uses the same ones; a change on one phone reaches the others
+  within seconds (or before their next upload / clean-up). Upload rules (Wi-Fi only, charging, quality…), whether a
+  phone backs up to a folder, and which of its own collections it protects stay per phone.
 * **Reliable**: uploads are queued, resume where they stopped after a connection drop, retry with back-off, wait for a
   working connection (e.g. a Wi-Fi login page) and continue in the background, even after a reboot.
 * **Options**: Wi-Fi only, charging only, upload as original / 720p / 480p, delete the phone copy once backed up.

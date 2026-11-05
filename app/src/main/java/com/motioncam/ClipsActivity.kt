@@ -1167,7 +1167,12 @@ open class ClipsActivity : Activity() {
         if (name == null) {
             addView(Ui.label(this@ClipsActivity, "Clips", 20f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 0, Ui.dp(this@ClipsActivity, 12), 0) })
             addView(ClipsSwitch.view(this@ClipsActivity, false), LinearLayout.LayoutParams(Ui.dp(this@ClipsActivity, 250), -2))
-        } else addView(LinearLayout(this@ClipsActivity).apply {
+        } else {
+            // inside a folder or collection the switch stays (compact), then "‹ name"
+            addView(ClipsSwitch.view(this@ClipsActivity, remote != null).also { sw ->
+                for (i in 0 until (sw as ViewGroup).childCount) (sw.getChildAt(i) as? TextView)?.apply { textSize = 12f; setPadding(0, Ui.dp(this@ClipsActivity, 6), 0, Ui.dp(this@ClipsActivity, 6)) }
+            }, LinearLayout.LayoutParams(Ui.dp(this@ClipsActivity, 220), -2).apply { rightMargin = Ui.dp(this@ClipsActivity, 12) })
+            addView(LinearLayout(this@ClipsActivity).apply {
             tag = "slides"
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1177,9 +1182,10 @@ open class ClipsActivity : Activity() {
             addView(Ui.label(this@ClipsActivity, "‹", 24f).apply { setPadding(0, 0, Ui.dp(this@ClipsActivity, 10), Ui.dp(this@ClipsActivity, 2)) })
             addView(Ui.label(this@ClipsActivity, name, 17f).apply {
                 setTypeface(typeface, android.graphics.Typeface.BOLD); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
-                maxWidth = Ui.dp(this@ClipsActivity, 220)
+                maxWidth = Ui.dp(this@ClipsActivity, 180)
             })
         })
+        }
     }
 
     /** The rest of the landscape header: the count (one line) and the tools as compact icon + name pills. */
@@ -1196,6 +1202,8 @@ open class ClipsActivity : Activity() {
             t.setPadding(Ui.dp(this, 10), Ui.dp(this, 7), Ui.dp(this, 12), Ui.dp(this, 7))
             (t.getChildAt(0)?.layoutParams as? LinearLayout.LayoutParams)?.let { it.width = Ui.dp(this, 20); it.height = Ui.dp(this, 20) }
             (t.getChildAt(1) as? TextView)?.apply { setPadding(Ui.dp(this@ClipsActivity, 6), 0, 0, 0); textSize = 12f; layoutParams = LinearLayout.LayoutParams(-2, -2) }
+            // Refresh and Timeline (play) are clear as icons alone (leaves room for the switch)
+            if (t.contentDescription == "Refresh" || t.contentDescription == "Timeline") { t.getChildAt(1)?.visibility = View.GONE; t.setPadding(Ui.dp(this, 10), Ui.dp(this, 7), Ui.dp(this, 10), Ui.dp(this, 7)); t.tooltipText = t.contentDescription }
             t.layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(Ui.dp(this@ClipsActivity, 3), 0, Ui.dp(this@ClipsActivity, 3), 0) }
         }
         h.addView(actionRow, LinearLayout.LayoutParams(-2, -2))

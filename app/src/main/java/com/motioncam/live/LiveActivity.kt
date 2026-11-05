@@ -64,7 +64,7 @@ class LiveActivity : Activity() {
         if (isFinishing) return
         box.removeAllViews()
         val d = dash ?: return
-        val list = d.events().take(6)
+        val list = d.events().take(3)
         if (list.isEmpty()) {
             box.addView(Ui.label(this, if (d.loaded) "No camera activity in the last 7 days." else "Loading…", 13f, Ui.GREY).apply {
                 setPadding(0, Ui.dp(this@LiveActivity, 4), 0, Ui.dp(this@LiveActivity, 4))

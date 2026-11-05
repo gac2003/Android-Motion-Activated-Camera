@@ -190,7 +190,7 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
   to dismiss it, up to dismiss all, tap to open; they hide by themselves after a few seconds.
 * **Live connection icon** (main screen): yellow while another phone is online as a camera; red with **LIVE** under the
   cloud while this phone is sending its live picture to another phone; a red dot for unread alerts.
-* **Recent activity** (top of Live connection): the latest events of all cameras – motion (with the clip it recorded,
+* **Recent activity** (top of Live connection): the 3 latest events of all cameras – motion (with the clip it recorded,
   tap to watch), monitoring started/stopped, heat, power, battery, PIN lock-outs – updating live. **See all activity**
   lists 7 days of them, newest first, consecutive events of one phone grouped under its name. Each camera's own Activity
   also has settings changes; in both, a motion and its saved clip are one entry.

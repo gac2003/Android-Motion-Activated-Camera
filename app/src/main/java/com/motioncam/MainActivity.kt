@@ -126,20 +126,39 @@ class MainActivity : Activity() {
         ui.post(ticker)
         ShortClipBus.listener = { id, len -> ui.post { offerUndo(id, len) } }
         com.motioncam.live.RemoteSettings.listeners += remoteChanged
-        // unread camera alerts: the Cameras icon turns yellow (also when an alert arrives while this screen is open)
+        // the live connection icon shows who is on air (and a dot for unread alerts), kept current while this is open
         com.motioncam.live.AlertInbox.listeners += inboxChanged
+        com.motioncam.live.Live.listeners += inboxChanged
         tintLiveIcon()
     }
 
     private val inboxChanged: () -> Unit = { tintLiveIcon() }
 
+    /**
+     * The live connection icon: red with "LIVE" under the cloud while this phone sends its live picture to another phone;
+     * yellow while at least one other phone is online as a camera; white otherwise. Unread camera alerts: a dot.
+     */
     private fun tintLiveIcon() {
-        (liveChip as? ImageView)?.setImageDrawable(IconDrawable(IconDrawable.Kind.LIVE,
-            if (prefs.liveOn && com.motioncam.live.AlertInbox.unread(this) > 0) Ui.ACCENT else 0xFFFFFFFF.toInt()))
+        val v = liveChip as? ImageView ?: return
+        val on = prefs.liveOn
+        val me = com.motioncam.cloud.Device.id(this)
+        val streaming = on && com.motioncam.live.CameraLink.streaming
+        val cams = if (on) com.motioncam.live.Live.phones.values.filter { it.id != me && it.online && it.camera } else emptyList()
+        val unread = on && com.motioncam.live.AlertInbox.unread(this) > 0
+        v.setImageDrawable(LiveIconDrawable(when { streaming -> Ui.RED; cams.isNotEmpty() -> Ui.ACCENT; else -> 0xFFFFFFFF.toInt() },
+            caption = streaming, dot = unread))
+        val what = when {
+            streaming -> "this phone is live: another phone is watching it"
+            cams.isNotEmpty() -> cams.joinToString { it.name.ifEmpty { "a camera" } } + " online"
+            else -> "no camera online"
+        } + if (unread) " · unread alerts" else ""
+        v.contentDescription = "Live connection ($what)"
+        v.tooltipText = "Live connection — $what"
     }
 
     override fun onPause() {
         com.motioncam.live.AlertInbox.listeners -= inboxChanged
+        com.motioncam.live.Live.listeners -= inboxChanged
         com.motioncam.live.RemoteSettings.listeners -= remoteChanged
         ShortClipBus.listener = null
         finishDiscard()   // leaving the screen: the decision stands

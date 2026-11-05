@@ -322,6 +322,8 @@ object CameraLink {
     }
 
     @Volatile private var liveThread: Thread? = null
+    /** This phone is sending its live picture to another phone right now. */
+    val streaming: Boolean get() = running && liveThread != null
 
     /** Low-rate live view while someone watches (a frame every 2 s). */
     private fun startLive(ctx: Context) {
@@ -348,6 +350,7 @@ object CameraLink {
         liveThread = t
         t.isDaemon = true
         t.start()
+        Live.notifyChanged()   // this phone's main screen shows it is live
     }
 
     private var lastLiveValues = ""
@@ -364,6 +367,7 @@ object CameraLink {
     private fun stopLive() {
         val wasLive = liveThread != null
         liveThread?.interrupt(); liveThread = null
+        if (wasLive) Live.notifyChanged()
         if (wasLive) main.post { try { EngineHost.release("live") } catch (_: Exception) {} }
     }
 

@@ -123,6 +123,8 @@ object Live {
     /** Fresh camera events (cam, type, data), for open camera screens (main thread). */
     val eventListeners = java.util.concurrent.CopyOnWriteArraySet<(String, String, JSONObject) -> Unit>()
     private fun changed() = main.post { for (l in listeners) try { l() } catch (_: Exception) {} }
+    /** Something screens show changed outside the phone list (e.g. this camera started or stopped streaming). */
+    fun notifyChanged() = changed()
 
     private var devListener: ValueEventListener? = null
     private var syncListener: ChildEventListener? = null

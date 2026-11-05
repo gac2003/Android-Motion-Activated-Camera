@@ -367,3 +367,43 @@ class BatteryDrawable(private val pct: Int, private val charging: Boolean, priva
         }
     }
 }
+
+
+/**
+ * The live connection icon with its state: [caption] draws a small "LIVE" under the cloud (the icon moves up to make
+ * room), [dot] a small dot in the corner (unread alerts).
+ */
+class LiveIconDrawable(private val tint: Int, private val caption: Boolean, private val dot: Boolean) : Drawable() {
+    private val icon = IconDrawable(IconDrawable.Kind.LIVE, tint)
+    private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = tint; textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD; letterSpacing = 0.08f
+    }
+    private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+
+    override fun draw(c: Canvas) {
+        val b = bounds
+        val s = minOf(b.width(), b.height()) / 24f
+        val ox = b.left + (b.width() - 24 * s) / 2
+        val oy = b.top + (b.height() - 24 * s) / 2
+        if (caption) {
+            // the icon at 80 %, top-centred; "LIVE" below it
+            val w = 24 * s * 0.8f
+            icon.setBounds((ox + (24 * s - w) / 2).toInt(), (oy - 1.2f * s).toInt(), (ox + (24 * s + w) / 2).toInt(), (oy - 1.2f * s + w).toInt())
+            icon.draw(c)
+            text.textSize = 6.2f * s
+            c.drawText("LIVE", ox + 12 * s, oy + 24.6f * s, text)
+        } else {
+            icon.setBounds(b)
+            icon.draw(c)
+        }
+        if (dot) {
+            dotPaint.color = if (tint == Ui.RED) 0xFFFFFFFF.toInt() else Ui.RED
+            c.drawCircle(ox + 21.5f * s, oy + 3.5f * s, 3f * s, dotPaint)
+        }
+    }
+
+    override fun setAlpha(alpha: Int) {}
+    override fun setColorFilter(cf: ColorFilter?) {}
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}

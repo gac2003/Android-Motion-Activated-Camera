@@ -84,8 +84,9 @@ object Alerts {
     private fun post(ctx: Context, cam: String, kind: String, channel: String, title: String, text: String, silent: Boolean, update: Boolean = false,
                      clip: JSONObject? = null, at: Long = System.currentTimeMillis()) {
         AlertInbox.add(ctx, cam, kind, title, text, update, clip?.toString(), at)
-        if (Prefs(ctx).alertsInApp) {
-            // "inside MotionCam only": a banner on the open screen (not for silent updates), nothing in the phone's notifications
+        // "inside MotionCam only", or MotionCam is open on screen right now: the in-app card (not for silent updates) and
+        // the Alerts list, never a phone notification on top of the app you are looking at
+        if (Prefs(ctx).alertsInApp || AlertInbox.front?.get() != null) {
             if (!update) AlertInbox.banner(cam, title, text)
             return
         }

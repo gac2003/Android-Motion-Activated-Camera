@@ -58,7 +58,7 @@ class AlertSettingsActivity : Activity() {
                 "can be up to ~15 minutes late. For instant alerts turn on Stay connected (Live connection). Anything missed is " +
                 "always shown when you open MotionCam.")
         }
-        f.choice("Where alerts appear", listOf("Phone notifications (also when MotionCam is closed, with Stay connected)",
+        f.choice("Where alerts appear", listOf("Phone notifications when MotionCam isn't on screen (while it is: a card in the app)",
             "Inside MotionCam only (a banner on the open screen + the Alerts list; nothing in the notification shade)"),
             if (p.alertsInApp) 1 else 0) { p.alertsInApp = it == 1 }
         inboxBtn = f.button("Alerts list (${AlertInbox.unread(this)} unread)") { startActivity(android.content.Intent(this, AlertsInboxActivity::class.java)) }

@@ -184,7 +184,8 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
 * **Alerts open the clip**: once the camera saves the clip a motion alert recorded, the alert (notification, Alerts list,
   Activity log) says "tap to watch" and plays it from the camera's cloud backup – waiting for the upload if needed.
   This needs the camera's backup folder added once under Clips → Remote Folders; the screen explains if it isn't.
-  Or choose **inside MotionCam only**: a card on the open screen and the Alerts list, nothing in the notification shade.
+  While MotionCam is on screen, alerts only show as a card in the app (no phone notification on top of it). Or choose
+  **inside MotionCam only**: a card on the open screen and the Alerts list, nothing in the notification shade.
   In-app cards stack like the phone's notifications (one in front, "+N more" with layers behind): swipe a card sideways
   to dismiss it, up to dismiss all, tap to open; they hide by themselves after a few seconds.
 * **Remote camera**: low-rate live view (a frame every 2 s, only while watched, stops after 3 min), a **high-quality

@@ -339,6 +339,15 @@ class HomeActivity : Activity(), Nav.Reselect {
             }
             box.addView(w, lp(top = 4).apply { bottomMargin = d(8) })
         }
+        // a camera paused because it is too hot: also a current state, shown on top
+        for (p in cams.filter { it.online && Live.cams[it.id]?.status?.optString("mode") == "PAUSED_HOT" }) {
+            val t = Live.cams[p.id]?.status?.optDouble("tempC", 0.0) ?: 0.0
+            box.addView(Ui.label(this, "🌡  ${p.name.ifEmpty { "A camera" }} is too hot" + (if (t > 0) " (%.0f °C)".format(t) else "") +
+                ": recording is paused until it cools down. Move it out of the sun or away from heat; unplugging a fast charger helps.", 13f, 0xFFFF8A65.toInt()).apply {
+                setPadding(d(12), d(10), d(12), d(10))
+                background = GradientDrawable().apply { setColor(0xFF2E1E19.toInt()); cornerRadius = d(12).toFloat() }
+            }, lp(top = 4).apply { bottomMargin = d(8) })
+        }
         // 2 cards per row; 3 in landscape
         val per = if (land) 3 else 2
         for ((r, group) in cams.chunked(per).withIndex()) {
@@ -383,8 +392,13 @@ class HomeActivity : Activity(), Nav.Reselect {
         c.addView(pic, LinearLayout.LayoutParams(-1, d(100)))
         val t = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(d(10), d(8), d(10), d(10)) }
         t.addView(Ui.label(this, p.name.ifEmpty { "Camera" }, 15f).apply { setTypeface(typeface, Typeface.BOLD); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+        val mode = st?.optString("mode")
+        val temp = st?.optDouble("tempC", 0.0) ?: 0.0
         val (state, color) = when {
             !p.online -> "Offline" + (if (p.seen > 0) " since " + Fmt.t(prefs, p.seen - Live.serverOffset, seconds = false) else "") to Ui.ACCENT
+            // paused by the camera phone itself: say so instead of "Monitoring"
+            mode == "PAUSED_HOT" -> "Too hot · paused" + (if (temp > 0) " (%.0f °C)".format(temp) else "") to 0xFFFF8A65.toInt()
+            mode == "PAUSED_STORAGE" -> "Storage full · paused" to 0xFFFF8A65.toInt()
             recording -> "Recording" to 0xFFFF8A85.toInt()
             st?.optBoolean("monitoring") == true -> "Monitoring" to 0xFF81C784.toInt()
             st?.optBoolean("standby") == true -> "Standby" to 0xFFB0B4BA.toInt()
@@ -394,6 +408,10 @@ class HomeActivity : Activity(), Nav.Reselect {
         val detail = Ui.label(this, "", 12f, Ui.GREY).apply { maxLines = 2 }
         val parts = ArrayList<CharSequence>()
         if (st != null && st.optInt("battery", -1) >= 0) parts += BatteryDrawable.text(detail, st.optInt("battery"), st.optBoolean("charging"))
+        // getting warm (40 °C and up, before it pauses): the temperature, in orange
+        if (p.online && temp >= 40 && mode != "PAUSED_HOT") parts += android.text.SpannableString("%.0f °C".format(temp)).apply {
+            setSpan(android.text.style.ForegroundColorSpan(0xFFFF8A65.toInt()), 0, length, 0)
+        }
         st?.optLong("lastMotion")?.takeIf { it > 0 }?.let { parts += "motion " + ago(System.currentTimeMillis() - it) + " ago" }
         detail.text = android.text.SpannableStringBuilder().apply { parts.forEachIndexed { i, x -> if (i > 0) append(" · "); append(x) } }
         if (parts.isNotEmpty()) t.addView(detail)

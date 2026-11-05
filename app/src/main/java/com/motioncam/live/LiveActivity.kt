@@ -24,8 +24,9 @@ import com.motioncam.iconButton
 import com.motioncam.topBar
 
 /**
- * Live connection hub: join the network of your phones (Google account or network code), see which phones are
- * connected (cameras with battery / temperature / last motion), open a camera, alerts, background mode and PIN.
+ * Settings › Your phones: join the network of your phones (Google account or network code; joining is what connects
+ * this phone), the phones on it (cameras with battery / temperature / last motion; mute, remove), alerts,
+ * background mode, and this phone as a camera (control, PIN, standby).
  */
 class LiveActivity : Activity() {
     private lateinit var f: Form
@@ -36,7 +37,7 @@ class LiveActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
-        root.addView(topBar(this, "Live connection"))
+        root.addView(topBar(this, "Your phones"))
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; val p = Ui.dp(this@LiveActivity, 16); setPadding(p, 0, p, p * 2) }
         root.addView(ScrollView(this).apply { addView(box) }, LinearLayout.LayoutParams(-1, 0, 1f))
         Ui.capWidth(box)
@@ -44,105 +45,47 @@ class LiveActivity : Activity() {
         f = Form(this, box)
     }
 
-    /** Recent activity across all cameras (top of the screen), updating live. */
-    private var dash: ActivityFeed? = null
-    private var dashBox: LinearLayout? = null
-    private var dashNewSince = Long.MAX_VALUE
-
     override fun onResume() {
         super.onResume()
         Live.listeners += refresh
         Live.viewerActive = true
         Live.refresh(this)
-        dash = ActivityFeed(this, 12) { fillDash() }
-        dashNewSince = AlertInbox.seenAt(this, null)
-        AlertInbox.markSeen(this, null)
         render()
     }
-    override fun onPause() { Live.listeners -= refresh; dash?.stop(); dash = null; super.onPause() }
-
-    /** The latest few notable events of all cameras (motion with its clip as one entry); the rest is in Activity. */
-    private fun fillDash() {
-        val box = dashBox ?: return
-        if (isFinishing) return
-        box.removeAllViews()
-        val d = dash ?: return
-        val list = d.events().take(3)
-        if (list.isEmpty()) {
-            box.addView(Ui.label(this, if (d.loaded) "No camera activity yet." else "Loading…", 13f, Ui.GREY).apply {
-                setPadding(0, Ui.dp(this@LiveActivity, 4), 0, Ui.dp(this@LiveActivity, 4))
-            })
-            return
-        }
-        val prefs = Prefs(this)
-        for (e in list) box.addView(ActivityLogActivity.eventRow(this, prefs, e, showCam = true, seconds = false, newSince = dashNewSince))
-        AlertInbox.markSeen(this, null)   // shown here = seen
-    }
+    override fun onPause() { Live.listeners -= refresh; super.onPause() }
 
     private fun render() {
         val box = f.box
         box.removeAllViews()
-        if (!LiveConfig.configured) { f.note("This build has no live-connection project configured."); return }
-        f.note("Connects your phones through the internet (Firebase), so it also works where phones can't reach each other " +
-            "(captive Wi-Fi, isolated networks). Camera phones share their status, alerts and a live view; other phones can " +
-            "control them. Clips and collections still come from the cloud folder.")
-        f.toggle("Live connection on this phone", prefs.liveOn) { on ->
-            if (on) chooseRole { enable() } else {
-                prefs.liveOn = false
-                LiveService.stop(this)
-                CameraLink.stop(this)
-                Live.refresh(this)
-                AlertCheckJob.schedule(this)
-            }
-            render()
-        }
-        if (!prefs.liveOn) return
-        f.line(if (prefs.liveCamera) "This phone: camera and viewer" else "This phone: viewer only (it can't be watched or controlled)",
-            13f, Ui.GREY)
-
-        // recent activity of all cameras, near the top (a few entries, so the rest of the screen stays close)
-        if (LiveNet.mode(this) != null && LiveNet.ready(this)) {
-            // a camera that was monitoring and lost its connection: a current state, shown on top (not a history entry)
-            val meId = Device.id(this)
-            for (p in Live.phones.values.filter { it.id != meId && !it.online && Live.cams[it.id]?.status?.optBoolean("monitoring") == true }) {
-                f.line("⚠ ${p.name.ifEmpty { "A camera" }} is offline" +
-                    (if (p.seen > 0) " since " + Fmt.t(prefs, p.seen - Live.serverOffset, seconds = false) else "") +
-                    " — it keeps recording if it still runs", 14f, Ui.ACCENT)
-            }
-            f.title("Recent activity")
-            dashBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            box.addView(dashBox)
-            dash?.sync()
-            fillDash()
-            f.button("See all activity", full = false) { com.motioncam.Nav.go(this, com.motioncam.Nav.Tab.ACTIVITY) }
-        } else dashBox = null
-
-        f.title("Your phones' network")
+        if (!LiveConfig.configured) { f.note("This build has no live-connection project configured (see the setup guide)."); return }
         val mode = LiveNet.mode(this)
+        // joining the network is what connects this phone: there is no separate on/off switch
+        f.title("Your phones' network")
         if (mode == null || !LiveNet.ready(this)) {
-            f.note("All your phones must join the same network: either the same Google account (simplest), or a network code " +
-                "if you don't want to use Google.")
-            f.button("Sign in with Google") {
-                LiveNet.signInGoogle(this) { err ->
-                    if (err != null) Toast.makeText(this, err, Toast.LENGTH_LONG).show() else { Live.refresh(this); render() }
-                }
-            }
-            f.button("Create a network code") { createCode() }
-            f.button("Join with a network code") { askCode() }
+            f.note("Connects your phones through the internet (Firebase), so it also works where phones can't reach each other " +
+                "(captive Wi-Fi, isolated networks). Camera phones share their status, alerts and a live view; other phones can " +
+                "control them. All your phones must join the same network: the same Google account (simplest), or a network code.")
+            f.button("Sign in with Google") { NetJoin.signInGoogle(this) { render() } }
+            f.button("Create a network code") { NetJoin.createCode(this) { render() } }
+            f.button("Join with a network code") { NetJoin.askCode(this) { render() } }
             return
         }
         if (mode == LiveNet.MODE_GOOGLE) f.line("Google account: ${LiveNet.account(this) ?: "signed in"}")
         else {
             f.line("Network code: •••••-•••••-•••••-•••••")
-            f.row(f.chip("Show / share code") { showCode(LiveNet.shownCode(this) ?: "") })
+            f.row(f.chip("Show / share code") { NetJoin.showCode(this, LiveNet.shownCode(this) ?: "") })
             f.note("Anyone with the code can join and see your cameras: share it only with your own phones. Everything in a " +
                 "code network is encrypted with the code.")
         }
-        f.button("Leave this network (sign out)", full = false) {
-            AlertDialog.Builder(this).setTitle("Leave the network?").setMessage("This phone stops sending and receiving. Your cloud clips are not affected.")
-                .setPositiveButton("Leave") { _, _ -> LiveNet.signOut(this); LiveService.stop(this); Live.refresh(this); render() }
-                .setNegativeButton("Cancel", null).show()
+        if (!prefs.liveOn) {
+            // turned off with the old on/off switch: signed in, but not connected on this phone
+            f.note("This phone is signed in but not connected (it was turned off in an earlier version).", Ui.ACCENT)
+            f.button("Connect this phone") { enable() }
         }
+        f.button("Leave this network (sign out)", full = false) { NetJoin.leave(this) { render() } }
+        if (!prefs.liveOn) return
+        f.line(if (prefs.liveCamera) "This phone: camera and viewer" else "This phone: viewer only (it can't be watched or controlled)",
+            13f, Ui.GREY)
 
         f.title("Phones")
         val me = Device.id(this)
@@ -153,7 +96,7 @@ class LiveActivity : Activity() {
             if (mode == LiveNet.MODE_CODE) "; to keep it out, also create a new code." else ".")
 
         f.title("Alerts on this phone")
-        f.button("Alerts & notifications…") { startActivity(Intent(this, AlertSettingsActivity::class.java)) }
+        f.button("Alerts & activity…") { startActivity(Intent(this, AlertSettingsActivity::class.java)) }
         f.toggle("Stay connected in the background", prefs.liveStay) { on ->
             prefs.liveStay = on
             if (on) LiveService.start(this) else LiveService.stop(this)
@@ -169,7 +112,7 @@ class LiveActivity : Activity() {
 
         f.title("This phone as a camera")
         f.toggle("Let other phones see and control this phone while it is monitoring", prefs.liveCamera) { on ->
-            if (on) withCameraPin { prefs.liveCamera = true; com.motioncam.CameraService.settingsChanged(this); render() }   // the PIN is always asked to turn this on
+            if (on) NetJoin.withCameraPin(this) { prefs.liveCamera = true; com.motioncam.CameraService.settingsChanged(this); render() }   // the PIN is always asked to turn this on
             else {
                 prefs.liveCamera = false
                 CameraLink.stop(this)
@@ -178,7 +121,7 @@ class LiveActivity : Activity() {
             render()
         }
         if (prefs.liveCamera) {
-            f.row(f.chip("Change PIN") { setPin { render() } })
+            f.row(f.chip("Change PIN") { NetJoin.setPin(this) { render() } })
             if (CameraLink.shortPin(this)) f.note("Your PIN is shorter than 6 characters: change it for better protection.", Ui.ACCENT)
             f.toggle("PIN also needed for the live view and frames", prefs.livePinForView) { prefs.livePinForView = it }
             f.toggle("Standby: can be started from your other phones", prefs.liveStandby) { on ->
@@ -252,94 +195,6 @@ class LiveActivity : Activity() {
             r.addView(more)
         }
         return LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(0, Ui.dp(ctx, 8), 0, 0); addView(r) }
-    }
-
-    // ------------------------------------------------------------------ network code
-
-    private fun createCode() {
-        val code = LiveNet.newCode()
-        AlertDialog.Builder(this).setTitle("New network code")
-            .setMessage("$code\n\nEnter this code on each of your phones (Join with a network code). Keep it private: anyone with it can see " +
-                "and (without a PIN) control your cameras.")
-            .setPositiveButton("Use this code") { _, _ -> join(code) }
-            .setNeutralButton("Copy") { _, _ -> copy(code); join(code) }
-            .setNegativeButton("Cancel", null).show()
-    }
-
-    private fun askCode() {
-        val input = EditText(this).apply { hint = "XXXXX-XXXXX-XXXXX-XXXXX"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS }
-        AlertDialog.Builder(this).setTitle("Join with a network code").setView(input)
-            .setPositiveButton("Join") { _, _ -> join(input.text.toString()) }.setNegativeButton("Cancel", null).show()
-    }
-
-    private fun join(code: String) {
-        Toast.makeText(this, "Connecting…", Toast.LENGTH_SHORT).show()
-        Thread {
-            val err = LiveNet.joinWithCode(this, code)
-            runOnUiThread { if (err != null) Toast.makeText(this, err, Toast.LENGTH_LONG).show() else { Live.refresh(this); render() } }
-        }.start()
-    }
-
-    private fun showCode(code: String) {
-        AlertDialog.Builder(this).setTitle("Network code").setMessage(code)
-            .setPositiveButton("Copy") { _, _ -> copy(code) }
-            .setNeutralButton("Share…") { _, _ -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, code), "Share code")) }
-            .setNegativeButton("Close", null).show()
-    }
-
-    private fun copy(s: String) {
-        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("MotionCam network code", s))
-        Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
-    }
-
-    /** Asks for the camera PIN (twice); [done] only runs when a valid PIN was saved. */
-    private fun setPin(done: () -> Unit) {
-        val input = EditText(this).apply { hint = "PIN (at least 6 characters)"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
-        val input2 = EditText(this).apply { hint = "Repeat the PIN"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; val p = Ui.dp(this@LiveActivity, 20); setPadding(p, 0, p, 0); addView(input); addView(input2) }
-        AlertDialog.Builder(this).setTitle("Camera PIN").setView(box)
-            .setMessage("Other phones need this PIN to control this camera, change its settings or (if you keep that on) watch it. " +
-                "Use at least 6 characters; letters and digits mixed are much harder to guess.")
-            .setPositiveButton("Save") { _, _ ->
-                val p = input.text.toString().trim()
-                when {
-                    p.length < 6 -> Toast.makeText(this, "At least 6 characters", Toast.LENGTH_SHORT).show()
-                    p != input2.text.toString().trim() -> Toast.makeText(this, "The two PINs differ", Toast.LENGTH_SHORT).show()
-                    else -> { CameraLink.setPin(this, p); done() }
-                }
-                render()
-            }.setNegativeButton("Cancel") { _, _ -> render() }.show()
-    }
-
-    /**
-     * Turning the camera role on always needs the PIN: set one (entered twice) if there is none, otherwise enter it
-     * (with "Set a new PIN" for a forgotten one). Cancel / wrong PIN: the camera role stays off.
-     */
-    private fun withCameraPin(then: () -> Unit) {
-        if (!CameraLink.hasPin(this)) { setPin(then); return }
-        val input = EditText(this).apply { hint = "PIN"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
-        val box = LinearLayout(this).apply { val p = Ui.dp(this@LiveActivity, 20); setPadding(p, 0, p, 0); addView(input, LinearLayout.LayoutParams(-1, -2)) }
-        AlertDialog.Builder(this).setTitle("Enter this camera's PIN").setView(box)
-            .setMessage("Needed to let other phones see and control this phone.")
-            .setPositiveButton("OK") { _, _ ->
-                if (CameraLink.pinMatches(this, input.text.toString())) then()
-                else { Toast.makeText(this, "Wrong PIN", Toast.LENGTH_SHORT).show(); render() }
-            }
-            .setNeutralButton("Set a new PIN") { _, _ -> setPin(then) }
-            .setNegativeButton("Cancel") { _, _ -> render() }
-            .setOnCancelListener { render() }
-            .show()
-    }
-
-    /** First step when turning the live connection on: viewer only, or also a camera (which needs a PIN). */
-    private fun chooseRole(then: () -> Unit) {
-        val d = com.motioncam.OptionSheet.show(this, "How will this phone take part?", listOf(
-            com.motioncam.Opt("Viewer only", "See your cameras and get their alerts. This phone is never watched or controlled.",
-                com.motioncam.IconDrawable.Kind.SCREEN) { prefs.liveCamera = false; then() },
-            com.motioncam.Opt("Camera and viewer", "While it is monitoring, your other phones can see and control it — protected by a PIN.",
-                com.motioncam.IconDrawable.Kind.VIDEOCAM) { withCameraPin { prefs.liveCamera = true; then() } },
-        ), subtitle = "You can change this later.")
-        d.setOnDismissListener { render() }
     }
 
     private fun enable() {

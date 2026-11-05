@@ -30,6 +30,7 @@ class RemoteTabActivity : com.motioncam.remote.RemoteFoldersActivity() {
 }
 
 class SettingsTabActivity : SettingsActivity() {
+    override val asTab = true
     override fun setContentView(view: View) = super.setContentView(Nav.wrap(this, view, Nav.Tab.SETTINGS))
     override fun onResume() { super.onResume(); Nav.tabShown(this, Nav.Tab.SETTINGS) }
     override fun finish() { if (!isTaskRoot) Nav.leaveTab(this, Nav.Tab.SETTINGS) else super.finish() }

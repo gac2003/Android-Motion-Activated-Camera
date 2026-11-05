@@ -185,8 +185,8 @@ class Prefs(ctx: Context) {
         val PROTECTION_KEYS = listOf("minBattery", "maxTempC")
         val REMOTE_KEYS = listOf("serverOn", "streamHd", "port")
         val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal", "cloudThumbs", "cloudPaused")
-        /** Live connection on/off, Stay connected, PIN for the view, camera role (sign-in and PINs are kept). */
-        val LIVE_KEYS = listOf("liveOn", "liveStay", "livePinForView", "liveCamera", "liveStandby")
+        /** Stay connected, PIN for the view, camera role (the network sign-in, its connection and PINs are kept). */
+        val LIVE_KEYS = listOf("liveStay", "livePinForView", "liveCamera", "liveStandby")
         val REMOTE_FOLDER_KEYS = listOf("remoteFtp", "remoteKeepCopy")
         val PLAYER_KEYS = listOf("skipMs", "stripZoom")
         val ALERT_KEYS = listOf("alertsOn", "alertsInApp", "alertsPoll", "alertRemote", "alertMotion", "alertMotionGapMin", "alertClip", "alertBattery", "alertBatteryPct",

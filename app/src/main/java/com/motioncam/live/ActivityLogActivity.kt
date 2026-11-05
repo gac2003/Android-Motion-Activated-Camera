@@ -26,7 +26,7 @@ class ActivityLogActivity : Activity() {
     private var filter = 0
     private val filters = listOf(
         "All" to emptySet(), "Motion" to setOf("motion"), "Clips" to setOf("clip"),
-        "Monitoring" to setOf("monitor_on", "monitor_off", "monitor_paused", "safety_stop", "pin_locked", "remote_taken"),
+        "Monitoring" to setOf("monitor_on", "monitor_off", "monitor_paused", "safety_stop", "pin_locked", "remote_taken", "settings_local"),
         "Battery & heat" to setOf("battery", "unplugged", "hot"))
     private var listener: ValueEventListener? = null
 
@@ -76,7 +76,7 @@ class ActivityLogActivity : Activity() {
 
     private fun icon(type: String) = when (type) {
         "motion" -> "🏃"; "clip" -> "🎞"; "monitor_on" -> "▶"; "monitor_off", "monitor_paused" -> "⏸"; "safety_stop" -> "⛔"
-        "battery" -> "🔋"; "unplugged" -> "🔌"; "hot" -> "🌡"; "pin_locked" -> "🔒"; "remote_taken" -> "🎮"; else -> "•"
+        "battery" -> "🔋"; "unplugged" -> "🔌"; "hot" -> "🌡"; "pin_locked" -> "🔒"; "remote_taken" -> "🎮"; "settings_local" -> "⚙"; else -> "•"
     }
 
     private fun render() {

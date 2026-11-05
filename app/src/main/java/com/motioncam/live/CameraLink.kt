@@ -73,7 +73,30 @@ object CameraLink {
         "focusAuto", "focusPos", "wbAuto", "wbKelvin", "zoom")
     private val publishSoon = Runnable { app?.let { if (running) try { publishStatus(it) } catch (_: Exception) {} } }
     private val prefsL = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (running && key in SETTING_KEYS) { main.removeCallbacks(publishSoon); main.postDelayed(publishSoon, 800) }
+        if (running && key in SETTING_KEYS) {
+            main.removeCallbacks(publishSoon); main.postDelayed(publishSoon, 800)
+            // changed on this phone itself (not by a viewer's Save): tell the viewers, once the changes settle
+            val byRemote = key in remoteKeys && System.currentTimeMillis() - remoteAt < 5000
+            if (!byRemote) { localKeys += key!!; main.removeCallbacks(reportLocal); main.postDelayed(reportLocal, 2500) }
+        }
+    }
+
+    /** Settings just applied for a viewer (so they aren't reported back as changed on the camera). */
+    @Volatile private var remoteKeys: Set<String> = emptySet()
+    @Volatile private var remoteAt = 0L
+    private val localKeys = java.util.LinkedHashSet<String>()
+    private val SETTING_LABELS = mapOf("camera" to "lens", "resHeight" to "resolution", "fps" to "frame rate", "hevc" to "codec",
+        "bitrateMbps" to "bitrate", "audio" to "audio", "preRecordMs" to "pre-record", "stopDelaySec" to "stop delay",
+        "maxClipMin" to "clip length", "sensitivity" to "sensitivity", "lightFilter" to "light filter", "minAreaPct" to "minimum area",
+        "minMotionMs" to "minimum motion time", "exposureAuto" to "exposure mode", "evIndex" to "exposure compensation", "iso" to "ISO",
+        "shutterNs" to "shutter speed", "focusAuto" to "focus mode", "focusPos" to "focus distance", "wbAuto" to "white balance mode",
+        "wbKelvin" to "white balance", "zoom" to "zoom")
+    private val reportLocal = Runnable {
+        val c = app ?: return@Runnable
+        if (!running || localKeys.isEmpty()) return@Runnable
+        val keys = localKeys.toList(); localKeys.clear()
+        val names = keys.mapNotNull { SETTING_LABELS[it] }.distinct()
+        event(c, "settings_local", "Changed on the camera phone: " + names.joinToString(), JSONObject().put("keys", JSONArray(keys)))
     }
 
     fun stop(ctx: Context) {
@@ -88,6 +111,7 @@ object CameraLink {
         watchL?.let { path(c, "watchers")?.removeEventListener(it) }
         snapL?.let { path(c, "snapReq")?.removeEventListener(it) }
         cmdL?.let { path(c, "cmd")?.removeEventListener(it) }
+        main.removeCallbacks(reportLocal); localKeys.clear()
         stopLive()
         Live.cameraActive = false
         Live.refresh(c)
@@ -291,6 +315,9 @@ object CameraLink {
     /** Low-rate live view while someone watches (a frame every 2 s). */
     private fun startLive(ctx: Context) {
         if (liveThread != null) return
+        // in standby the camera is closed: open it while someone watches (allowed: the camera service was started from
+        // the app), and close it again when they stop. While monitoring this changes nothing.
+        main.post { try { EngineHost.acquire(ctx, "live") } catch (_: Exception) {} }
         val t = Thread {
             FrameHub.clients++
             try {
@@ -311,7 +338,11 @@ object CameraLink {
         t.start()
     }
 
-    private fun stopLive() { liveThread?.interrupt(); liveThread = null }
+    private fun stopLive() {
+        val wasLive = liveThread != null
+        liveThread?.interrupt(); liveThread = null
+        if (wasLive) main.post { try { EngineHost.release("live") } catch (_: Exception) {} }
+    }
 
     /** A high-quality current frame (full analysis resolution, high JPEG quality). */
     private fun snapshot(ctx: Context, id: String, s: DataSnapshot) {
@@ -413,7 +444,9 @@ object CameraLink {
                 main.post { CameraService.stop(ctx) }
             }
             "set" -> {
-                val (applied, rejected) = RemoteSettings.apply(ctx, d.optJSONObject("args") ?: JSONObject())
+                val args = d.optJSONObject("args") ?: JSONObject()
+                remoteKeys = args.keys().asSequence().toSet() + setOf("zoom"); remoteAt = System.currentTimeMillis()
+                val (applied, rejected) = RemoteSettings.apply(ctx, args)
                 EngineHost.peek()?.applyConfig()
                 EngineHost.peek()?.applyPro()
                 RemoteSettings.changed()

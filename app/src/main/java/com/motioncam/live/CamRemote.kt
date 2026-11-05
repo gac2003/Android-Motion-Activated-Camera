@@ -21,7 +21,28 @@ import org.json.JSONObject
  * with their answers, and the low-rate live view. Shared by the camera screen and the full-screen live view.
  */
 class CamRemote(private val a: Activity, val cam: String) {
+    companion object {
+        /** The last live picture of each camera (and when it was taken), kept while MotionCam runs. */
+        val lastFrames = java.util.concurrent.ConcurrentHashMap<String, Pair<Bitmap, Long>>()
+    }
     private val ui = Handler(Looper.getMainLooper())
+
+    /**
+     * Why live view can't show a picture right now (null = it can): offline, or MotionCam's camera not running on
+     * that phone (not monitoring and not in standby).
+     */
+    fun liveProblem(): String? {
+        val p = Live.phones[cam]
+        if (p == null || !p.online) return "The camera phone is offline"
+        val s = status()
+        if (!p.camera || (s != null && !s.optBoolean("monitoring") && !s.optBoolean("standby") && s.optString("mode") == "OFF"))
+            return "MotionCam's camera isn't running on that phone (not monitoring, standby off). Open MotionCam there or " +
+                "turn on Standby in its Live connection settings."
+        return null
+    }
+
+    /** Names of settings in a "settings_local" event, for messages. */
+    fun changedText(d: JSONObject): String = d.optString("text").removePrefix("Changed on the camera phone: ").ifEmpty { "settings" }
 
     fun status(): JSONObject? = Live.cams[cam]?.status
     fun caps(): JSONObject? = Live.cams[cam]?.caps
@@ -119,6 +140,25 @@ class CamRemote(private val a: Activity, val cam: String) {
     inner class Feed(private val maxMs: Long, private val onFrame: (Bitmap, Long) -> Unit, private val onState: (String) -> Unit) {
         var watching = false; private set
         private var started = 0L
+        /** When the last picture arrived here (0 = none since watching started). */
+        var lastFrame = 0L; private set
+
+        /**
+         * What to tell the viewer about the picture (null = live and fresh): starting, or why nothing new arrives. The
+         * last picture stays on screen either way.
+         */
+        fun health(): String? {
+            if (!watching) return null
+            liveProblem()?.let { return it }
+            val now = System.currentTimeMillis()
+            val since = if (lastFrame > 0) now - lastFrame else now - started
+            return when {
+                lastFrame == 0L && since < 8000 -> if (status()?.optBoolean("standby") == true) "Waking the camera…" else "Starting live view…"
+                lastFrame == 0L -> "No picture from the camera yet (it may be busy, or its camera can't be opened)"
+                since > 8000 -> "Live view stalled — no new picture for ${since / 1000} s"
+                else -> null
+            }
+        }
         private var liveL: ValueEventListener? = null
         private val heartbeat = object : Runnable {
             override fun run() {
@@ -140,6 +180,7 @@ class CamRemote(private val a: Activity, val cam: String) {
             if (status()?.optBoolean("pinForView") == true && pinFor() == null) { askPin({ start() }); return }
             watching = true
             started = System.currentTimeMillis()
+            lastFrame = 0L
             onState("Starting live view…")
             Live.ref(a, "cams/$cam/watchers/${Device.id(a)}")?.onDisconnect()?.removeValue()
             heartbeat.run()
@@ -147,7 +188,11 @@ class CamRemote(private val a: Activity, val cam: String) {
                 override fun onDataChange(s: DataSnapshot) {
                     val bytes = LiveNet.openBytes(a, s.child("img").value as? String) ?: return
                     val at = (s.child("at").value as? Number)?.toLong() ?: 0
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { onFrame(it, at - Live.serverOffset) }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let {
+                        lastFrame = System.currentTimeMillis()
+                        lastFrames[cam] = it to (at - Live.serverOffset)
+                        onFrame(it, at - Live.serverOffset)
+                    }
                 }
                 override fun onCancelled(e: DatabaseError) {}
             }.also { Live.ref(a, "cams/$cam/live")?.addValueEventListener(it) }

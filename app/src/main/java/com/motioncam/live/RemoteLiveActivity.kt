@@ -47,6 +47,8 @@ class RemoteLiveActivity : Activity() {
 
     private lateinit var image: ImageView
     private lateinit var msgTv: TextView
+    /** Under the picture (top of the controls), in colour: why no new picture arrives; the last one stays as it is. */
+    private lateinit var liveNote: TextView
     private lateinit var top: LinearLayout
     private lateinit var statusTv: TextView
     private lateinit var infoTv: TextView
@@ -89,6 +91,8 @@ class RemoteLiveActivity : Activity() {
         r = CamRemote(this, cam)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         buildUi()
+        // the last picture seen of this camera stays on screen (dimmed) until a new one arrives
+        CamRemote.lastFrames[cam]?.let { (bmp, at) -> image.setImageBitmap(bmp); lastFrameAt = at }
         feed = r.Feed(10 * 60_000L, { bmp, at ->
             image.setImageBitmap(bmp)
             lastFrameAt = at
@@ -104,6 +108,7 @@ class RemoteLiveActivity : Activity() {
     override fun onResume() {
         super.onResume()
         Live.listeners += refresh
+        Live.eventListeners += events
         Live.viewerActive = true
         Live.refresh(this)
         refreshAll()
@@ -113,6 +118,7 @@ class RemoteLiveActivity : Activity() {
 
     override fun onPause() {
         Live.listeners -= refresh
+        Live.eventListeners -= events
         if (::feed.isInitialized) feed.stop()
         ui.removeCallbacks(tick)
         super.onPause()
@@ -123,9 +129,33 @@ class RemoteLiveActivity : Activity() {
         arrangeBottom()
     }
 
+    /** Settings changed on the camera phone itself: the controls already show them; say so, and keep unsent changes. */
+    private val events: (String, String, JSONObject) -> Unit = { c, type, d ->
+        if (c == cam && type == "settings_local") {
+            val keys = d.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+            val clash = keys.any { draft.has(it) }
+            Toast.makeText(this, "The camera phone changed its " + r.changedText(d) +
+                (if (clash) ". Your unsent values for those are kept: Save to apply them, or Cancel to take the camera's." else "."),
+                Toast.LENGTH_LONG).show()
+            refreshAll()
+        }
+    }
+
     /** Once a second: recording time, "x s ago" of the last frame. */
     private val tick = object : Runnable {
-        override fun run() { renderStatus(); updateLiveLabel(); ui.postDelayed(this, 1000) }
+        override fun run() {
+            renderStatus(); updateLiveLabel()
+            // why no new picture arrives (with a picture on screen the reason goes under it; with none, in the middle)
+            val h = if (feed.watching) feed.health() else null
+            if (h != null && lastFrameAt > 0) {
+                liveNote.text = "⚠ $h · showing the picture from " + Fmt.t(prefs, lastFrameAt); liveNote.visibility = View.VISIBLE
+                msgTv.visibility = View.GONE
+            } else {
+                liveNote.visibility = View.GONE
+                if (h != null) { msgTv.text = h; msgTv.visibility = View.VISIBLE }
+            }
+            ui.postDelayed(this, 1000)
+        }
     }
 
     // ------------------------------------------------------------------ UI
@@ -196,6 +226,8 @@ class RemoteLiveActivity : Activity() {
         saveBar.addView(Ui.chip(this, "Cancel").apply { setOnClickListener { cancelDraft() } })
         saveBtn = Ui.chip(this, "Save").apply { Ui.setChipState(this, true); setOnClickListener { saveDraft() } }
         saveBar.addView(saveBtn, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = d(8) })
+        liveNote = Ui.label(this, "", 12f, Ui.ACCENT).apply { setPadding(d(12), 0, d(12), d(6)); visibility = View.GONE }
+        bottomBox.addView(liveNote)
         bottomBox.addView(saveBar)
         bottomBox.addView(panel)
         strip = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }

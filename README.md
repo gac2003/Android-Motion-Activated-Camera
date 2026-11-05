@@ -192,6 +192,11 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
   controls (lens, exposure, ISO, shutter, focus, white balance, zoom), recording and motion settings, start / pause /
   resume / stop monitoring, and the camera's **Activity** log (7 days). Settings changed remotely are drafts until you
   tap **Save** (or **Cancel**) in the bar that stays at the bottom of the screen; leaving with unsaved changes asks first.
+* **Live view in standby** too: the camera opens while someone watches and closes again after. When no new picture
+  arrives, the last one stays on screen with a coloured line under it saying why (offline, MotionCam's camera not running
+  there, stalled…); reopening a camera shows its last picture.
+* **Settings changed on the camera phone** reach the other phones within a second and show as a notice on any open
+  camera screen (unsaved changes to the same settings are kept for you to Save or Cancel) and in the Activity log.
 * **Full screen** live view: laid out like the camera screen – the picture fills the screen, status on top, and the same
   control buttons (lens, format, EV, ISO, shutter, focus, white balance, zoom) with their slider and AUTO, plus Start /
   Stop monitoring. Changes are lined up (shown at once on the buttons) and sent together with **Save** (or dropped with

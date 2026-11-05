@@ -120,6 +120,8 @@ object Live {
     val cams = ConcurrentHashMap<String, Cam>()
     /** Screens refresh on changes (main thread). */
     val listeners = java.util.concurrent.CopyOnWriteArraySet<() -> Unit>()
+    /** Fresh camera events (cam, type, data), for open camera screens (main thread). */
+    val eventListeners = java.util.concurrent.CopyOnWriteArraySet<(String, String, JSONObject) -> Unit>()
     private fun changed() = main.post { for (l in listeners) try { l() } catch (_: Exception) {} }
 
     private var devListener: ValueEventListener? = null
@@ -207,7 +209,11 @@ object Live {
                 val t = (s.child("t").value as? Number)?.toLong() ?: return
                 if (t < attachedAt - 60_000 + serverOffset) return     // older events: only shown in Activity, not alerted
                 val d = LiveNet.open(ctx, s.child("d").value as? String) ?: return
-                try { Alerts.onEvent(ctx, id, t, JSONObject(d)) } catch (_: Exception) {}
+                try {
+                    val o = JSONObject(d)
+                    Alerts.onEvent(ctx, id, t, o)
+                    main.post { for (l in eventListeners) try { l(id, o.optString("type"), o) } catch (_: Exception) {} }
+                } catch (_: Exception) {}
                 markSeen(ctx, id, t)
             }
             override fun onChildChanged(s: DataSnapshot, prev: String?) {}

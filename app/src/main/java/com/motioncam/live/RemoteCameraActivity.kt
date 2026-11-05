@@ -40,6 +40,8 @@ class RemoteCameraActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var image: ImageView
     private lateinit var imageLabel: TextView
+    /** Under the picture, in colour: why no new picture arrives (the last one stays on screen as it is). */
+    private lateinit var liveNote: TextView
     private lateinit var liveBtn: TextView
     private lateinit var f: Form
     private val ui = Handler(Looper.getMainLooper())
@@ -80,6 +82,11 @@ class RemoteCameraActivity : Activity() {
         frame.addView(imageLabel, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START))
         val w = resources.displayMetrics.widthPixels.coerceAtMost(Ui.dp(this, 700))
         root.addView(frame, LinearLayout.LayoutParams(-1, w * 9 / 16))
+        liveNote = Ui.label(this, "", 12f, Ui.ACCENT).apply {
+            setPadding(Ui.dp(this@RemoteCameraActivity, 12), Ui.dp(this@RemoteCameraActivity, 4), Ui.dp(this@RemoteCameraActivity, 12), 0)
+            visibility = android.view.View.GONE
+        }
+        root.addView(liveNote)
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; val p = Ui.dp(this@RemoteCameraActivity, 8); setPadding(p, p, p, 0) }
         liveBtn = Ui.chip(this, "▶ Live view").apply { setOnClickListener { if (feed.watching) stopWatching() else startWatching() } }
         buttons.addView(liveBtn)
@@ -109,9 +116,39 @@ class RemoteCameraActivity : Activity() {
         feed = r.Feed(3 * 60_000L, { bmp, at ->
             image.setImageBitmap(bmp)
             imageLabel.text = "Live (every 2 s) · " + Fmt.t(prefs, at)
+            liveNote.visibility = android.view.View.GONE
         }) { msg ->
             imageLabel.text = msg
             liveBtn.text = if (feed.watching) "■ Stop live" else "▶ Live view"
+        }
+        // the last picture seen of this camera stays on screen (with its time) until a new one arrives
+        CamRemote.lastFrames[cam]?.let { (bmp, at) ->
+            image.setImageBitmap(bmp)
+            imageLabel.text = "Last picture · " + Fmt.t(prefs, at) + " — tap Live view for a new one"
+        }
+    }
+
+    /** Once a second while watching: under the picture, why no new one arrives (the last one stays as it is). */
+    private val liveTick = object : Runnable {
+        override fun run() {
+            val h = if (feed.watching) feed.health() else null
+            if (h != null) {
+                val last = CamRemote.lastFrames[cam]
+                liveNote.text = "⚠ " + h + (last?.let { " · showing the picture from " + Fmt.t(prefs, it.second) } ?: "")
+                liveNote.visibility = android.view.View.VISIBLE
+            } else liveNote.visibility = android.view.View.GONE
+            ui.postDelayed(this, 1000)
+        }
+    }
+
+    /** Settings changed on the camera phone itself: the screen already shows them; say so, and keep unsent edits. */
+    private val events: (String, String, JSONObject) -> Unit = { c, type, d ->
+        if (c == cam && type == "settings_local") {
+            val keys = d.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+            val clash = keys.filter { draft.has(it) }
+            Toast.makeText(this, "The camera phone changed its " + r.changedText(d) +
+                (if (clash.isNotEmpty()) ". Your unsaved values for those are kept: Save to apply them, or Cancel to take the camera's." else "."),
+                Toast.LENGTH_LONG).show()
         }
     }
 
@@ -240,14 +277,18 @@ class RemoteCameraActivity : Activity() {
     override fun onResume() {
         super.onResume()
         Live.listeners += refresh
+        Live.eventListeners += events
         Live.viewerActive = true
         Live.refresh(this)
         lastSettings = ""
         renderIfChanged()
+        ui.post(liveTick)
     }
 
     override fun onPause() {
         Live.listeners -= refresh
+        Live.eventListeners -= events
+        ui.removeCallbacks(liveTick)
         if (::feed.isInitialized) stopWatching()
         super.onPause()
     }

@@ -18,6 +18,7 @@ object ResetEffects {
             if (!p.liveOn || !p.liveStay) com.motioncam.live.LiveService.stop(ctx)
             if (!p.liveOn || !p.liveCamera) com.motioncam.live.CameraLink.stop(ctx)
             com.motioncam.live.Live.refresh(ctx)
+            CameraService.settingsChanged(ctx)
         }
         if (keys.any { it in Prefs.REMOTE_KEYS }) CameraService.instance?.reloadServer()
     }

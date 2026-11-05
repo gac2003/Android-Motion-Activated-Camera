@@ -58,6 +58,7 @@ class LiveActivity : Activity() {
             if (on) chooseRole { enable() } else {
                 prefs.liveOn = false
                 LiveService.stop(this)
+                CameraLink.stop(this)
                 Live.refresh(this)
             }
             render()
@@ -98,7 +99,7 @@ class LiveActivity : Activity() {
         val phones = Live.phones.values.sortedWith(compareBy({ it.id != me }, { !it.camera }, { it.name }))
         if (phones.isEmpty()) f.note("Connecting…")
         for (p in phones) box.addView(phoneRow(p, p.id == me))
-        f.note("Camera phones appear while they are monitoring. A phone you remove signs itself out when it next connects" +
+        f.note("Camera phones appear while they are monitoring or in standby. A phone you remove signs itself out when it next connects" +
             if (mode == LiveNet.MODE_CODE) "; to keep it out, also create a new code." else ".")
 
         f.title("Alerts on this phone")
@@ -113,7 +114,7 @@ class LiveActivity : Activity() {
 
         f.title("This phone as a camera")
         f.toggle("Let other phones see and control this phone while it is monitoring", prefs.liveCamera) { on ->
-            if (on) withCameraPin { prefs.liveCamera = true; render() }   // the PIN is always asked to turn this on
+            if (on) withCameraPin { prefs.liveCamera = true; com.motioncam.CameraService.settingsChanged(this); render() }   // the PIN is always asked to turn this on
             else {
                 prefs.liveCamera = false
                 CameraLink.stop(this)
@@ -125,6 +126,13 @@ class LiveActivity : Activity() {
             f.row(f.chip("Change PIN") { setPin { render() } })
             if (CameraLink.shortPin(this)) f.note("Your PIN is shorter than 6 characters: change it for better protection.", Ui.ACCENT)
             f.toggle("PIN also needed for the live view and frames", prefs.livePinForView) { prefs.livePinForView = it }
+            f.toggle("Standby: can be started from your other phones", prefs.liveStandby) { on ->
+                prefs.liveStandby = on
+                com.motioncam.CameraService.settingsChanged(this)
+            }
+            f.note("When monitoring is stopped, MotionCam stays connected with the camera off (a small notification shows " +
+                "\"standby\"), so your other phones can start monitoring again. Turn it off from that notification or here. " +
+                "Most reliable while the phone is charging.")
             f.note("The PIN protects the camera's controls, settings and pausing/stopping monitoring (and, if on, its live view). " +
                 "It is never sent: requests are signed with it. After 5 wrong PINs remote control is locked for 10 minutes.")
         } else f.note("Viewer only: this phone sees the cameras and gets their alerts, but is never shown or controllable as a camera.")

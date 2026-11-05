@@ -47,6 +47,22 @@ class RemoteCameraActivity : Activity() {
     private var watchStarted = 0L
     private var lastSettings = ""
     private val refresh: () -> Unit = { renderIfChanged() }
+    /** Settings changed here but not sent yet (sent together with Save). */
+    private val draft = JSONObject()
+    /** Saved values shown until the camera's status confirms them (so controls don't flick back meanwhile). */
+    private val saved = JSONObject()
+    private var savedAt = 0L
+    private var saving = false
+    private var leaveOk = false
+    private lateinit var scroll: ScrollView
+    private lateinit var saveBar: LinearLayout
+    private lateinit var saveInfo: TextView
+    private lateinit var saveBtn: TextView
+    private lateinit var hqBox: LinearLayout
+    private lateinit var hqImage: ImageView
+    private lateinit var hqLabel: TextView
+    private var hqBytes: ByteArray? = null
+    private var hqTime = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,11 +88,138 @@ class RemoteCameraActivity : Activity() {
             setOnClickListener { startActivity(Intent(this@RemoteCameraActivity, ActivityLogActivity::class.java).putExtra(Alerts.EXTRA_CAM, cam)) }
         }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(this@RemoteCameraActivity, 6) })
         root.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(buttons) })
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; val p = Ui.dp(this@RemoteCameraActivity, 16); setPadding(p, 0, p, p * 2) }
-        root.addView(ScrollView(this).apply { addView(box) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        Ui.capWidth(box)
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; val p = Ui.dp(this@RemoteCameraActivity, 16); setPadding(p, 0, p, p * 2) }
+        hqBox = hqPanel()
+        content.addView(hqBox)
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(box)
+        scroll = ScrollView(this).apply { addView(content) }
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        Ui.capWidth(content)
+        saveBar = saveBar()
+        root.addView(saveBar)
         setContentView(root)
         f = Form(this, box)
+    }
+
+    // ------------------------------------------------------------------ high-quality frame (under the live view)
+
+    private fun hqPanel(): LinearLayout {
+        val ctx = this
+        return LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = android.view.View.GONE
+            setPadding(0, Ui.dp(ctx, 12), 0, 0)
+            val head = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            hqLabel = Ui.label(ctx, "", 13f, Ui.ACCENT)
+            head.addView(hqLabel, LinearLayout.LayoutParams(0, -2, 1f))
+            head.addView(Ui.chip(ctx, "Save to phone").apply { setOnClickListener { saveFrame() } })
+            head.addView(com.motioncam.iconButton(ctx, com.motioncam.IconDrawable.Kind.CLOSE, 40, 10) {
+                visibility = android.view.View.GONE; hqImage.setImageDrawable(null); hqBytes = null
+            }.apply { contentDescription = "Close the frame" }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(ctx, 4) })
+            addView(head)
+            hqImage = ImageView(ctx).apply {
+                adjustViewBounds = true; scaleType = ImageView.ScaleType.FIT_CENTER; setBackgroundColor(Color.BLACK)
+                contentDescription = "High-quality frame (tap to view full screen)"
+                setOnClickListener { showFrameFull() }
+            }
+            addView(hqImage, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(ctx, 6) })
+        }
+    }
+
+    private fun showFrameFull() {
+        val b = hqBytes ?: return
+        val bmp = BitmapFactory.decodeByteArray(b, 0, b.size) ?: return
+        val d = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        d.setContentView(ImageView(this).apply {
+            setImageBitmap(bmp); scaleType = ImageView.ScaleType.FIT_CENTER; setBackgroundColor(Color.BLACK)
+            setOnClickListener { d.dismiss() }
+        })
+        d.show()
+    }
+
+    /** Saves the frame to the phone's Pictures/MotionCam (seen in the gallery). */
+    private fun saveFrame() {
+        val b = hqBytes ?: return
+        val name = (Live.phones[cam]?.name?.ifEmpty { null } ?: "Camera").replace(Regex("[^A-Za-z0-9 _-]"), "") + " " +
+            java.text.SimpleDateFormat("yyyy-MM-dd HH-mm-ss", java.util.Locale.US).format(java.util.Date(hqTime)) + ".jpg"
+        try {
+            val v = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MotionCam")
+            }
+            val uri = contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v) ?: throw Exception("no storage")
+            contentResolver.openOutputStream(uri)?.use { it.write(b) }
+            Toast.makeText(this, "Saved to Pictures/MotionCam", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) { Toast.makeText(this, "Couldn't save: ${e.message}", Toast.LENGTH_LONG).show() }
+    }
+
+    // ------------------------------------------------------------------ unsaved settings (Save / Cancel stay on screen)
+
+    private fun saveBar(): LinearLayout {
+        val ctx = this
+        return LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF2A2416.toInt())
+            val p = Ui.dp(ctx, 12)
+            setPadding(p, Ui.dp(ctx, 8), p, Ui.dp(ctx, 8))
+            visibility = android.view.View.GONE
+            saveInfo = Ui.label(ctx, "", 14f)
+            addView(saveInfo, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(Ui.chip(ctx, "Cancel").apply { setOnClickListener { cancelDraft() } })
+            saveBtn = Ui.chip(ctx, "Save").apply { Ui.setChipState(this, true); setOnClickListener { saveDraft() } }
+            addView(saveBtn, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(ctx, 8) })
+        }
+    }
+
+    private fun updateBar() {
+        val n = draft.length()
+        val show = n > 0 || saving
+        saveInfo.text = if (saving) "Saving…" else "$n unsaved change${if (n == 1) "" else "s"}"
+        saveBtn.isEnabled = !saving; saveBtn.alpha = if (saving) 0.5f else 1f
+        if (show == (saveBar.visibility == android.view.View.VISIBLE)) return
+        if (show) {
+            saveBar.visibility = android.view.View.VISIBLE
+            saveBar.translationY = Ui.dp(this, 60).toFloat()
+            saveBar.animate().translationY(0f).setDuration(180).start()
+        } else saveBar.animate().translationY(saveBar.height.toFloat()).setDuration(150).withEndAction {
+            saveBar.visibility = android.view.View.GONE; saveBar.translationY = 0f
+        }.start()
+    }
+
+    private fun saveDraft() {
+        if (draft.length() == 0 || saving) return
+        val sent = JSONObject(draft.toString())
+        saving = true; updateBar()
+        send("set", sent, onFail = { saving = false; updateBar() }) { ok, r ->
+            saving = false
+            val applied = r?.optJSONArray("applied")
+            val keys = if (applied != null) (0 until applied.length()).map { applied.getString(it) } else if (ok) sent.keys().asSequence().toList() else emptyList()
+            for (k in keys) {
+                // only if not changed again meanwhile
+                if (draft.opt(k)?.toString() == sent.opt(k)?.toString()) draft.remove(k)
+                saved.put(k, sent.get(k))
+            }
+            savedAt = System.currentTimeMillis()
+            updateBar(); render()
+        }
+    }
+
+    private fun cancelDraft() {
+        draft.keys().asSequence().toList().forEach { draft.remove(it) }
+        updateBar(); render()
+    }
+
+    /** Leaving with unsaved changes asks first. */
+    override fun finish() {
+        if (draft.length() == 0 || leaveOk) { super.finish(); return }
+        AlertDialog.Builder(this).setTitle("Unsaved changes")
+            .setMessage("${draft.length()} setting${if (draft.length() == 1) "" else "s"} changed here ha${if (draft.length() == 1) "s" else "ve"} not been sent to the camera.")
+            .setPositiveButton("Save") { _, _ -> saveDraft() }
+            .setNegativeButton("Discard") { _, _ -> leaveOk = true; finish() }
+            .setNeutralButton("Keep editing", null).show()
     }
 
     override fun onResume() {
@@ -153,17 +296,21 @@ class RemoteCameraActivity : Activity() {
         val at = Live.now()
         val m = HashMap<String, Any>(); m["by"] = Device.id(this); m["at"] = at
         pinFor()?.let { m["sig"] = CameraLink.sign(cam, it, "snap:$id:$at") }
-        imageLabel.text = "Asking for a high-quality frame…"
+        hqBox.visibility = android.view.View.VISIBLE
+        hqLabel.text = "Asking for a high-quality frame…"
+        scroll.post { scroll.smoothScrollTo(0, 0) }
         val out = Live.ref(this, "cams/$cam/snap/$id") ?: return
         val l = object : ValueEventListener {
             override fun onDataChange(s: DataSnapshot) {
                 if (!s.exists()) return
                 out.removeEventListener(this)
                 out.removeValue()
-                (s.child("err").value as? String)?.let { imageLabel.text = it; return }
+                (s.child("err").value as? String)?.let { hqLabel.text = it; return }
                 val bytes = LiveNet.openBytes(this@RemoteCameraActivity, s.child("img").value as? String) ?: return
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { image.setImageBitmap(it) }
-                imageLabel.text = "High-quality frame · " + Fmt.t(prefs, System.currentTimeMillis())
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { hqImage.setImageBitmap(it) } ?: return
+                hqBytes = bytes
+                hqTime = System.currentTimeMillis()
+                hqLabel.text = "High-quality frame · " + Fmt.t(prefs, hqTime)
             }
             override fun onCancelled(e: DatabaseError) {}
         }
@@ -184,9 +331,16 @@ class RemoteCameraActivity : Activity() {
             .setNegativeButton("Cancel", null).show()
     }
 
-    private fun send(type: String, args: JSONObject? = null, done: (Boolean) -> Unit = {}) {
-        if (!online()) { Toast.makeText(this, "The camera is offline", Toast.LENGTH_SHORT).show(); return }
-        if (status()?.optBoolean("pin") == true && pinFor() == null) { askPin { send(type, args, done) }; return }
+    private fun send(type: String, args: JSONObject? = null, onFail: () -> Unit = {}, done: (Boolean, JSONObject?) -> Unit = { _, _ -> }) {
+        if (!online()) { Toast.makeText(this, "The camera is offline", Toast.LENGTH_SHORT).show(); onFail(); return }
+        if (status()?.optBoolean("pin") == true && pinFor() == null) {
+            val input = EditText(this).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; hint = "PIN" }
+            AlertDialog.Builder(this).setTitle("PIN of this camera").setView(input)
+                .setMessage("Set on the camera phone (Live connection → Remote control PIN). It is remembered on this phone.")
+                .setPositiveButton("OK") { _, _ -> SecretStore.put(this, "live.pin.$cam", input.text.toString().trim()); send(type, args, onFail, done) }
+                .setNegativeButton("Cancel") { _, _ -> onFail() }.setOnCancelListener { onFail() }.show()
+            return
+        }
         val ref = Live.ref(this, "cams/$cam/cmd")?.push() ?: return
         val id = ref.key ?: return
         val d = JSONObject().put("type", type).put("by", Device.id(this)).put("byName", Device.name(this)).put("at", Live.now())
@@ -203,14 +357,36 @@ class RemoteCameraActivity : Activity() {
                 val msg = r.optString("msg")
                 if (msg == "Wrong PIN") SecretStore.put(this@RemoteCameraActivity, "live.pin.$cam", null)
                 Toast.makeText(this@RemoteCameraActivity, msg, Toast.LENGTH_SHORT).show()
-                done(r.optBoolean("ok"))
+                done(r.optBoolean("ok"), r)
             }
             override fun onCancelled(e: DatabaseError) {}
         })
         ref.setValue(m)
+        // no answer (camera went offline meanwhile): unlock the Save bar
+        ui.postDelayed({ if (saving && type == "set") { saving = false; updateBar(); Toast.makeText(this, "No answer from the camera — try Save again", Toast.LENGTH_SHORT).show() } }, 20_000)
     }
 
-    private fun set(key: String, value: Any) = send("set", JSONObject().put(key, value))
+    /** Settings that show or hide other controls: the screen is rebuilt right away when they change. */
+    private val STRUCTURAL = setOf("exposureAuto", "focusAuto", "wbAuto", "camera")
+
+    /** A setting changed here: kept as a draft until Save. */
+    private fun set(key: String, value: Any) {
+        val server = status()?.optJSONObject("settings")?.opt(key)
+        if (server != null && server.toString() == value.toString()) draft.remove(key) else draft.put(key, value)
+        updateBar()
+        if (key in STRUCTURAL) ui.post { render() }
+    }
+
+    /** The camera's settings with saved-but-unconfirmed values and this screen's unsaved changes on top. */
+    private fun shownSettings(server: JSONObject): JSONObject {
+        val m = JSONObject(server.toString())
+        if (System.currentTimeMillis() - savedAt > 15_000) saved.keys().asSequence().toList().forEach { saved.remove(it) }
+        for (k in saved.keys().asSequence().toList()) {
+            if (server.opt(k)?.toString() == saved.opt(k)?.toString()) saved.remove(k) else m.put(k, saved.get(k))
+        }
+        for (k in draft.keys()) m.put(k, draft.get(k))
+        return m
+    }
 
     // ------------------------------------------------------------------ screen
 
@@ -227,7 +403,7 @@ class RemoteCameraActivity : Activity() {
         val s = status()
         val phone = Live.phones[cam]
         if (s == null) { f.note(if (phone?.online == true) "Waiting for the camera's status…" else "The camera is not connected right now."); return }
-        val st = s.optJSONObject("settings") ?: JSONObject()
+        val st = shownSettings(s.optJSONObject("settings") ?: JSONObject())
         val c = caps() ?: JSONObject()
         val enabled = online()
 
@@ -237,6 +413,7 @@ class RemoteCameraActivity : Activity() {
             !enabled -> "Offline" + (phone?.seen?.takeIf { it > 0 }?.let { " since " + Fmt.t(prefs, it - Live.serverOffset, seconds = false) } ?: "")
             mode == "RECORDING" -> "● Recording (since " + Fmt.t(prefs, s.optLong("recSince"), seconds = false) + ")"
             s.optBoolean("monitoring") -> "Monitoring (watching for motion)"
+            s.optBoolean("standby") -> "Standby · not monitoring (you can start it from here)"
             else -> "Not monitoring" + s.optString("message").takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
         }, 15f, if (mode == "RECORDING") Ui.RED else Color.WHITE)
         val lm = s.optLong("lastMotion")
@@ -246,16 +423,22 @@ class RemoteCameraActivity : Activity() {
         if (s.optBoolean("pin")) f.note("This camera needs a PIN for controls" + if (pinFor() != null) " (remembered)." else ".")
 
         f.title("Monitoring")
-        f.row(
-            if (s.optBoolean("monitoring")) f.chip("Pause monitoring") { send("pause") } else f.chip("Resume monitoring") { send("resume") },
-            f.chip("Stop monitoring") {
-                AlertDialog.Builder(this).setTitle("Stop monitoring?")
-                    .setMessage("The camera phone stops completely and goes offline. It can only be started again on the phone itself. " +
-                        "Use Pause to keep it reachable.")
-                    .setPositiveButton("Stop") { _, _ -> send("stop") }.setNegativeButton("Cancel", null).show()
-            })
+        val stopChip = f.chip("Stop monitoring") {
+            val standbyOn = s.optBoolean("standbyOn")
+            AlertDialog.Builder(this).setTitle("Stop monitoring?")
+                .setMessage(if (standbyOn) "The camera closes and the phone goes to standby: it stays connected, and you can start monitoring again from here."
+                    else "The camera phone stops completely and goes offline. It can only be started again on the phone itself " +
+                        "(or turn on Standby in its Live connection settings). Use Pause to keep it reachable.")
+                .setPositiveButton("Stop") { _, _ -> send("stop") }.setNegativeButton("Cancel", null).show()
+        }
+        when {
+            s.optBoolean("standby") -> f.row(f.chip("▶ Start monitoring") { send("start") }.apply { Ui.setChipState(this, true) })
+            s.optBoolean("monitoring") -> f.row(f.chip("Pause monitoring") { send("pause") }, stopChip)
+            else -> f.row(f.chip("Resume monitoring") { send("resume") }, stopChip)
+        }
 
         f.title("Camera")
+        f.note("Changes below are sent to the camera when you tap Save.")
         val lenses = c.optJSONArray("lenses")
         val lensLabel = (0 until (lenses?.length() ?: 0)).map { lenses!!.getJSONObject(it) }.firstOrNull { it.optString("key") == st.optString("camera") }?.optString("label")
             ?: s.optString("lens")

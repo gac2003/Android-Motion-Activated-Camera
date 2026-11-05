@@ -164,8 +164,13 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
   Alerts arrive while MotionCam is open; **Stay connected** (silent notification) keeps them coming when it is closed.
   Or choose **inside MotionCam only**: a banner on the open screen and the Alerts list, nothing in the notification shade.
 * **Remote camera**: low-rate live view (a frame every 2 s, only while watched, stops after 3 min), a **high-quality
-  frame** on request, the camera controls (lens, exposure, ISO, shutter, focus, white balance, zoom), recording and
-  motion settings, pause / resume / stop monitoring, and the camera's **Activity** log (7 days).
+  frame** on request (shown under the live view; tap for full screen, save it to Pictures/MotionCam), the camera
+  controls (lens, exposure, ISO, shutter, focus, white balance, zoom), recording and motion settings, start / pause /
+  resume / stop monitoring, and the camera's **Activity** log (7 days). Settings changed remotely are drafts until you
+  tap **Save** (or **Cancel**) in the bar that stays at the bottom of the screen; leaving with unsaved changes asks first.
+* **Standby** (camera phones, on by default): when monitoring stops, the phone stays connected with the camera off (a
+  "standby" notification with Start / Turn off), so another phone can start monitoring again. It begins whenever
+  MotionCam is opened on the camera phone. Most reliable while charging (Android may delay messages to a sleeping phone).
 * **PIN**: every camera phone has one (6+ characters); it protects controls and settings and, by default, the live view
   and frames. Requests are signed with it (never sent; slow hashing against offline guessing); 5 wrong PINs lock remote
   control for 10 minutes, doubling each time. Network codes are always made by the app (20 random characters, ~99 bits).

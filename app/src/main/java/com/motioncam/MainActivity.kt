@@ -112,6 +112,7 @@ class MainActivity : Activity() {
         resumed = true
         StatusBus.add(statusListener)
         com.motioncam.cloud.CloudSync.kick(this)
+        CameraService.ensureStandby(this)   // camera phone on the live connection: reachable while not monitoring
         updateFlags()
         (getSystemService(DISPLAY_SERVICE) as DisplayManager).registerDisplayListener(displayListener, ui)
         updateGeometry()
@@ -702,7 +703,7 @@ class MainActivity : Activity() {
     // ------------------------------------------------------------------ start / stop / permissions
 
     private fun onStartStop() {
-        if (CameraService.instance != null) {
+        if (CameraService.monitoring) {
             CameraService.stop(this)
             startBtn.postDelayed({ render(StatusBus.status) }, 300)
             return
@@ -736,7 +737,7 @@ class MainActivity : Activity() {
         // motion just started: a short, non-blocking pop-up in the corner (the time also stays in the info line)
         if (lastMode != null && lastMode != Mode.RECORDING && s.mode == Mode.RECORDING) showPill("● Motion detected — recording", 3000)
         lastMode = s.mode
-        val running = CameraService.instance != null
+        val running = CameraService.monitoring
         startBtn.text = if (compact == true) (if (running) "STOP" else "START") else if (running) "STOP MONITORING" else "START MONITORING"
         Ui.pill(startBtn, if (running) Ui.RED else 0xFF2E7D32.toInt())
         val now = System.currentTimeMillis()
@@ -747,8 +748,8 @@ class MainActivity : Activity() {
                 "● REC %02d:%02d".format(sec / 60, sec % 60)
             }
             s.mode == Mode.WATCHING -> "Watching for motion"
-            s.mode == Mode.PREVIEW -> "Preview · not monitoring"
-            s.mode == Mode.OFF -> if (running) "Starting…" else "Not monitoring"
+            s.mode == Mode.PREVIEW -> if (CameraService.inStandby) "Preview · standby" else "Preview · not monitoring"
+            s.mode == Mode.OFF -> if (running) "Starting…" else if (CameraService.inStandby) "Standby · your phones can start it" else "Not monitoring"
             else -> s.message.ifEmpty { s.mode.name }
         }
         val sb = StringBuilder()

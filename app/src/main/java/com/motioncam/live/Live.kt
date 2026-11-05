@@ -216,6 +216,7 @@ object Live {
     private fun removedByOtherPhone(ctx: Context) {
         try { ref(ctx, "devices/${Device.id(ctx)}")?.removeValue() } catch (_: Exception) {}
         Prefs(ctx).liveOn = false
+        CameraLink.stop(ctx)
         LiveNet.signOut(ctx)
         refresh(ctx)
         android.widget.Toast.makeText(ctx, "This phone was removed from the live connection by another phone", android.widget.Toast.LENGTH_LONG).show()

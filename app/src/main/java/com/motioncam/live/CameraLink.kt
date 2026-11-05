@@ -79,6 +79,8 @@ object CameraLink {
         stopLive()
         Live.cameraActive = false
         Live.refresh(c)
+        // no longer reachable: standby has no purpose any more
+        if (CameraService.inStandby) CameraService.exit(c)
     }
 
     /** Monitoring stopped by the phone itself (battery, heat, storage…). */
@@ -121,6 +123,7 @@ object CameraLink {
         val e = EngineHost.peek()
         val o = JSONObject()
             .put("name", Device.name(ctx)).put("mode", s.mode.name).put("monitoring", s.monitoring).put("message", s.message)
+            .put("standby", CameraService.inStandby).put("standbyOn", CameraService.standbyAllowed(ctx)).put("canStart", CameraService.inStandby || (CameraService.monitoring && !s.monitoring))
             .put("recSince", s.recordingSinceWall).put("lastMotion", s.lastMotionWall).put("battery", s.batteryPct)
             .put("charging", s.charging).put("tempC", s.tempC.toDouble()).put("lens", s.lens).put("format", s.format)
             .put("pin", pin(ctx) != null).put("pinForView", pin(ctx) != null && p.livePinForView)
@@ -297,7 +300,7 @@ object CameraLink {
     }
 
     private val seenCmds = HashSet<String>()
-    private val PROTECTED = setOf("set", "pause", "resume", "stop")
+    private val PROTECTED = setOf("set", "pause", "resume", "stop", "start")
 
     private fun command(ctx: Context, s: DataSnapshot) {
         val id = s.key ?: return
@@ -322,7 +325,19 @@ object CameraLink {
         when (type) {
             "pause" -> { EngineHost.peek()?.setMonitoring(false); event(ctx, "monitor_paused", "Monitoring paused by $who"); reply(true, "Monitoring paused") }
             "resume" -> { EngineHost.peek()?.setMonitoring(true); reply(true, "Monitoring resumed") }
-            "stop" -> { event(ctx, "monitor_off", "Monitoring stopped by $who"); reply(true, "Stopping"); main.post { CameraService.stop(ctx) } }
+            "start" -> when {
+                CameraService.inStandby -> {
+                    reply(true, "Starting monitoring…"); main.post { CameraService.instance?.startMonitoring() }
+                }
+                CameraService.monitoring && EngineHost.peek()?.monitoring == false -> { EngineHost.peek()?.setMonitoring(true); reply(true, "Monitoring resumed") }
+                CameraService.monitoring -> reply(true, "Already monitoring")
+                else -> reply(false, "The camera phone is not in standby")
+            }
+            "stop" -> {
+                event(ctx, "monitor_off", "Monitoring stopped by $who")
+                reply(true, if (CameraService.standbyAllowed(ctx)) "Stopped · standby (you can start it again from here)" else "Stopping")
+                main.post { CameraService.stop(ctx) }
+            }
             "set" -> {
                 val (applied, rejected) = RemoteSettings.apply(ctx, d.optJSONObject("args") ?: JSONObject())
                 EngineHost.peek()?.applyConfig()

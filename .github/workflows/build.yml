@@ -43,15 +43,14 @@ jobs:
           MOTIONCAM_KEYSTORE_PASSWORD: ${{ secrets.MOTIONCAM_KEYSTORE_PASSWORD }}
           MOTIONCAM_KEY_ALIAS: ${{ secrets.MOTIONCAM_KEY_ALIAS }}
           # Your API credentials (SETUP.md): repository variables under Settings > Secrets and variables > Actions >
-          # Variables. A fork uses only its own; the fallbacks below apply to the original repository only and can be
-          # removed once its variables are set.
+          # Variables. Each repository (and fork) uses only its own; missing ones switch that feature off.
           MC_APPLICATION_ID: ${{ vars.MC_APPLICATION_ID }}
-          MC_FIREBASE_API_KEY: ${{ vars.MC_FIREBASE_API_KEY || (github.repository == 'gac2003/Android-Motion-Activated-Camera' && 'AIzaSyASIj5IkW7MJAgrqQWLJVHHDwCVYPd2vug' || '') }}
-          MC_FIREBASE_APP_ID: ${{ vars.MC_FIREBASE_APP_ID || (github.repository == 'gac2003/Android-Motion-Activated-Camera' && '1:198396848516:android:cfbb20e804460c47bf55d1' || '') }}
-          MC_FIREBASE_PROJECT_ID: ${{ vars.MC_FIREBASE_PROJECT_ID || (github.repository == 'gac2003/Android-Motion-Activated-Camera' && 'android-motion-camera' || '') }}
-          MC_FIREBASE_DB_URL: ${{ vars.MC_FIREBASE_DB_URL || (github.repository == 'gac2003/Android-Motion-Activated-Camera' && 'https://android-motion-camera-default-rtdb.firebaseio.com' || '') }}
-          MC_GOOGLE_WEB_CLIENT_ID: ${{ vars.MC_GOOGLE_WEB_CLIENT_ID || (github.repository == 'gac2003/Android-Motion-Activated-Camera' && '198396848516-6np4ldb18s7k0mt85ihg0b1kss7j5716.apps.googleusercontent.com' || '') }}
-          MC_DROPBOX_APP_KEY: ${{ vars.MC_DROPBOX_APP_KEY || (github.repository == 'gac2003/Android-Motion-Activated-Camera' && 'm5m6p1cg7v9crh6' || '') }}
+          MC_FIREBASE_API_KEY: ${{ vars.MC_FIREBASE_API_KEY }}
+          MC_FIREBASE_APP_ID: ${{ vars.MC_FIREBASE_APP_ID }}
+          MC_FIREBASE_PROJECT_ID: ${{ vars.MC_FIREBASE_PROJECT_ID }}
+          MC_FIREBASE_DB_URL: ${{ vars.MC_FIREBASE_DB_URL }}
+          MC_GOOGLE_WEB_CLIENT_ID: ${{ vars.MC_GOOGLE_WEB_CLIENT_ID }}
+          MC_DROPBOX_APP_KEY: ${{ vars.MC_DROPBOX_APP_KEY }}
         run: |
           ./gradlew --no-daemon assembleRelease
           cp app/build/outputs/apk/release/app-release.apk MotionCam.apk

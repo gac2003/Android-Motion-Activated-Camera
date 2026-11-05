@@ -73,7 +73,9 @@ off in your build.
      to 10 s, e.g. 1.2). Clips that end on their own and stops from the notification are never affected.
 4. Settings → *Exempt from battery optimisation*. Set *Video rotation* explicitly if the phone is on a fixed stand.
 
-Clips are saved to **Movies/MotionCam** (visible in Gallery and over USB file transfer).
+Clips are saved to **Movies/MotionCam** (visible in Gallery and over USB file transfer). A clip's ⋮ in the player
+(or *More* when clips are selected) has **Show in file manager** – Samsung's My Files, or the phone's Files app – and
+**Open in another app**.
 The **Clips** screen shows thumbnails by day; tapping a clip opens the **player**, which plays every following clip
 back to back like one continuous video. Below the video is a filmstrip (like modern phone gallery players): the playing clip is expanded
 into its frames (tap it to collapse/expand; one frame per second, pinch for more – down to exact frames – or fewer), drag to scrub (stops at the clip's ends while expanded; letting go at the end stays there, paused).

@@ -206,6 +206,10 @@ class ClipsActivity : Activity() {
         more = labeledButton(this, IconDrawable.Kind.MORE, "More") {
             val pm = PopupMenu(this, more)
             if (collectionId != null && remote == null) pm.menu.add(0, 2, 51, "Delete from phone")
+            if (remote == null) {
+                pm.menu.add(0, 8, 50, "Open in another app").isEnabled = selected.size == 1
+                pm.menu.add(0, 9, 50, "Show in file manager")
+            }
             if (collectionId != null && CloudDelete.canDelete(remote)) pm.menu.add(0, 7, 52, "Delete from cloud")
             if (canMark()) {
                 pm.menu.add(0, 4, 53, "Protect in cloud")
@@ -220,6 +224,11 @@ class ClipsActivity : Activity() {
                     5 -> protect(selectedClips(), false)
                     6 -> openProtected()
                     7 -> deleteFromCloud()
+                    8 -> selectedClips().firstOrNull()?.let { c ->
+                        try { startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(c.uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)) }
+                        catch (_: Exception) { Toast.makeText(this, "No other app can play it", Toast.LENGTH_SHORT).show() }
+                    }
+                    9 -> FileReveal.show(this, selectedClips().singleOrNull())
                 }
                 true
             }

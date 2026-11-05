@@ -48,7 +48,7 @@ object RemoteSettings {
                     "evIndex" -> int().let { s -> if (c == null || range(s, c.evMin, c.evMax)) { p.evIndex = s; true } else false }
                     "iso" -> int().let { s -> if (c == null || range(s, c.isoMin, c.isoMax)) { p.iso = s; true } else false }
                     "shutterNs" -> (v as Number).toLong().let { s -> if (c == null || range(s, c.expMinNs, c.expMaxNs)) { p.shutterNs = s; true } else false }
-                    "focusPos" -> dbl().let { s -> if (c == null || range(s, 0, c.minFocusDiopter)) { p.focusPos = s.toFloat(); true } else false }
+                    "focusPos" -> dbl().let { s -> if (s in 0.0..1.0) { p.focusPos = s.toFloat(); true } else false }   // 1 = far … 0 = closest
                     "wbKelvin" -> int().let { s -> if (s in 2000..10000) { p.wbKelvin = s; true } else false }
                     "zoom" -> dbl().let { s -> if (c == null || range(s, c.zoomMin, c.zoomMax)) { p.zoom = s.toFloat(); true } else false }
                     "camera" -> (v as String).let { key -> if (Lenses.list(ctx).any { it.key == key }) { p.camera = key; p.zoom = 1f; true } else false }

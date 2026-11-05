@@ -43,8 +43,8 @@ class RemoteCameraActivity : Activity() {
     private lateinit var liveBtn: TextView
     private lateinit var f: Form
     private val ui = Handler(Looper.getMainLooper())
-    private var watching = false
-    private var watchStarted = 0L
+    private lateinit var r: CamRemote
+    private lateinit var feed: CamRemote.Feed
     private var lastSettings = ""
     private val refresh: () -> Unit = { renderIfChanged() }
     /** Settings changed here but not sent yet (sent together with Save). */
@@ -68,6 +68,7 @@ class RemoteCameraActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         cam = intent.getStringExtra(Alerts.EXTRA_CAM) ?: run { finish(); return }
+        r = CamRemote(this, cam)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
         root.addView(topBar(this, Live.phones[cam]?.name?.ifEmpty { null } ?: "Camera"))
         val frame = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
@@ -80,8 +81,12 @@ class RemoteCameraActivity : Activity() {
         val w = resources.displayMetrics.widthPixels.coerceAtMost(Ui.dp(this, 700))
         root.addView(frame, LinearLayout.LayoutParams(-1, w * 9 / 16))
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; val p = Ui.dp(this@RemoteCameraActivity, 8); setPadding(p, p, p, 0) }
-        liveBtn = Ui.chip(this, "▶ Live view").apply { setOnClickListener { if (watching) stopWatching() else startWatching() } }
+        liveBtn = Ui.chip(this, "▶ Live view").apply { setOnClickListener { if (feed.watching) stopWatching() else startWatching() } }
         buttons.addView(liveBtn)
+        buttons.addView(Ui.chip(this, "⛶ Full screen").apply {
+            contentDescription = "Full-screen live view with camera controls"
+            setOnClickListener { startActivity(Intent(this@RemoteCameraActivity, RemoteLiveActivity::class.java).putExtra(Alerts.EXTRA_CAM, cam)) }
+        }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(this@RemoteCameraActivity, 6) })
         buttons.addView(Ui.chip(this, "High-quality frame").apply { setOnClickListener { requestFrame() } },
             LinearLayout.LayoutParams(-2, -2).apply { leftMargin = Ui.dp(this@RemoteCameraActivity, 6) })
         buttons.addView(Ui.chip(this, "Activity").apply {
@@ -100,6 +105,14 @@ class RemoteCameraActivity : Activity() {
         root.addView(saveBar)
         setContentView(root)
         f = Form(this, box)
+        image.setOnClickListener { if (!feed.watching) startWatching() }
+        feed = r.Feed(3 * 60_000L, { bmp, at ->
+            image.setImageBitmap(bmp)
+            imageLabel.text = "Live (every 2 s) · " + Fmt.t(prefs, at)
+        }) { msg ->
+            imageLabel.text = msg
+            liveBtn.text = if (feed.watching) "■ Stop live" else "▶ Live view"
+        }
     }
 
     // ------------------------------------------------------------------ high-quality frame (under the live view)
@@ -193,9 +206,9 @@ class RemoteCameraActivity : Activity() {
         if (draft.length() == 0 || saving) return
         val sent = JSONObject(draft.toString())
         saving = true; updateBar()
-        send("set", sent, onFail = { saving = false; updateBar() }) { ok, r ->
+        send("set", sent, onFail = { saving = false; updateBar() }) { ok, res ->
             saving = false
-            val applied = r?.optJSONArray("applied")
+            val applied = res?.optJSONArray("applied")
             val keys = if (applied != null) (0 until applied.length()).map { applied.getString(it) } else if (ok) sent.keys().asSequence().toList() else emptyList()
             for (k in keys) {
                 // only if not changed again meanwhile
@@ -233,59 +246,26 @@ class RemoteCameraActivity : Activity() {
 
     override fun onPause() {
         Live.listeners -= refresh
-        stopWatching()
+        if (::feed.isInitialized) stopWatching()
         super.onPause()
     }
 
-    private fun status(): JSONObject? = Live.cams[cam]?.status
-    private fun caps(): JSONObject? = Live.cams[cam]?.caps
-    private fun online() = Live.phones[cam]?.online == true
+    private fun status(): JSONObject? = r.status()
+    private fun caps(): JSONObject? = r.caps()
+    private fun online() = r.online()
+    private fun pinFor(): String? = r.pinFor()
+    private fun askPin(then: () -> Unit) = r.askPin(then)
 
     // ------------------------------------------------------------------ live view / frames
 
-    private var liveL: ValueEventListener? = null
-    private val heartbeat = object : Runnable {
-        override fun run() {
-            if (!watching) return
-            if (System.currentTimeMillis() - watchStarted > 3 * 60_000L) {   // don't stream forever by accident
-                stopWatching(); imageLabel.text = "Live view paused after 3 minutes — tap Live view to continue"; return
-            }
-            val at = Live.now()
-            val m = HashMap<String, Any>(); m["at"] = at
-            pinFor()?.let { m["sig"] = CameraLink.sign(cam, it, "watch:${Device.id(this@RemoteCameraActivity)}:$at") }
-            Live.ref(this@RemoteCameraActivity, "cams/$cam/watchers/${Device.id(this@RemoteCameraActivity)}")?.setValue(m)
-            ui.postDelayed(this, 15_000)
-        }
-    }
-
     private fun startWatching() {
-        if (!online()) { Toast.makeText(this, "The camera is offline", Toast.LENGTH_SHORT).show(); return }
-        if (status()?.optBoolean("pinForView") == true && pinFor() == null) { askPin { startWatching() }; return }
-        watching = true
-        watchStarted = System.currentTimeMillis()
-        liveBtn.text = "■ Stop live"
-        imageLabel.text = "Starting live view…"
-        Live.ref(this, "cams/$cam/watchers/${Device.id(this)}")?.onDisconnect()?.removeValue()
-        heartbeat.run()
-        liveL = object : ValueEventListener {
-            override fun onDataChange(s: DataSnapshot) {
-                val bytes = LiveNet.openBytes(this@RemoteCameraActivity, s.child("img").value as? String) ?: return
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { image.setImageBitmap(it) }
-                val at = (s.child("at").value as? Number)?.toLong() ?: 0
-                imageLabel.text = "Live (every 2 s) · " + Fmt.t(prefs, at - Live.serverOffset)
-            }
-            override fun onCancelled(e: DatabaseError) {}
-        }.also { Live.ref(this, "cams/$cam/live")?.addValueEventListener(it) }
+        feed.start()
+        if (feed.watching) liveBtn.text = "■ Stop live"
     }
 
     private fun stopWatching() {
-        if (!watching) return
-        watching = false
+        feed.stop()
         liveBtn.text = "▶ Live view"
-        ui.removeCallbacks(heartbeat)
-        liveL?.let { Live.ref(this, "cams/$cam/live")?.removeEventListener(it) }
-        liveL = null
-        Live.ref(this, "cams/$cam/watchers/${Device.id(this)}")?.removeValue()
     }
 
     private fun requestFrame() {
@@ -321,50 +301,8 @@ class RemoteCameraActivity : Activity() {
 
     // ------------------------------------------------------------------ PIN + commands
 
-    private fun pinFor(): String? = SecretStore.get(this, "live.pin.$cam")
-
-    private fun askPin(then: () -> Unit) {
-        val input = EditText(this).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; hint = "PIN" }
-        AlertDialog.Builder(this).setTitle("PIN of this camera").setView(input)
-            .setMessage("Set on the camera phone (Live connection → Remote control PIN). It is remembered on this phone.")
-            .setPositiveButton("OK") { _, _ -> SecretStore.put(this, "live.pin.$cam", input.text.toString().trim()); then() }
-            .setNegativeButton("Cancel", null).show()
-    }
-
-    private fun send(type: String, args: JSONObject? = null, onFail: () -> Unit = {}, done: (Boolean, JSONObject?) -> Unit = { _, _ -> }) {
-        if (!online()) { Toast.makeText(this, "The camera is offline", Toast.LENGTH_SHORT).show(); onFail(); return }
-        if (status()?.optBoolean("pin") == true && pinFor() == null) {
-            val input = EditText(this).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; hint = "PIN" }
-            AlertDialog.Builder(this).setTitle("PIN of this camera").setView(input)
-                .setMessage("Set on the camera phone (Live connection → Remote control PIN). It is remembered on this phone.")
-                .setPositiveButton("OK") { _, _ -> SecretStore.put(this, "live.pin.$cam", input.text.toString().trim()); send(type, args, onFail, done) }
-                .setNegativeButton("Cancel") { _, _ -> onFail() }.setOnCancelListener { onFail() }.show()
-            return
-        }
-        val ref = Live.ref(this, "cams/$cam/cmd")?.push() ?: return
-        val id = ref.key ?: return
-        val d = JSONObject().put("type", type).put("by", Device.id(this)).put("byName", Device.name(this)).put("at", Live.now())
-        if (args != null) d.put("args", args)
-        val sealed = LiveNet.seal(this, d.toString())
-        val m = HashMap<String, Any>(); m["d"] = sealed
-        pinFor()?.let { m["sig"] = CameraLink.sign(cam, it, sealed) }
-        val res = Live.ref(this, "cams/$cam/cmdResult/$id") ?: return
-        res.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(s: DataSnapshot) {
-                if (!s.exists()) return
-                res.removeEventListener(this); res.removeValue()
-                val r = LiveNet.open(this@RemoteCameraActivity, s.child("d").value as? String)?.let { JSONObject(it) } ?: return
-                val msg = r.optString("msg")
-                if (msg == "Wrong PIN") SecretStore.put(this@RemoteCameraActivity, "live.pin.$cam", null)
-                Toast.makeText(this@RemoteCameraActivity, msg, Toast.LENGTH_SHORT).show()
-                done(r.optBoolean("ok"), r)
-            }
-            override fun onCancelled(e: DatabaseError) {}
-        })
-        ref.setValue(m)
-        // no answer (camera went offline meanwhile): unlock the Save bar
-        ui.postDelayed({ if (saving && type == "set") { saving = false; updateBar(); Toast.makeText(this, "No answer from the camera — try Save again", Toast.LENGTH_SHORT).show() } }, 20_000)
-    }
+    private fun send(type: String, args: JSONObject? = null, onFail: () -> Unit = {}, done: (Boolean, JSONObject?) -> Unit = { _, _ -> }) =
+        r.send(type, args, onFail = onFail, done = done)
 
     /** Settings that show or hide other controls: the screen is rebuilt right away when they change. */
     private val STRUCTURAL = setOf("exposureAuto", "focusAuto", "wbAuto", "camera")
@@ -466,8 +404,9 @@ class RemoteCameraActivity : Activity() {
         val minFocus = c.optDouble("minFocus", 0.0)
         if (minFocus > 0) {
             f.toggle("Focus: automatic", st.optBoolean("focusAuto", true), enabled) { set("focusAuto", it) }
-            if (!st.optBoolean("focusAuto", true)) f.slider("Focus distance", 0, 100, (st.optDouble("focusPos") / minFocus * 100).roundToInt(),
-                { if (it == 0) "far (∞)" else "%.2f m".format(1 / (minFocus * it / 100)) }, enabled) { set("focusPos", minFocus * it / 100) }
+            // focusPos: 1 = far (∞) … 0 = closest; the slider runs far → close
+            if (!st.optBoolean("focusAuto", true)) f.slider("Focus distance", 0, 100, ((1 - st.optDouble("focusPos", 1.0).coerceIn(0.0, 1.0)) * 100).roundToInt(),
+                { if (it == 0) "far (∞)" else "%.2f m".format(1 / (minFocus * it / 100)) }, enabled) { set("focusPos", 1 - it / 100.0) }
         }
         f.toggle("White balance: automatic", st.optBoolean("wbAuto", true), enabled) { set("wbAuto", it) }
         if (!st.optBoolean("wbAuto", true)) f.slider("White balance", 20, 100, st.optInt("wbKelvin", 5200) / 100, { "${it * 100} K" }, enabled) { set("wbKelvin", it * 100) }

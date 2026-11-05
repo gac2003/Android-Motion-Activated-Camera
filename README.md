@@ -168,6 +168,9 @@ make outgoing connections, so it works on captive Wi-Fi and networks that block 
   controls (lens, exposure, ISO, shutter, focus, white balance, zoom), recording and motion settings, start / pause /
   resume / stop monitoring, and the camera's **Activity** log (7 days). Settings changed remotely are drafts until you
   tap **Save** (or **Cancel**) in the bar that stays at the bottom of the screen; leaving with unsaved changes asks first.
+* **Full screen** live view: laid out like the camera screen – the picture fills the screen, status on top, and the same
+  control buttons (lens, format, EV, ISO, shutter, focus, white balance, zoom) with their slider and AUTO, plus Start /
+  Stop monitoring. Changes apply when you lift your finger. Tap the picture to hide the controls; works in landscape.
 * **Standby** (camera phones, on by default): when monitoring stops, the phone stays connected with the camera off (a
   "standby" notification with Start / Turn off), so another phone can start monitoring again. It begins whenever
   MotionCam is opened on the camera phone. Most reliable while charging (Android may delay messages to a sleeping phone).

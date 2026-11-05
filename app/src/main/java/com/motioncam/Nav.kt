@@ -61,7 +61,8 @@ object Nav {
         if (inner[a.javaClass]?.get() === a) inner.remove(a.javaClass)
         if (quiet.remove(a)) return
         val p = parents[a]?.get()
-        if (alive(p) && !a.isTaskRoot) open(a, p!!.javaClass)
+        noWindowAnim(a)
+        if (alive(p) && !a.isTaskRoot) { popping = p!!.javaClass; open(a, p.javaClass) }
     }
 
     /** The deepest open screen of one side of the Clips tab, or its first screen. */
@@ -73,6 +74,40 @@ object Nav {
     fun popClips(a: Activity, remote: Boolean) {
         for (c in INNER) inner[c]?.get()?.takeIf { alive(it) && remoteSide(it) == remote }?.let { quiet += it; it.finish(); inner.remove(c) }
         open(a, if (remote) RemoteTabActivity::class.java else ClipsTabActivity::class.java)
+    }
+
+    /** No window animation for the screen just started or finished (the Clips tab slides only its content). */
+    @Suppress("DEPRECATION")
+    fun noWindowAnim(a: Activity) = a.overridePendingTransition(0, 0)
+
+    /** The screen to slide back in when it returns (an inner screen above it was closed). */
+    private var popping: Class<*>? = null
+
+    /**
+     * Inside the Clips tab only the content moves: the "Clips" title, the switch and the tab bar stay where they are.
+     * [from] is where the content starts, as a share of the width (1 = from the right, negative = from the left).
+     */
+    fun slideContent(a: Activity, from: Float) {
+        val wrap = a.findViewById<android.view.ViewGroup>(android.R.id.content)?.getChildAt(0) as? android.view.ViewGroup ?: return
+        val content = wrap.getChildAt(0) as? android.view.ViewGroup ?: return
+        val views = ArrayList<View>()
+        for (i in 0 until content.childCount) {
+            val v = content.getChildAt(i)
+            if (v.tag == "clipsHeader") (v as? android.view.ViewGroup)?.let { g -> for (j in 0 until g.childCount) g.getChildAt(j).takeIf { it.tag == "slides" }?.let { views += it } }
+            else views += v
+        }
+        val w = (content.width.takeIf { it > 0 } ?: a.resources.displayMetrics.widthPixels).toFloat()
+        for (v in views) {
+            v.animate().cancel()
+            v.translationX = w * from
+            v.alpha = if (from < 0) 0.5f else 1f
+            v.animate().translationX(0f).alpha(1f).setDuration(240).setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
+        }
+    }
+
+    /** A Clips tab screen comes to the front: slide its content back in if an inner screen above it was just closed. */
+    fun clipsResumed(a: Activity) {
+        if (popping == a.javaClass) { popping = null; slideContent(a, -0.3f) }
     }
 
     /** Being closed because it was replaced or the side went back to its first screen (not by the user's Back). */

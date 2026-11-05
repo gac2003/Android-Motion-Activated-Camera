@@ -19,7 +19,7 @@ class ClipsTabActivity : ClipsActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) { Nav.clipsTop = java.lang.ref.WeakReference(this); super.onCreate(savedInstanceState) }
     override fun onSelecting(on: Boolean) { window.decorView.findViewWithTag<View>("tabbar")?.visibility = if (on) View.GONE else View.VISIBLE }
     override fun setContentView(view: View) = super.setContentView(Nav.wrap(this, view, Nav.Tab.CLIPS))
-    override fun onResume() { super.onResume(); Nav.tabShown(this, Nav.Tab.CLIPS); Nav.setClipsRemote(this, false); Nav.clipsTop = java.lang.ref.WeakReference(this) }
+    override fun onResume() { super.onResume(); Nav.tabShown(this, Nav.Tab.CLIPS); Nav.setClipsRemote(this, false); Nav.clipsTop = java.lang.ref.WeakReference(this); Nav.clipsResumed(this) }
     override fun finish() { if (!isTaskRoot) Nav.leaveTab(this, Nav.Tab.CLIPS) else super.finish() }
 }
 
@@ -32,11 +32,12 @@ class RemoteTabActivity : com.motioncam.remote.RemoteFoldersActivity() {
         if (savedInstanceState == null && !Nav.folderOpen()) Nav.lastFolder(this)?.let { id ->
             if (com.motioncam.remote.RemoteSources.get(this, id) != null)
                 startActivity(android.content.Intent(this, RemoteClipsTabActivity::class.java).putExtra(ClipsActivity.EXTRA_REMOTE, id))
+                    .also { Nav.noWindowAnim(this) }
             else Nav.setLastFolder(this, null)
         }
     }
     override fun setContentView(view: View) = super.setContentView(Nav.wrap(this, view, Nav.Tab.CLIPS))
-    override fun onResume() { super.onResume(); Nav.tabShown(this, Nav.Tab.CLIPS); Nav.setClipsRemote(this, true); Nav.clipsTop = java.lang.ref.WeakReference(this) }
+    override fun onResume() { super.onResume(); Nav.tabShown(this, Nav.Tab.CLIPS); Nav.setClipsRemote(this, true); Nav.clipsTop = java.lang.ref.WeakReference(this); Nav.clipsResumed(this) }
     override fun finish() { if (!isTaskRoot) Nav.leaveTab(this, Nav.Tab.CLIPS) else super.finish() }
 }
 
@@ -56,10 +57,13 @@ abstract class ClipsInner : ClipsActivity(), ClipsSide {
     override val onRemoteSide get() = sourceId != null
     override fun setContentView(view: View) = super.setContentView(Nav.wrap(this, view, Nav.Tab.CLIPS))
     override fun onSelecting(on: Boolean) { window.decorView.findViewWithTag<View>("tabbar")?.visibility = if (on) View.GONE else View.VISIBLE }
-    override fun onCreate(savedInstanceState: android.os.Bundle?) { super.onCreate(savedInstanceState); Nav.innerOpened(this) }
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState); Nav.innerOpened(this)
+        if (savedInstanceState == null) Nav.slideContent(this, 1f)   // opened: its content slides in under the header
+    }
     override fun onResume() {
         super.onResume(); Nav.tabShown(this, Nav.Tab.CLIPS); Nav.setClipsRemote(this, onRemoteSide)
-        Nav.clipsTop = java.lang.ref.WeakReference(this)
+        Nav.clipsTop = java.lang.ref.WeakReference(this); Nav.clipsResumed(this)
     }
     override fun finish() { super.finish(); Nav.innerClosed(this) }
 }
@@ -78,10 +82,13 @@ class CollectionsTabActivity : CollectionsActivity(), ClipsSide {
     override val asTab = true
     override val onRemoteSide get() = sourceId != null
     override fun setContentView(view: View) = super.setContentView(Nav.wrap(this, view, Nav.Tab.CLIPS))
-    override fun onCreate(savedInstanceState: android.os.Bundle?) { super.onCreate(savedInstanceState); Nav.innerOpened(this) }
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState); Nav.innerOpened(this)
+        if (savedInstanceState == null) Nav.slideContent(this, 1f)   // opened: its content slides in under the header
+    }
     override fun onResume() {
         super.onResume(); Nav.tabShown(this, Nav.Tab.CLIPS); Nav.setClipsRemote(this, onRemoteSide)
-        Nav.clipsTop = java.lang.ref.WeakReference(this)
+        Nav.clipsTop = java.lang.ref.WeakReference(this); Nav.clipsResumed(this)
     }
     override fun finish() { super.finish(); Nav.innerClosed(this) }
 }

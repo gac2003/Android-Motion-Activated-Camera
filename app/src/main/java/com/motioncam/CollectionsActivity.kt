@@ -44,12 +44,14 @@ open class CollectionsActivity : Activity() {
             setOnClickListener { CollectionPicker.askName(this@CollectionsActivity, "New collection", "") { store.create(this@CollectionsActivity, it); reload() } }
         }
         if (asTab) root.addView(LinearLayout(this).apply {
+            tag = "clipsHeader"
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@CollectionsActivity, 16)
             setPadding(p, p, p, Ui.dp(this@CollectionsActivity, 4))
             addView(Ui.label(this@CollectionsActivity, "Clips", 26f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 0, 0, Ui.dp(this@CollectionsActivity, 10)) })
             addView(ClipsSwitch.view(this@CollectionsActivity, remote = remote != null))
             val back = backRow(this@CollectionsActivity, "Collections", remote?.name) { finish() } as LinearLayout
+            back.tag = "slides"
             if (canEdit()) back.addView(add)
             addView(back)
         }) else root.addView(topBar(this, remote?.let { "Collections · ${it.name}" } ?: "Collections", if (canEdit()) add else null))
@@ -163,6 +165,7 @@ open class CollectionsActivity : Activity() {
             setOnClickListener {
                 startActivity(Intent(ctx, if (asTab) CollectionTabActivity::class.java else ClipsActivity::class.java).putExtra(ClipsActivity.EXTRA_COLLECTION, c.id)
                     .putExtra(ClipsActivity.EXTRA_REMOTE, remote?.id))
+                if (asTab) Nav.noWindowAnim(this@CollectionsActivity)
             }
         }
         val coverW = Ui.dp(ctx, 112)

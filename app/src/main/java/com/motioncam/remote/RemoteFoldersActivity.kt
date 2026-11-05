@@ -65,6 +65,7 @@ open class RemoteFoldersActivity : Activity() {
         prefs = Prefs(this)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Ui.BG) }
         if (asTab) root.addView(LinearLayout(this).apply {
+            tag = "clipsHeader"
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@RemoteFoldersActivity, 16)
             setPadding(p, p, p, Ui.dp(this@RemoteFoldersActivity, 4))
@@ -319,6 +320,7 @@ open class RemoteFoldersActivity : Activity() {
         // in the Clips tab the folder opens inside the tab (tab bar and switch stay)
         startActivity(Intent(this, if (asTab) com.motioncam.RemoteClipsTabActivity::class.java else ClipsActivity::class.java)
             .putExtra(ClipsActivity.EXTRA_REMOTE, s.id))
+        if (asTab) com.motioncam.Nav.noWindowAnim(this)
     }
 
     // ------------------------------------------------------------------ adding

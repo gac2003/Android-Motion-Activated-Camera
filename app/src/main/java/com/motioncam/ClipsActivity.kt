@@ -146,6 +146,7 @@ open class ClipsActivity : Activity() {
             if (collectionId == null) add(IconDrawable.Kind.COLLECTIONS, "Collections") {
                 startActivity(Intent(this@ClipsActivity, if (asTab) CollectionsTabActivity::class.java else CollectionsActivity::class.java)
                     .putExtra(CollectionsActivity.EXTRA_REMOTE, remote?.id))
+                if (asTab) Nav.noWindowAnim(this@ClipsActivity)
             }
             // a collection: get all of it here (remote) or into the cloud (phone)
             if (collectionId != null && remote != null) add(IconDrawable.Kind.DOWNLOAD, "Save all") {
@@ -1033,13 +1034,14 @@ open class ClipsActivity : Activity() {
 
     /** The Clips tab's header: its title, the On this phone / Remote folders switch, and where you are inside the tab. */
     private fun tabHeader(): View = LinearLayout(this).apply {
+        tag = "clipsHeader"
         orientation = LinearLayout.VERTICAL
         setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 8))
         addView(Ui.label(this@ClipsActivity, "Clips", 26f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 0, 0, Ui.dp(this@ClipsActivity, 10)) })
         addView(ClipsSwitch.view(this@ClipsActivity, remote = remote != null))
         // a remote folder or a collection opened in the Clips tab: its name, tap to go back one step
         val name = collectionId?.let { store.get(this@ClipsActivity, it)?.name } ?: remote?.name
-        if (name != null) addView(backRow(this@ClipsActivity, name, remote?.takeIf { collectionId != null }?.name) { finish() })
+        if (name != null) addView(backRow(this@ClipsActivity, name, remote?.takeIf { collectionId != null }?.name) { finish() }.apply { tag = "slides" })
     }
 
     private fun deleteSelected() {

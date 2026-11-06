@@ -136,10 +136,11 @@ A new Dropbox app can be used by up to 500 people, plenty for personal use.
 
 <!-- screenshot: setup-github-variables.png (the MC_ variables listed) · setup-release.png (a release with MotionCam.apk) -->
 
-1. In your fork: **Settings → Secrets and variables → Actions → Variables → New repository variable** for each value
-   you have (skip the ones for features you didn't set up):
+1. In your fork: **Settings → Secrets and variables → Actions → Secrets → New repository secret** for each value
+   you have (skip the ones for features you didn't set up). Use **Secrets**, not Variables: a public repository's
+   build logs are public, and only secrets are hidden in them.
 
-   | Variable | From |
+   | Secret | From |
    |---|---|
    | `MC_APPLICATION_ID` | your package name (step 1) |
    | `MC_FIREBASE_API_KEY`, `MC_FIREBASE_APP_ID`, `MC_FIREBASE_PROJECT_ID`, `MC_FIREBASE_DB_URL` | step 3 |
@@ -151,8 +152,30 @@ A new Dropbox app can be used by up to 500 people, plenty for personal use.
 3. On the phone, open your fork's latest release → **MotionCam.apk** → install (allow installing from the browser;
    *Install anyway* if Play Protect asks). Every later build installs over it.
 
+**Your accounts and a public repository**: your fork's Releases are public, so anyone could download that APK and use
+your Firebase / Dropbox setup. To keep it to yourself, add a [personal build](#a-personal-build-in-a-private-repository):
+then the public APK has no accounts and yours goes to a private repository.
+
 **Check it worked**: Settings → *Your phones* doesn't say "not set up in this build"; Clips → *Remote folders* →
 **＋ Add** offers Google Drive and Dropbox.
+
+## A personal build in a private repository
+
+<!-- screenshot: setup-private-release.png (the private repository's release) -->
+
+The workflow can build every commit twice: a plain APK for your public Releases, and your full APK in a **private**
+repository's Releases that only you can download.
+
+1. Create a **private** repository, e.g. `Private-MotionCam`, with *Add a README* ticked (it only holds releases).
+2. GitHub → your avatar → *Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new
+   token*: *Only select repositories* → the private repository; *Repository permissions* → **Contents: Read and
+   write**; an expiry you'll remember to renew.
+3. In your fork's **Secrets**: `PRIVATE_RELEASE_TOKEN` = the token. If the private repository isn't called
+   `<you>/Private-MotionCam`, add a **variable** `PRIVATE_RELEASE_REPO` = `<you>/<name>`.
+
+From the next build on, your public release has no accounts and the private repository gets `MotionCam x.y.z
+(personal)` with them. Install that one on your phones (open the release while signed in to GitHub); don't install the
+public one over it.
 
 ## If something doesn't work
 

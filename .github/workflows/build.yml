@@ -11,60 +11,87 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: false
 
+# Two builds of the same commit, with the same version:
+#  - public:   this repository's Releases. No accounts built in when you also have a personal build (below);
+#              without one (a fork that just wants its own APK), it uses your MC_ values.
+#  - personal: your MC_ values (Firebase, Dropbox, package name), published to a PRIVATE repository's Releases with
+#              the PRIVATE_RELEASE_TOKEN secret, so the APK with your accounts is never public. Skipped without it.
+# Your MC_ values go under Settings > Secrets and variables > Actions > **Secrets** (secrets are hidden in the public
+# build logs; variables are not). See SETUP.md.
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        variant: [public, personal]
+    env:
+      VARIANT: ${{ matrix.variant }}
+      # the personal build runs only with a token for the private repository
+      ENABLED: ${{ matrix.variant == 'public' || secrets.PRIVATE_RELEASE_TOKEN != '' }}
+      # accounts go into the personal build, or into the public one when there is no personal build
+      WITH_KEYS: ${{ matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '' }}
+      PRIVATE_REPO: ${{ vars.PRIVATE_RELEASE_REPO || format('{0}/Private-MotionCam', github.repository_owner) }}
     steps:
+      - name: Skip (no personal build set up)
+        if: env.ENABLED != 'true'
+        run: echo "No PRIVATE_RELEASE_TOKEN secret, so there is no personal build."
       - uses: actions/checkout@v4
+        if: env.ENABLED == 'true'
       - uses: actions/setup-java@v4
+        if: env.ENABLED == 'true'
         with:
           distribution: temurin
           java-version: 17
       - name: Install SDK packages (SDK is preinstalled on the runner)
+        if: env.ENABLED == 'true'
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0"
-      - run: chmod +x gradlew
       - name: Set up signing key (from repository secrets)
+        if: env.ENABLED == 'true'
         env:
           KEYSTORE_B64: ${{ secrets.MOTIONCAM_KEYSTORE_B64 }}
         run: |
+          chmod +x gradlew
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/motioncam.jks"
             echo "MOTIONCAM_KEYSTORE=$RUNNER_TEMP/motioncam.jks" >> "$GITHUB_ENV"
-          elif [ "$GITHUB_REPOSITORY" = "gac2003/Android-Motion-Activated-Camera" ]; then
+          elif [ "$GITHUB_REPOSITORY" = "gac2003/Android-Motion-Activated-Camera" ] || [ "$VARIANT" = personal ]; then
             echo "::error::Signing secrets are missing. Add MOTIONCAM_KEYSTORE_B64, MOTIONCAM_KEYSTORE_PASSWORD and MOTIONCAM_KEY_ALIAS under Settings > Secrets and variables > Actions."
             exit 1
           else
             echo "::warning::No signing key secrets: this build uses a temporary key, so it can't be installed over a previous build. Add your own key (SETUP.md, step 2)."
           fi
       - name: Build APK
+        if: env.ENABLED == 'true'
         env:
           MOTIONCAM_KEYSTORE_PASSWORD: ${{ secrets.MOTIONCAM_KEYSTORE_PASSWORD }}
           MOTIONCAM_KEY_ALIAS: ${{ secrets.MOTIONCAM_KEY_ALIAS }}
-          # Your API credentials (SETUP.md): repository variables under Settings > Secrets and variables > Actions >
-          # Variables. Each repository (and fork) uses only its own; missing ones switch that feature off.
-          MC_APPLICATION_ID: ${{ vars.MC_APPLICATION_ID }}
-          MC_FIREBASE_API_KEY: ${{ vars.MC_FIREBASE_API_KEY }}
-          MC_FIREBASE_APP_ID: ${{ vars.MC_FIREBASE_APP_ID }}
-          MC_FIREBASE_PROJECT_ID: ${{ vars.MC_FIREBASE_PROJECT_ID }}
-          MC_FIREBASE_DB_URL: ${{ vars.MC_FIREBASE_DB_URL }}
-          MC_GOOGLE_WEB_CLIENT_ID: ${{ vars.MC_GOOGLE_WEB_CLIENT_ID }}
-          MC_DROPBOX_APP_KEY: ${{ vars.MC_DROPBOX_APP_KEY }}
+          # your accounts (SETUP.md): secrets (preferred) or variables; empty when this build has no accounts
+          MC_APPLICATION_ID: ${{ secrets.MC_APPLICATION_ID || vars.MC_APPLICATION_ID }}
+          MC_FIREBASE_API_KEY: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && (secrets.MC_FIREBASE_API_KEY || vars.MC_FIREBASE_API_KEY) || '' }}
+          MC_FIREBASE_APP_ID: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && (secrets.MC_FIREBASE_APP_ID || vars.MC_FIREBASE_APP_ID) || '' }}
+          MC_FIREBASE_PROJECT_ID: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && (secrets.MC_FIREBASE_PROJECT_ID || vars.MC_FIREBASE_PROJECT_ID) || '' }}
+          MC_FIREBASE_DB_URL: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && (secrets.MC_FIREBASE_DB_URL || vars.MC_FIREBASE_DB_URL) || '' }}
+          MC_GOOGLE_WEB_CLIENT_ID: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && (secrets.MC_GOOGLE_WEB_CLIENT_ID || vars.MC_GOOGLE_WEB_CLIENT_ID) || '' }}
+          MC_DROPBOX_APP_KEY: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && (secrets.MC_DROPBOX_APP_KEY || vars.MC_DROPBOX_APP_KEY) || '' }}
         run: |
+          echo "Building the $VARIANT APK ($( [ "$WITH_KEYS" = true ] && echo 'with' || echo 'without' ) accounts)"
           ./gradlew --no-daemon assembleRelease
           cp app/build/outputs/apk/release/app-release.apk MotionCam.apk
       - name: Show signing certificate (should match the release key's SHA-1)
+        if: env.ENABLED == 'true'
         run: '"$ANDROID_HOME"/build-tools/34.0.0/apksigner verify --print-certs MotionCam.apk | grep -E "SHA-1|SHA-256|DN"'
       - uses: actions/upload-artifact@v4
+        # only the public APK becomes a (public) workflow artifact
+        if: env.ENABLED == 'true' && matrix.variant == 'public'
         with:
           name: MotionCam-apk
           path: MotionCam.apk
-      - name: Publish as the latest release
-        # every repository (forks too) publishes its own builds of main as releases
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Version
+        if: env.ENABLED == 'true'
         run: |
           # the same version as the app: <major.minor> from version.properties, patch = builds since it started
           MM=$(grep '^major_minor=' version.properties | cut -d= -f2 | tr -d '[:space:]')
@@ -72,24 +99,27 @@ jobs:
           REPO=$(grep '^base_repo=' version.properties | cut -d= -f2 | tr -d '[:space:]')
           if [ "$GITHUB_REPOSITORY" = "$REPO" ]; then PATCH=$(( GITHUB_RUN_NUMBER - BASE )); if [ "$PATCH" -lt 0 ]; then PATCH=0; fi
           else PATCH=$GITHUB_RUN_NUMBER; fi
-          VERSION="$MM.$PATCH"
-          TAG="v$VERSION"
+          echo "VERSION=$MM.$PATCH" >> "$GITHUB_ENV"
+      - name: Publish the public APK to this repository's Releases
+        if: env.ENABLED == 'true' && matrix.variant == 'public' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           NOTES="MotionCam $VERSION (build ${GITHUB_RUN_NUMBER}, commit ${GITHUB_SHA::7}): $(git log -1 --pretty=%s)
 
-          **Install:** download MotionCam.apk below on your Android phone (Android 11+), open it and allow installing from your browser/file manager. Updates install over the previous version and keep your settings."
-          gh release create "$TAG" MotionCam.apk --title "MotionCam $VERSION" --notes "$NOTES" --target "$GITHUB_SHA" --latest
-          # keep only the 5 newest automatic builds (v1.1.x, and the older build-N ones)
+          **Install:** download MotionCam.apk below on your Android phone (Android 11+), open it and allow installing from your browser/file manager. Updates install over the previous version and keep your settings and clips."
+          gh release create "v$VERSION" MotionCam.apk --title "MotionCam $VERSION" --notes "$NOTES" --target "$GITHUB_SHA" --latest
+          # keep only the 5 newest automatic builds
           gh release list --limit 100 --json tagName,createdAt -q 'sort_by(.createdAt) | reverse | .[].tagName' \
             | grep -E '^(v[0-9]+\.[0-9]+\.[0-9]+|build-[0-9]+)$' | tail -n +6 \
             | xargs -r -I{} gh release delete {} --yes --cleanup-tag
-      - name: Start the private build (optional, see tools/private-build)
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      - name: Publish the personal APK to the private repository's Releases
+        if: env.ENABLED == 'true' && matrix.variant == 'personal' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         env:
-          PRIVATE_TOKEN: ${{ secrets.PRIVATE_BUILD_TOKEN }}
-          PRIVATE_REPO: ${{ vars.PRIVATE_BUILD_REPO }}
+          GH_TOKEN: ${{ secrets.PRIVATE_RELEASE_TOKEN }}
         run: |
-          if [ -z "$PRIVATE_TOKEN" ] || [ -z "$PRIVATE_REPO" ]; then echo "No private build set up."; exit 0; fi
-          curl -sSf -X POST -H "Authorization: Bearer $PRIVATE_TOKEN" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$PRIVATE_REPO/dispatches" \
-            -d "{\"event_type\":\"public-build\",\"client_payload\":{\"sha\":\"$GITHUB_SHA\",\"run\":\"$GITHUB_RUN_NUMBER\",\"repo\":\"$GITHUB_REPOSITORY\"}}"
-          echo "Asked $PRIVATE_REPO to build this commit."
+          gh release create "v$VERSION" MotionCam.apk --repo "$PRIVATE_REPO" --title "MotionCam $VERSION (personal)" \
+            --notes "Personal build of $GITHUB_REPOSITORY@${GITHUB_SHA::7}: $(git log -1 --pretty=%s)" --latest \
+            || gh release upload "v$VERSION" MotionCam.apk --clobber --repo "$PRIVATE_REPO"
+          gh release list --repo "$PRIVATE_REPO" --limit 100 --json tagName,createdAt -q 'sort_by(.createdAt) | reverse | .[].tagName' \
+            | tail -n +6 | xargs -r -I{} gh release delete {} --repo "$PRIVATE_REPO" --yes --cleanup-tag

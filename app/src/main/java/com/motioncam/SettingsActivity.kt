@@ -264,7 +264,7 @@ open class SettingsActivity : Activity() {
         Category("display", "APP", "Display", IconDrawable.Kind.EYE, 0xFFFFB74D.toInt()) { a ->
             "Preview, focus peaking, " + if (Prefs(a).use24h) "24-hour clock" else "12-hour clock" },
         Category("about", "APP", "About & help", IconDrawable.Kind.SETTINGS, 0xFFB0B4BA.toInt()) { a ->
-            "Version " + (try { a.packageManager.getPackageInfo(a.packageName, 0).versionName } catch (_: Exception) { "" }) + " · setup guide" },
+            "Version " + (try { a.packageManager.getPackageInfo(a.packageName, 0).versionName } catch (_: Exception) { "" }) + " · user guide" },
         Category("reset", "APP", "Reset", IconDrawable.Kind.REFRESH, 0xFFFF8A85.toInt()) { _ -> "Restore default settings" },
     )
 
@@ -730,11 +730,11 @@ open class SettingsActivity : Activity() {
         box.addView(Ui.label(this, "MotionCam $v", 16f).apply { setPadding(0, Ui.dp(this@SettingsActivity, 6), 0, Ui.dp(this@SettingsActivity, 4)) })
         note("Turns spare phones into motion cameras: record clips on motion, watch and control your cameras from your other phones, " +
             "and back clips up to Google Drive, Dropbox or your own server.")
-        button("Setup guide (opens in the browser)") {
-            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gac2003/Android-Motion-Activated-Camera/blob/main/SETUP.md"))) }
+        button("User guide (opens in the browser)") {
+            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gac2003/Android-Motion-Activated-Camera/blob/main/docs/USER_GUIDE.md"))) }
             catch (_: Exception) { Toast.makeText(this, "No browser found", Toast.LENGTH_SHORT).show() }
         }
-        note("Clips stay on your phones and in the folders you choose. Your phones' network uses your own Firebase project (see the guide).")
+        note("Clips stay on your phones and in the folders you choose. To run MotionCam on your own free accounts, see SETUP.md on the project's page.")
     }
 
     private fun confirmReset(title: String, msg: String, keys: List<String>) {

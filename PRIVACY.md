@@ -1,6 +1,6 @@
 # MotionCam Privacy Policy
 
-_Last updated: November 4, 2026 (live connection)_
+_Last updated: November 6, 2026_
 
 MotionCam is an open-source Android app that turns a phone into a motion-activated security camera.
 It is a personal project with no company, servers, accounts, advertising or analytics behind it.
@@ -8,7 +8,8 @@ It is a personal project with no company, servers, accounts, advertising or anal
 ## Summary
 
 - MotionCam **does not collect, sell or share** any personal data. The developer receives **no data**, except what you
-  choose to send through the optional **Live connection** (see below), which is stored in the developer's Firebase project.
+  choose to send through the optional **Your phones** connection (see below). With the ready-made APK that is stored in
+  the developer's Firebase project; if you [build your own copy](SETUP.md), in yours, and the developer receives nothing.
 - Video, audio and settings stay **on your phone**, unless you choose to back clips up to a cloud service or
   server **you** control (Google Drive, Dropbox, FTP or SFTP).
 - There are **no ads, no analytics, no tracking and no crash reporting**.
@@ -21,7 +22,7 @@ It is a personal project with no company, servers, accounts, advertising or anal
 | Microphone (optional) | Sound in recorded clips, if "Record audio" is on | Inside the saved clips only |
 | Notifications | Shows that monitoring is running, and warnings (e.g. phone too hot, backup problem) | Shown on the phone only |
 | Local network | The optional built-in web viewer lets *your own* devices watch the camera over USB tethering, Wi-Fi, Bluetooth tethering or the phone's hotspot. It is off by default and protected by a password you set | Stays between your phone and your viewing device |
-| Internet | Only for optional cloud backup that you set up | Only to the service you connect (see below) |
+| Internet | Only for optional cloud backup and the optional Your phones connection | Only to the service you connect, and the Firebase project of your build (see below) |
 | Videos on the phone (optional) | To show clips recorded by an earlier install of the app | Stays on the phone |
 
 Motion detection runs entirely on the phone. Frames are analysed in memory and immediately discarded; nothing
@@ -82,24 +83,26 @@ features you turned on; it is not used for advertising, not sold, not shared wit
   (Google Drive: hidden app properties on the clip; Dropbox/FTP/SFTP: tiny files in a `.keep` subfolder) with the
   phone's name and collection names, so all your phones can see why a clip is kept. Nothing is sent anywhere else.
 
-## Optional live connection (Firebase)
+## Optional "Your phones" connection (Firebase)
 
-Off unless you turn it on (Settings → Live connection). It connects your own phones through **Firebase Realtime
-Database** and **Firebase Authentication** (Google), in the Firebase project of this app's developer:
+Off unless you turn it on (Settings → Your phones). It connects your own phones through **Firebase Realtime
+Database** and **Firebase Authentication** (Google), in the Firebase project of whoever built your copy: the developer's
+for the ready-made APK, **your own** if you build it yourself ([SETUP.md](SETUP.md)).
 
 - **What is stored**: your phones' names and online state; camera status (monitoring, battery, charging, temperature,
-  last motion time, lens, recording and motion settings); camera events (kept 7 days); live-view frames (overwritten every
+  last motion time, lens, recording and motion settings); camera events (kept forever by default, or 1 year / 30 days: Settings → Alerts & activity → *Keep activity*);
+  each camera's latest picture for the Home cards (locked with its PIN when the live view needs one); live-view frames (overwritten every
   2 seconds while someone watches, removed when the camera stops); high-quality frames (deleted after they are viewed);
   remote-control requests and their results; short "something changed in this folder" signals (folder identified by a
   hash). No clips are sent through it.
 - **Google sign-in mode**: you sign in with your Google account (only your basic profile: name, email). Data is stored
   under your account's ID and the database rules only let your own account read or write it. It is not end-to-end
-  encrypted, so the Firebase project owner (the developer) could technically see it in the project's console; the
+  encrypted, so the Firebase project owner (with the ready-made APK, the developer) could technically see it in the project's console; the
   developer does not look at it or use it.
 - **Network-code mode**: no Google account; you join anonymously and everything is **encrypted on your phones with the
   network code**, so neither Firebase nor the developer can read it.
-- **Leave** any time (Live connection → Leave this network); data of a camera stops being updated, events expire after 7
-  days. To have everything removed sooner, open an issue on GitHub.
+- **Leave** any time (Your phones → Leave); a camera's data stops being updated. Activity → ⋮ → *Delete activity*
+  removes events. With the ready-made APK, to have everything removed, open an issue on GitHub.
 - Firebase's own handling of data is described in [Firebase's privacy information](https://firebase.google.com/support/privacy).
 
 ## Your control over your data

@@ -38,7 +38,9 @@ android {
         val build = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionCode = build
         // <major.minor> from version.properties; the patch counts builds since that version started
-        versionName = versionProps.getProperty("major_minor") + "." + (build - versionProps.getProperty("base_run").toInt()).coerceAtLeast(0)
+        // in a fork (or locally) the patch is simply the build number
+        val patch = if (System.getenv("GITHUB_REPOSITORY") == versionProps.getProperty("base_repo")) (build - versionProps.getProperty("base_run").toInt()).coerceAtLeast(0) else build
+        versionName = versionProps.getProperty("major_minor") + "." + patch
     }
 
     // Release signing key comes from GitHub Actions secrets (never stored in the repo). Builds without it

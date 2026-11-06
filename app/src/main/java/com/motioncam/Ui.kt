@@ -33,6 +33,7 @@ object Ui {
 
     /** Landscape: the phone's status bar (time, icons, battery) hides for more height; swipe down shows it briefly. */
     fun statusBarForOrientation(a: android.app.Activity) {
+        if (a is PlayerActivity) return   // the player keeps the phone's bars hidden in both orientations
         val c = a.window?.insetsController ?: return
         if (a.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
             c.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE

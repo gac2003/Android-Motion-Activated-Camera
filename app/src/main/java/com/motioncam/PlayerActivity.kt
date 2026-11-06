@@ -311,6 +311,7 @@ class PlayerActivity : Activity() {
     override fun onResume() {
         super.onResume()
         updateSkipLabels()   // may have been changed in Settings
+        immersive(true)      // the phone's bars stay hidden (a swipe shows them briefly)
         if (playing) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         ui.post(ticker)
     }
@@ -507,7 +508,8 @@ class PlayerActivity : Activity() {
     private lateinit var pillTime: TextView
     private lateinit var fsBtn: android.widget.ImageView
     /** Full screen (like Samsung's player): the picture uses the whole screen, the controls float over it. */
-    private var full = false
+    /** The player is always "full screen": the picture uses the whole screen and the controls float over it. */
+    private var full = true
     private var chromeHidden = false
     private val hideChrome = Runnable { if (full && playing && !scrubbing && vScale <= 1.01f) setChrome(false) }
 
@@ -520,7 +522,6 @@ class PlayerActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (full) { setFull(false); return }
         @Suppress("DEPRECATION") super.onBackPressed()
     }
 
@@ -562,20 +563,21 @@ class PlayerActivity : Activity() {
             playPill = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = GradientDrawable().apply { cornerRadius = d(26).toFloat(); setColor(0xE65A5E66.toInt()); setStroke(d(1), 0x33FFFFFF) }
+                background = GradientDrawable().apply { cornerRadius = d(24).toFloat(); setColor(0xBF5A5E66.toInt()); setStroke(d(1), 0x2EFFFFFF) }
                 elevation = d(4).toFloat()
-                setPadding(d(16), d(10), d(20), d(10))
+                setPadding(d(18), d(8), d(14), d(8))
                 isClickable = true
                 setOnClickListener { togglePlay(); pokeChrome() }
             }
             pillIcon = android.widget.ImageView(this).apply { setImageDrawable(IconDrawable(if (playing) IconDrawable.Kind.PAUSE else IconDrawable.Kind.PLAY)) }
-            playPill.addView(pillIcon, LinearLayout.LayoutParams(d(28), d(28)))
-            pillTime = Ui.label(this, "", 15f).apply {
+            // the time first, play / pause on its right
+            pillTime = Ui.label(this, "", 13.5f).apply {
                 setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL))
                 fontFeatureSettings = "tnum"   // digits keep their width while the time runs
-                setPadding(d(10), 0, 0, 0)
+                setPadding(0, 0, d(9), 0)
             }
             playPill.addView(pillTime)
+            playPill.addView(pillIcon, LinearLayout.LayoutParams(d(25), d(25)))
             fsBtn = android.widget.ImageView(this).apply {
                 setPadding(d(7), d(7), d(7), d(7))
                 setOnClickListener { setFull(!full) }
@@ -595,13 +597,9 @@ class PlayerActivity : Activity() {
             bar.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
         }
         if (full) {
-            ctrls.addView(playPill, LinearLayout.LayoutParams(-2, d(52)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = d(8) })
+            ctrls.addView(playPill, LinearLayout.LayoutParams(-2, d(47)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = d(8) })
             if (!land) ctrls.addView(strip, LinearLayout.LayoutParams(-1, d(72)))
             ctrls.addView(bar)
-            bar.addView(fsBtn, LinearLayout.LayoutParams(d(40), d(40)))
-            fsBtn.setImageDrawable(IconDrawable(IconDrawable.Kind.FIT_IN))
-            fsBtn.background = null
-            fsBtn.contentDescription = "Leave full screen"
             ctrls.background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xD9000000.toInt(), 0x00000000))
             ctrls.setPadding(0, d(24), 0, 0)
             video.addView(ctrls, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
@@ -834,8 +832,9 @@ class PlayerActivity : Activity() {
         val v = if (zoomed) View.GONE else View.VISIBLE
         if (topBar.visibility != v) {
             topBar.visibility = v
-            strip.visibility = v
-            bar.visibility = v
+            // full screen: the rows keep their room while zoomed, so the pill stays at the same height
+            strip.visibility = if (full && zoomed) View.INVISIBLE else v
+            bar.visibility = if (full && zoomed) View.INVISIBLE else v
             // zoomed in full screen: the play pill stays where it is on the screen (like Samsung's player)
             if (::fsBtn.isInitialized) { fsBtn.visibility = v; playPill.visibility = if (full) View.VISIBLE else v }
             if (full) {

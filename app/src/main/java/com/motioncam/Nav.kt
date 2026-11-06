@@ -377,7 +377,7 @@ object ClipsSwitch {
             setBackgroundColor(0xFF15171B.toInt())
             setPadding(0, Ui.dp(ctx, 10), 0, Ui.dp(ctx, 8))
         }
-        col.addView(Ui.label(ctx, "Clips", 14f).apply { setTypeface(typeface, Typeface.BOLD); setPadding(0, 0, 0, Ui.dp(ctx, 4)) })
+        col.addView(Ui.label(ctx, "Clips", 14f).apply { setTypeface(typeface, Typeface.BOLD); gravity = Gravity.CENTER; setPadding(0, 0, 0, Ui.dp(ctx, 4)) })
         val mid = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER

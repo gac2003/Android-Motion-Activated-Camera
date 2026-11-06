@@ -77,14 +77,15 @@ Turn the phone sideways and every screen uses the width instead of stacking (por
   someone watches); on the right a see-through column with the controls (scroll it), **⚙** at the top, a round
   **Start / Stop** in the middle and **FILL / FIT** at the bottom – the picture fills the screen behind the controls or
   fits beside them (remembered). A control's slider appears along the bottom of the picture.
-* **Player**: the video keeps clear of the controls, which take one row under it: ⏮ ⏭, a shorter filmstrip, speed,
-  skip and sound; the clip count moves to the top.
+* **Player**: one row of controls (⏮ ⏭, a shorter filmstrip, speed, skip, sound) floats over the picture's bottom edge;
+  the clip count moves to the top.
 * **A camera's screen** (from its card): the picture on the left, status and controls on the right.
 
-### Full-screen player
-The small **⛶** at the video's bottom right (portrait or landscape) goes full screen, like Samsung's player: the
-picture takes the whole screen (the phone's bars hide), the controls float over it with a **pill** under the picture –
-play / pause and the time (0:03 / 0:10) – a tap shows or hides them (they fade by themselves while playing), and ⛶ or Back leaves.
+### Player
+The picture always uses the whole screen (the phone's bars hide; swipe to see them), portrait or landscape, like
+Samsung's player. The controls float over it: the filmstrip and buttons at the bottom, and a pill under the picture
+with the time (0:03 / 0:10) and play / pause. A tap shows or hides them (they fade by themselves while playing);
+double-tap left / right still skips. Zoomed in, the pill stays where it is.
 
 ### Versions
 Releases are named like the app's version: **MotionCam 1.1.0**, 1.1.1, … (tag `v1.1.0`). The major and minor numbers

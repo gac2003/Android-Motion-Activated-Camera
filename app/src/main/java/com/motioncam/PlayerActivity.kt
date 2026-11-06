@@ -836,7 +836,12 @@ class PlayerActivity : Activity() {
             topBar.visibility = v
             strip.visibility = v
             bar.visibility = v
-            if (::fsBtn.isInitialized) { fsBtn.visibility = v; playPill.visibility = v }
+            // zoomed in full screen: the play pill stays where it is on the screen (like Samsung's player)
+            if (::fsBtn.isInitialized) { fsBtn.visibility = v; playPill.visibility = if (full) View.VISIBLE else v }
+            if (full) {
+                ctrls.visibility = View.VISIBLE; ctrls.alpha = 1f
+                ctrls.background = if (zoomed) null else GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xD9000000.toInt(), 0x00000000))
+            }
             if (!zoomed) { topBar.alpha = 1f; ctrls.alpha = 1f; ctrls.visibility = View.VISIBLE; chromeHidden = false }
         }
         zoomReset.visibility = if (zoomed) View.VISIBLE else View.GONE

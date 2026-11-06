@@ -162,7 +162,7 @@ object Nav {
         if (side) {
             addView(rail(a, tab).apply { tag = "tabbar" }, LinearLayout.LayoutParams(-2, -1))
             // the Clips tab: its On this phone / Remote folders switch as a narrow column beside the tabs
-            if (tab == Tab.CLIPS) addView(ClipsSwitch.column(a).apply { tag = "tabbar" }, LinearLayout.LayoutParams(Ui.dp(a, 88), -1))
+            if (tab == Tab.CLIPS) addView(ClipsSwitch.column(a).apply { tag = "tabbar" }, LinearLayout.LayoutParams(Ui.dp(a, 64), -1))
             addView(content, LinearLayout.LayoutParams(0, -1, 1f))
         } else {
             addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -375,9 +375,9 @@ object ClipsSwitch {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setBackgroundColor(0xFF15171B.toInt())
-            setPadding(0, Ui.dp(ctx, 12), 0, Ui.dp(ctx, 8))
+            setPadding(0, Ui.dp(ctx, 10), 0, Ui.dp(ctx, 8))
         }
-        col.addView(Ui.label(ctx, "Clips", 16f).apply { setTypeface(typeface, Typeface.BOLD); setPadding(0, 0, 0, Ui.dp(ctx, 6)) })
+        col.addView(Ui.label(ctx, "Clips", 14f).apply { setTypeface(typeface, Typeface.BOLD); setPadding(0, 0, 0, Ui.dp(ctx, 4)) })
         val mid = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -389,8 +389,8 @@ object ClipsSwitch {
             mid.addView(LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(0, Ui.dp(ctx, 8), 0, Ui.dp(ctx, 8))
-                background = if (on) android.graphics.drawable.GradientDrawable().apply { setColor(0xFF3A3320.toInt()); cornerRadius = Ui.dp(ctx, 14).toFloat() } else null
+                setPadding(0, Ui.dp(ctx, 7), 0, Ui.dp(ctx, 7))
+                background = if (on) android.graphics.drawable.GradientDrawable().apply { setColor(0xFF3A3320.toInt()); cornerRadius = Ui.dp(ctx, 12).toFloat() } else null
                 isClickable = true
                 contentDescription = label.replace("\n", " ") + if (on) " (shown)" else ""
                 setOnClickListener { pick(a, isRemote, on) }
@@ -399,7 +399,7 @@ object ClipsSwitch {
                 addView(Ui.label(ctx, label, 11f, color).apply {
                     gravity = Gravity.CENTER; setPadding(0, Ui.dp(ctx, 4), 0, 0); if (on) setTypeface(typeface, Typeface.BOLD)
                 })
-            }, LinearLayout.LayoutParams(Ui.dp(ctx, 80), -2).apply { setMargins(0, Ui.dp(ctx, 3), 0, Ui.dp(ctx, 3)) })
+            }, LinearLayout.LayoutParams(Ui.dp(ctx, 58), -2).apply { setMargins(0, Ui.dp(ctx, 3), 0, Ui.dp(ctx, 3)) })
         }
         col.addView(mid, LinearLayout.LayoutParams(-1, 0, 1f))
         val box = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }

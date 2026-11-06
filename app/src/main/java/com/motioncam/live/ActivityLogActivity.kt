@@ -109,11 +109,42 @@ open class ActivityLogActivity : Activity() {
         scroll = ScrollView(this).apply {
             addView(box)
             setOnScrollChangeListener { v, _, y, _, _ ->
+                updateSticky()
                 val child = (v as ScrollView).getChildAt(0) ?: return@setOnScrollChangeListener
                 if (y + v.height >= child.height - d(600)) loadMore()
             }
         }
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        // the day and the phone of the events at the top stay pinned while scrolling (one thin row in landscape)
+        val landNow = com.motioncam.Nav.landscape(this)
+        sticky = LinearLayout(this).apply {
+            orientation = if (landNow) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+            gravity = if (landNow) Gravity.CENTER_VERTICAL else Gravity.NO_GRAVITY
+            setBackgroundColor(Ui.BG)
+            elevation = d(3).toFloat()
+            visibility = View.GONE
+            isClickable = true
+        }
+        stickyDay = Ui.label(this, "", 13f, Ui.ACCENT).apply {
+            setTypeface(typeface, Typeface.BOLD); letterSpacing = 0.06f
+            setPadding(0, d(if (landNow) 4 else 6), d(if (landNow) 12 else 0), d(if (landNow) 4 else 2))
+        }
+        sticky.addView(stickyDay)
+        stickyCam = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        sticky.addView(stickyCam, if (landNow) LinearLayout.LayoutParams(0, -2, 1f) else LinearLayout.LayoutParams(-1, -2))
+        val frame = FrameLayout(this)
+        frame.addView(scroll, FrameLayout.LayoutParams(-1, -1))
+        frame.addView(sticky, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+        // the pinned row lines up with the list (which is centred at a readable width)
+        box.addOnLayoutChangeListener { _, l, _, r, _, _, _, _, _ ->
+            val lp = sticky.layoutParams as FrameLayout.LayoutParams
+            val w = r - l - box.paddingLeft - box.paddingRight
+            if (lp.width != w || lp.leftMargin != l + box.paddingLeft) {
+                lp.width = w; lp.leftMargin = l + box.paddingLeft; lp.gravity = Gravity.TOP or Gravity.START
+                sticky.post { sticky.layoutParams = lp; updateSticky() }
+            }
+            sticky.post { updateSticky() }   // the list was rebuilt or grew: same pinned row, new positions
+        }
+        root.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
         // one column in every orientation (a timeline reads top to bottom), centred at a readable width when wide
         Ui.capWidth(box)
         setContentView(root)
@@ -308,6 +339,7 @@ open class ActivityLogActivity : Activity() {
         if (filters.isNotEmpty()) info.addView(infoLine("Showing ", filterText(), "", null) {})
         if (jumpEnd > 0) info.addView(infoLine("From ", jumpLabel, " back", "Back to today") { backToNow() })
         box.removeAllViews()
+        dayMarks.clear(); blockMarks.clear(); stickyCamId = null; if (::sticky.isInitialized) stickyCam.removeAllViews()
         val all = cam == null
         val want = ActivityTypes.FILTERS.filter { it.first in filters }.flatMap { it.third }.toSet()
         val front = frontier()
@@ -332,9 +364,11 @@ open class ActivityLogActivity : Activity() {
             val day = startOfDay(e.t)
             if (day != lastDay) {
                 lastDay = day
-                box.addView(Ui.label(this, dayTitle(day), 13f, Ui.ACCENT).apply {
+                val dv = Ui.label(this, dayTitle(day), 13f, Ui.ACCENT).apply {
                     setTypeface(typeface, Typeface.BOLD); letterSpacing = 0.06f; setPadding(0, d(16), 0, d(2))
-                })
+                }
+                box.addView(dv)
+                dayMarks += dv to dayTitle(day)
                 block = null
             }
             if (block == null || blockCam != e.cam) {
@@ -346,6 +380,7 @@ open class ActivityLogActivity : Activity() {
                 }
                 if (all) b.addView(phoneHeader(e.cam))
                 box.addView(b, LinearLayout.LayoutParams(-1, -2).apply { topMargin = d(8) })
+                if (all) blockMarks += b to e.cam
                 block = b
             }
             val row = eventRow(this, prefs, e, showCam = false, openCamera = all, newSince = newSince, seenFor = { c -> seenBefore[c] ?: newSince })
@@ -366,6 +401,44 @@ open class ActivityLogActivity : Activity() {
     }
 
     /** The phone's name heads its card: tap for that phone's own Activity (Back returns here). */
+    // ------------------------------------------------------------------ pinned day / phone
+
+    private lateinit var sticky: LinearLayout
+    private lateinit var stickyDay: TextView
+    private lateinit var stickyCam: LinearLayout
+    private var stickyCamId: String? = null
+    private val dayMarks = ArrayList<Pair<View, String>>()
+    private val blockMarks = ArrayList<Pair<View, String>>()
+
+    /**
+     * The day (and, in All cameras, the phone) of the events at the top of the list stays pinned: it changes as you
+     * scroll into another day or another phone's group, and the next day's title pushes it up as it arrives.
+     */
+    private fun updateSticky() {
+        if (!::sticky.isInitialized) return
+        val y = scroll.scrollY
+        val day = dayMarks.lastOrNull { it.first.top + it.first.height <= y + d(4) }
+        if (day == null) { sticky.visibility = View.GONE; return }
+        sticky.visibility = View.VISIBLE
+        if (stickyDay.text != day.second) stickyDay.text = day.second
+        val h = sticky.height.takeIf { it > 0 } ?: d(30)
+        // the phone: only once its own header has scrolled under the pinned row
+        val block = blockMarks.lastOrNull { it.first.top <= y + h }?.takeIf { (b, _) -> b.top + b.height > y + h && b.top >= day.first.top }
+        val cam = block?.takeIf { (b, _) -> b.top + d(30) < y + h }?.second
+        if (cam != stickyCamId) {
+            stickyCamId = cam
+            stickyCam.removeAllViews()
+            if (cam != null) stickyCam.addView(phoneHeader(cam).apply {
+                val land = com.motioncam.Nav.landscape(this@ActivityLogActivity)
+                setPadding(if (land) 0 else d(12), d(if (land) 4 else 4), d(if (land) 0 else 12), d(if (land) 4 else 6))
+                if (!land) background = GradientDrawable().apply { setColor(0xFF1E2126.toInt()); cornerRadius = d(10).toFloat() }
+            })
+        }
+        // the next day's title pushes the pinned row up
+        val next = dayMarks.firstOrNull { it.first.top > y }
+        sticky.translationY = next?.let { (it.first.top - y - h).coerceAtMost(0).toFloat() } ?: 0f
+    }
+
     private fun phoneHeader(c: String): View = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL

@@ -171,8 +171,7 @@ class PlayerActivity : Activity() {
         val gd = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent) = true
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
-                if (vScale > 1.01f && !pinching) { vTx -= dx; vTy -= dy; applyZoom() }
-                return true
+                return true   // panning is done in the touch listener (with the pinch), see zoomTouch
             }
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 // full screen: a tap shows / hides the controls (play / pause is the pill at the bottom)
@@ -188,25 +187,10 @@ class PlayerActivity : Activity() {
                 return true
             }
         })
-        val sd = android.view.ScaleGestureDetector(this, object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScaleBegin(d: android.view.ScaleGestureDetector): Boolean { pinching = true; return true }
-            override fun onScale(d: android.view.ScaleGestureDetector): Boolean {
-                val ns = (vScale * d.scaleFactor).coerceIn(1f, 6f)
-                // zoom around the fingers
-                val cx = d.focusX - video.width / 2f
-                val cy = d.focusY - video.height / 2f
-                vTx = cx - (cx - vTx) * ns / vScale
-                vTy = cy - (cy - vTy) * ns / vScale
-                vScale = ns
-                applyZoom()
-                return true
-            }
-            override fun onScaleEnd(d: android.view.ScaleGestureDetector) { pinching = false; if (vScale < 1.03f) resetZoom() }
-        })
         var tapSkipping = false
         video.setOnTouchListener { _, e ->
             if (full && e.actionMasked == MotionEvent.ACTION_DOWN && !chromeHidden) pokeChrome()
-            sd.onTouchEvent(e)
+            zoomTouch(e)
             // after a double-tap skip, each further quick tap on that side skips again (like YouTube)
             if (e.actionMasked == MotionEvent.ACTION_DOWN && vScale <= 1.01f) {
                 val side = if (e.x < video.width / 2f) -1 else 1
@@ -224,6 +208,11 @@ class PlayerActivity : Activity() {
                 return@setOnTouchListener true
             }
             if (!pinching && e.pointerCount == 1) gd.onTouchEvent(e)
+            else if (pinching && e.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+                // a second finger: never a tap or double-tap
+                val cancel = MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }
+                gd.onTouchEvent(cancel); cancel.recycle()
+            }
             true
         }
         root.addView(video, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -818,9 +807,57 @@ class PlayerActivity : Activity() {
 
     // ------------------------------------------------------------------ pinch zoom
 
+    // ------------------------------------------------------------------ pinch zoom and pan
+
+    private var lastFx = 0f
+    private var lastFy = 0f
+    private var lastSpan = 0f
+
+    /**
+     * Pinch and pan in one: the point between the fingers stays under the fingers while they spread, pinch and move
+     * (one finger pans while zoomed). The focus and spread are taken again whenever a finger lands or lifts, so the
+     * picture never jumps when the number of fingers changes.
+     */
+    private fun zoomTouch(e: MotionEvent) {
+        val up = if (e.actionMasked == MotionEvent.ACTION_POINTER_UP) e.actionIndex else -1
+        var sx = 0f; var sy = 0f; var n = 0
+        for (i in 0 until e.pointerCount) if (i != up) { sx += e.getX(i); sy += e.getY(i); n++ }
+        if (n == 0) return
+        val fx = sx / n; val fy = sy / n
+        var span = 0f
+        for (i in 0 until e.pointerCount) if (i != up) span += Math.hypot((e.getX(i) - fx).toDouble(), (e.getY(i) - fy).toDouble()).toFloat()
+        span /= n
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_POINTER_UP -> {
+                lastFx = fx; lastFy = fy; lastSpan = span
+                pinching = n >= 2
+                if (e.actionMasked == MotionEvent.ACTION_POINTER_UP && n < 2 && vScale < 1.03f) resetZoom()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val ns = if (n >= 2 && lastSpan > 8f) (vScale * span / lastSpan).coerceIn(1f, 6f) else vScale
+                if (n >= 2 || vScale > 1.01f) {
+                    // keep the content point that was under the last focus under the new focus
+                    val cx = video.width / 2f; val cy = video.height / 2f
+                    vTx = (fx - cx) - ((lastFx - cx) - vTx) * ns / vScale
+                    vTy = (fy - cy) - ((lastFy - cy) - vTy) * ns / vScale
+                    vScale = ns
+                    applyZoom()
+                }
+                lastFx = fx; lastFy = fy; lastSpan = span
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                pinching = false
+                if (vScale < 1.03f && vScale != 1f) resetZoom()
+            }
+        }
+    }
+
     private fun applyZoom() {
-        val maxX = (vScale - 1f) * video.width / 2f
-        val maxY = (vScale - 1f) * video.height / 2f
+        // the picture can't leave the screen: limits from its real size (a letterboxed clip is smaller than the screen)
+        val tw = (cur.tv.width.takeIf { it > 0 } ?: video.width) * vScale
+        val th = (cur.tv.height.takeIf { it > 0 } ?: video.height) * vScale
+        val maxX = maxOf(0f, (tw - video.width) / 2f)
+        val maxY = maxOf(0f, (th - video.height) / 2f)
         vTx = vTx.coerceIn(-maxX, maxX)
         vTy = vTy.coerceIn(-maxY, maxY)
         for (s in listOf(a, b)) {

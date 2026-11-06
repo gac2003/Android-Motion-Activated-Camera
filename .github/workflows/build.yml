@@ -82,3 +82,14 @@ jobs:
           gh release list --limit 100 --json tagName,createdAt -q 'sort_by(.createdAt) | reverse | .[].tagName' \
             | grep -E '^(v[0-9]+\.[0-9]+\.[0-9]+|build-[0-9]+)$' | tail -n +6 \
             | xargs -r -I{} gh release delete {} --yes --cleanup-tag
+      - name: Start the private build (optional, see tools/private-build)
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_BUILD_TOKEN }}
+          PRIVATE_REPO: ${{ vars.PRIVATE_BUILD_REPO }}
+        run: |
+          if [ -z "$PRIVATE_TOKEN" ] || [ -z "$PRIVATE_REPO" ]; then echo "No private build set up."; exit 0; fi
+          curl -sSf -X POST -H "Authorization: Bearer $PRIVATE_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$PRIVATE_REPO/dispatches" \
+            -d "{\"event_type\":\"public-build\",\"client_payload\":{\"sha\":\"$GITHUB_SHA\",\"run\":\"$GITHUB_RUN_NUMBER\",\"repo\":\"$GITHUB_REPOSITORY\"}}"
+          echo "Asked $PRIVATE_REPO to build this commit."

@@ -35,11 +35,13 @@ android {
         minSdk = 30
         targetSdk = 34
         // CI build number, so every published APK is newer than the previous one
-        val build = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
+        // MC_BUILD_NUMBER / MC_BUILD_REPO: a private build of the public code takes the public build's numbers
+        val build = (System.getenv("MC_BUILD_NUMBER")?.ifBlank { null } ?: System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionCode = build
         // <major.minor> from version.properties; the patch counts builds since that version started
         // in a fork (or locally) the patch is simply the build number
-        val patch = if (System.getenv("GITHUB_REPOSITORY") == versionProps.getProperty("base_repo")) (build - versionProps.getProperty("base_run").toInt()).coerceAtLeast(0) else build
+        val repo = System.getenv("MC_BUILD_REPO")?.ifBlank { null } ?: System.getenv("GITHUB_REPOSITORY")
+        val patch = if (repo == versionProps.getProperty("base_repo")) (build - versionProps.getProperty("base_run").toInt()).coerceAtLeast(0) else build
         versionName = versionProps.getProperty("major_minor") + "." + patch
     }
 

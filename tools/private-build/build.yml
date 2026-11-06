@@ -1,0 +1,95 @@
+# Your personal MotionCam build, made in a PRIVATE repository from the public code.
+#
+# The public repository builds a plain APK (no accounts built in). This workflow builds the same commit with your
+# own Firebase / Dropbox / package-name values and signing key, which live only in the private repository, and
+# publishes it to the private repository's Releases. See tools/private-build/README.md.
+#
+# Put this file in your private repository at .github/workflows/build.yml.
+name: Build personal APK
+on:
+  repository_dispatch:
+    types: [public-build]   # sent by the public repository after each build of main
+  workflow_dispatch:        # or run it by hand (builds the public repository's latest main)
+
+permissions:
+  contents: write   # publish releases in this (private) repository
+
+concurrency:
+  group: personal-build
+  cancel-in-progress: false
+
+env:
+  PUBLIC_REPO: gac2003/Android-Motion-Activated-Camera   # change if you build from your own fork
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Which public commit
+        id: which
+        env:
+          SHA: ${{ github.event.client_payload.sha }}
+          RUN: ${{ github.event.client_payload.run }}
+        run: |
+          if [ -z "$SHA" ]; then
+            SHA=$(curl -sSf "https://api.github.com/repos/$PUBLIC_REPO/commits/main" | jq -r .sha)
+            RUN=$(curl -sSf "https://api.github.com/repos/$PUBLIC_REPO/actions/runs?branch=main&per_page=1" | jq -r '.workflow_runs[0].run_number')
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+          echo "Building $PUBLIC_REPO@$SHA as build $RUN"
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PUBLIC_REPO }}
+          ref: ${{ steps.which.outputs.sha }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Install SDK packages
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0"
+      - run: chmod +x gradlew
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.MOTIONCAM_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then echo "::error::Add MOTIONCAM_KEYSTORE_B64, MOTIONCAM_KEYSTORE_PASSWORD and MOTIONCAM_KEY_ALIAS secrets."; exit 1; fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/motioncam.jks"
+          echo "MOTIONCAM_KEYSTORE=$RUNNER_TEMP/motioncam.jks" >> "$GITHUB_ENV"
+      - name: Build APK
+        env:
+          MOTIONCAM_KEYSTORE_PASSWORD: ${{ secrets.MOTIONCAM_KEYSTORE_PASSWORD }}
+          MOTIONCAM_KEY_ALIAS: ${{ secrets.MOTIONCAM_KEY_ALIAS }}
+          # the same version as the public build of this commit (so updates install in order)
+          MC_BUILD_NUMBER: ${{ steps.which.outputs.run }}
+          MC_BUILD_REPO: ${{ env.PUBLIC_REPO }}
+          # your values: this repository's Settings > Secrets and variables > Actions > Variables
+          MC_APPLICATION_ID: ${{ vars.MC_APPLICATION_ID }}
+          MC_FIREBASE_API_KEY: ${{ vars.MC_FIREBASE_API_KEY }}
+          MC_FIREBASE_APP_ID: ${{ vars.MC_FIREBASE_APP_ID }}
+          MC_FIREBASE_PROJECT_ID: ${{ vars.MC_FIREBASE_PROJECT_ID }}
+          MC_FIREBASE_DB_URL: ${{ vars.MC_FIREBASE_DB_URL }}
+          MC_GOOGLE_WEB_CLIENT_ID: ${{ vars.MC_GOOGLE_WEB_CLIENT_ID }}
+          MC_DROPBOX_APP_KEY: ${{ vars.MC_DROPBOX_APP_KEY }}
+        run: |
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk MotionCam.apk
+      - name: Publish to this repository's Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ steps.which.outputs.run }}
+          SHA: ${{ steps.which.outputs.sha }}
+        run: |
+          MM=$(grep '^major_minor=' version.properties | cut -d= -f2 | tr -d '[:space:]')
+          BASE=$(grep '^base_run=' version.properties | cut -d= -f2 | tr -d '[:space:]')
+          REPO=$(grep '^base_repo=' version.properties | cut -d= -f2 | tr -d '[:space:]')
+          if [ "$PUBLIC_REPO" = "$REPO" ]; then PATCH=$(( RUN - BASE )); if [ "$PATCH" -lt 0 ]; then PATCH=0; fi; else PATCH=$RUN; fi
+          VERSION="$MM.$PATCH"
+          gh release create "v$VERSION" MotionCam.apk --repo "$GITHUB_REPOSITORY" --title "MotionCam $VERSION (personal)" \
+            --notes "Personal build of $PUBLIC_REPO@${SHA::7}." --latest \
+            || gh release upload "v$VERSION" MotionCam.apk --clobber --repo "$GITHUB_REPOSITORY"
+          # keep the 5 newest
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,createdAt -q 'sort_by(.createdAt) | reverse | .[].tagName' \
+            | tail -n +6 | xargs -r -I{} gh release delete {} --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag

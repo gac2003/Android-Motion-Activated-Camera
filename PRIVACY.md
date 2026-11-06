@@ -8,8 +8,8 @@ It is a personal project with no company, servers, accounts, advertising or anal
 ## Summary
 
 - MotionCam **does not collect, sell or share** any personal data. The developer receives **no data**, except what you
-  choose to send through the optional **Your phones** connection (see below). With the ready-made APK that is stored in
-  the developer's Firebase project; if you [build your own copy](SETUP.md), in yours, and the developer receives nothing.
+  choose to send through the optional **Your phones** connection (see below), which only exists in a copy you
+  [build yourself](SETUP.md) and is stored in **your own** Firebase project. The developer receives nothing.
 - Video, audio and settings stay **on your phone**, unless you choose to back clips up to a cloud service or
   server **you** control (Google Drive, Dropbox, FTP or SFTP).
 - There are **no ads, no analytics, no tracking and no crash reporting**.
@@ -86,8 +86,7 @@ features you turned on; it is not used for advertising, not sold, not shared wit
 ## Optional "Your phones" connection (Firebase)
 
 Off unless you turn it on (Settings → Your phones). It connects your own phones through **Firebase Realtime
-Database** and **Firebase Authentication** (Google), in the Firebase project of whoever built your copy: the developer's
-for the ready-made APK, **your own** if you build it yourself ([SETUP.md](SETUP.md)).
+Database** and **Firebase Authentication** (Google), in **your own** Firebase project (it is only available in a copy you build yourself, see [SETUP.md](SETUP.md)).
 
 - **What is stored**: your phones' names and online state; camera status (monitoring, battery, charging, temperature,
   last motion time, lens, recording and motion settings); camera events (kept forever by default, or 1 year / 30 days: Settings → Alerts & activity → *Keep activity*);
@@ -97,12 +96,12 @@ for the ready-made APK, **your own** if you build it yourself ([SETUP.md](SETUP.
   hash). No clips are sent through it.
 - **Google sign-in mode**: you sign in with your Google account (only your basic profile: name, email). Data is stored
   under your account's ID and the database rules only let your own account read or write it. It is not end-to-end
-  encrypted, so the Firebase project owner (with the ready-made APK, the developer) could technically see it in the project's console; the
+  encrypted, so the Firebase project owner (you) could see it in the project's console in the project's console; the
   developer does not look at it or use it.
 - **Network-code mode**: no Google account; you join anonymously and everything is **encrypted on your phones with the
   network code**, so neither Firebase nor the developer can read it.
 - **Leave** any time (Your phones → Leave); a camera's data stops being updated. Activity → ⋮ → *Delete activity*
-  removes events. With the ready-made APK, to have everything removed, open an issue on GitHub.
+  removes events.
 - Firebase's own handling of data is described in [Firebase's privacy information](https://firebase.google.com/support/privacy).
 
 ## Your control over your data

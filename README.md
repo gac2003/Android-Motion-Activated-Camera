@@ -36,13 +36,12 @@ Tested running 24/7 on a Galaxy S23 Ultra and S20 FE.
 
 ## Get it
 
-You have two options:
-
-| | Ready-made APK | Your own build (recommended to keep it all yours) |
+| | Download the app | Set up your own (full features) |
 |---|---|---|
 | **Effort** | 2 minutes | About 45 minutes, once |
-| **Recording, clips, player, web viewer** | ✅ | ✅ |
-| **Backup, alerts, live view between phones** | Use this project's Google, Dropbox and Firebase setup | Use **your own** free accounts; nobody else's quotas or data |
+| **Recording, clips, player, search, web viewer** | ✅ | ✅ |
+| **Backup to your own FTP / SFTP server** | ✅ | ✅ |
+| **Google Drive, Dropbox, alerts and live view between phones** | – | ✅ with **your own** free accounts |
 | **How** | [Download the APK](https://github.com/gac2003/Android-Motion-Activated-Camera/releases/latest/download/MotionCam.apk) on the phone, open it, allow installing (*Install anyway* if Play Protect asks) | Fork this repo and follow **[SETUP.md](SETUP.md)**: GitHub builds the APK for you, no Android Studio needed |
 
 New versions install over the old one and keep your settings and clips.

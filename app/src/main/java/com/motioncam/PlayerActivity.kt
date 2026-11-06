@@ -469,7 +469,7 @@ class PlayerActivity : Activity() {
     private fun setPlaying(p: Boolean) {
         playing = p
         if (::playPill.isInitialized) {
-            playPill.setImageDrawable(IconDrawable(if (p) IconDrawable.Kind.PAUSE else IconDrawable.Kind.PLAY))
+            pillIcon.setImageDrawable(IconDrawable(if (p) IconDrawable.Kind.PAUSE else IconDrawable.Kind.PLAY))
             playPill.contentDescription = if (p) "Pause" else "Play"
         }
         if (full) {
@@ -501,7 +501,10 @@ class PlayerActivity : Activity() {
     private lateinit var menuBtnV: View
     /** The filmstrip and the button row (with the play pill in full screen). */
     private lateinit var ctrls: LinearLayout
-    private lateinit var playPill: android.widget.ImageView
+    /** Full screen: play / pause with the time, in a pill under the picture (like Samsung's player). */
+    private lateinit var playPill: LinearLayout
+    private lateinit var pillIcon: android.widget.ImageView
+    private lateinit var pillTime: TextView
     private lateinit var fsBtn: android.widget.ImageView
     /** Full screen (like Samsung's player): the picture uses the whole screen, the controls float over it. */
     private var full = false
@@ -525,6 +528,7 @@ class PlayerActivity : Activity() {
         full = on
         immersive(on)
         arrange()
+        try { updatePosition() } catch (_: Exception) {}   // the pill (or the corner) shows the time at once
         if (on) { bigPlay.animate().cancel(); bigPlay.visibility = View.GONE; pokeChrome() }
         else if (!playing) { bigPlay.setImageDrawable(IconDrawable(IconDrawable.Kind.PLAY)); bigPlay.alpha = 1f; bigPlay.visibility = View.VISIBLE }
     }
@@ -555,12 +559,23 @@ class PlayerActivity : Activity() {
         fun detach(v: View) { (v.parent as? android.view.ViewGroup)?.removeView(v) }
         if (!::ctrls.isInitialized) {
             ctrls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            playPill = android.widget.ImageView(this).apply {
-                setImageDrawable(IconDrawable(if (playing) IconDrawable.Kind.PAUSE else IconDrawable.Kind.PLAY))
-                background = GradientDrawable().apply { cornerRadius = d(20).toFloat(); setColor(0x99202328.toInt()) }
-                setPadding(d(16), d(8), d(16), d(8))
+            playPill = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = GradientDrawable().apply { cornerRadius = d(26).toFloat(); setColor(0xE65A5E66.toInt()); setStroke(d(1), 0x33FFFFFF) }
+                elevation = d(4).toFloat()
+                setPadding(d(16), d(10), d(20), d(10))
+                isClickable = true
                 setOnClickListener { togglePlay(); pokeChrome() }
             }
+            pillIcon = android.widget.ImageView(this).apply { setImageDrawable(IconDrawable(if (playing) IconDrawable.Kind.PAUSE else IconDrawable.Kind.PLAY)) }
+            playPill.addView(pillIcon, LinearLayout.LayoutParams(d(28), d(28)))
+            pillTime = Ui.label(this, "", 15f).apply {
+                setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL))
+                fontFeatureSettings = "tnum"   // digits keep their width while the time runs
+                setPadding(d(10), 0, 0, 0)
+            }
+            playPill.addView(pillTime)
             fsBtn = android.widget.ImageView(this).apply {
                 setPadding(d(7), d(7), d(7), d(7))
                 setOnClickListener { setFull(!full) }
@@ -580,7 +595,7 @@ class PlayerActivity : Activity() {
             bar.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
         }
         if (full) {
-            ctrls.addView(playPill, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = d(6) })
+            ctrls.addView(playPill, LinearLayout.LayoutParams(-2, d(52)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = d(8) })
             if (!land) ctrls.addView(strip, LinearLayout.LayoutParams(-1, d(72)))
             ctrls.addView(bar)
             bar.addView(fsBtn, LinearLayout.LayoutParams(d(40), d(40)))
@@ -996,7 +1011,11 @@ class PlayerActivity : Activity() {
         val tags = TagStore.tagsOf(this, remote?.id, clips[i]).joinToString("  ") { "#$it" }
         if (tagLine.text.toString() != tags) { tagLine.text = tags; tagLine.visibility = if (tags.isEmpty()) View.GONE else View.VISIBLE }
         val c = clips[i]
-        info.text = "${i + 1}/${clips.size} · ${fmtDur(pos.toLong())}/${fmtDur(c.durationMs)}"   // compact: shares the bar
+        // full screen: the time is in the play pill, the clip count stays in the corner
+        if (full && ::pillTime.isInitialized) {
+            info.text = "${i + 1}/${clips.size}"
+            pillTime.text = "${fmtDur(pos.toLong())} / ${fmtDur(c.durationMs)}"
+        } else info.text = "${i + 1}/${clips.size} · ${fmtDur(pos.toLong())}/${fmtDur(c.durationMs)}"   // compact: shares the bar
     }
 
     private fun fmtDur(ms: Long): String { val s = ms / 1000; return "%d:%02d".format(s / 60, s % 60) }

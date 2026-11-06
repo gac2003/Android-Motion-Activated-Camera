@@ -48,7 +48,7 @@ open class CollectionsActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             val p = Ui.dp(this@CollectionsActivity, 16)
             setPadding(p, if (Nav.landscape(this@CollectionsActivity)) Ui.dp(this@CollectionsActivity, 8) else p, p, Ui.dp(this@CollectionsActivity, 4))
-            addView(com.motioncam.ClipsSwitch.header(this@CollectionsActivity, remote = remote != null))
+            if (!Nav.landscape(this@CollectionsActivity)) addView(com.motioncam.ClipsSwitch.header(this@CollectionsActivity, remote = remote != null))
             val back = backRow(this@CollectionsActivity, "Collections", remote?.name) { finish() } as LinearLayout
             back.tag = "slides"
             if (canEdit()) back.addView(add)

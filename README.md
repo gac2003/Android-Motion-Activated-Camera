@@ -66,7 +66,8 @@ reopens where you were (Home and its last tab, or Camera mode).
 Turn the phone sideways and every screen uses the width instead of stacking (portrait stays as it is):
 * **Tabs** become a rail on the left, spread over the height. **‹** at its top hides the tab names (**›** shows them);
   remembered for every tab.
-* **Headers** take one row: title, switch, count and tools side by side, with no extra space above.
+* **Headers** take one row: title, count and tools side by side, with no extra space above. In **Clips**, "Clips" and
+  the On this phone / Remote folders switch move to a narrow column beside the tabs.
 * **Clips**: as many columns as fit with clips at least 150 dp wide (5 on most phones). When selecting, the actions sit
   in the bar at the top instead of a bar over the clips.
 * **Home**: cameras three to a row on the left, recent activity on the right. **Activity**: one column at a readable width, filters
@@ -82,8 +83,8 @@ Turn the phone sideways and every screen uses the width instead of stacking (por
 
 ### Full-screen player
 The small **⛶** at the video's bottom right (portrait or landscape) goes full screen, like Samsung's player: the
-picture takes the whole screen (the phone's bars hide), the controls float over it with a small **play / pause pill**
-at the bottom, a tap shows or hides them (they fade by themselves while playing), and ⛶ or Back leaves.
+picture takes the whole screen (the phone's bars hide), the controls float over it with a **pill** under the picture –
+play / pause and the time (0:03 / 0:10) – a tap shows or hides them (they fade by themselves while playing), and ⛶ or Back leaves.
 
 ### Versions
 Releases are named like the app's version: **MotionCam 1.1.0**, 1.1.1, … (tag `v1.1.0`). The major and minor numbers

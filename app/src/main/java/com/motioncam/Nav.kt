@@ -161,6 +161,8 @@ object Nav {
         (content.parent as? android.view.ViewGroup)?.removeView(content)
         if (side) {
             addView(rail(a, tab).apply { tag = "tabbar" }, LinearLayout.LayoutParams(-2, -1))
+            // the Clips tab: its On this phone / Remote folders switch as a narrow column beside the tabs
+            if (tab == Tab.CLIPS) addView(ClipsSwitch.column(a).apply { tag = "tabbar" }, LinearLayout.LayoutParams(Ui.dp(a, 88), -1))
             addView(content, LinearLayout.LayoutParams(0, -1, 1f))
         } else {
             addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -352,6 +354,60 @@ object ClipsSwitch {
         addView(view(a, remote), if (land) LinearLayout.LayoutParams(Ui.dp(a, 250), -2) else LinearLayout.LayoutParams(0, -2, 1f))
     }
 
+    /** Tapping a side: the other side as it was left; the side already shown goes back to its first screen. */
+    fun pick(a: Activity, isRemote: Boolean, on: Boolean) {
+        if (on) { if (a !is ClipsTabActivity && a !is RemoteTabActivity) { if (isRemote) Nav.setLastFolder(a, null); Nav.popClips(a, isRemote) }; return }
+        Nav.setClipsRemote(a, isRemote)
+        Nav.open(a, Nav.clipsScreen(a, isRemote))
+    }
+
+    /** Which side a Clips tab screen is on. */
+    fun remoteSide(a: Activity) = a is RemoteTabActivity || (a as? ClipsSide)?.onRemoteSide == true
+
+    /**
+     * Landscape: "Clips" and the two sides (On this phone, Remote folders) as a narrow column beside the tabs, centred
+     * in its height, instead of a row above the clips.
+     */
+    fun column(a: Activity): View {
+        val ctx: Context = a
+        val remote = remoteSide(a)
+        val col = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setBackgroundColor(0xFF15171B.toInt())
+            setPadding(0, Ui.dp(ctx, 12), 0, Ui.dp(ctx, 8))
+        }
+        col.addView(Ui.label(ctx, "Clips", 16f).apply { setTypeface(typeface, Typeface.BOLD); setPadding(0, 0, 0, Ui.dp(ctx, 6)) })
+        val mid = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, Ui.dp(ctx, 34))   // centred on the column's whole height
+        }
+        for ((label, isRemote) in listOf("On this\nphone" to false, "Remote\nfolders" to true)) {
+            val on = isRemote == remote
+            val color = if (on) Ui.ACCENT else 0xFFC4C8CE.toInt()
+            mid.addView(LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(0, Ui.dp(ctx, 8), 0, Ui.dp(ctx, 8))
+                background = if (on) android.graphics.drawable.GradientDrawable().apply { setColor(0xFF3A3320.toInt()); cornerRadius = Ui.dp(ctx, 14).toFloat() } else null
+                isClickable = true
+                contentDescription = label.replace("\n", " ") + if (on) " (shown)" else ""
+                setOnClickListener { pick(a, isRemote, on) }
+                addView(ImageView(ctx).apply { setImageDrawable(IconDrawable(if (isRemote) IconDrawable.Kind.CLOUD else IconDrawable.Kind.PHONE, color)) },
+                    LinearLayout.LayoutParams(Ui.dp(ctx, 24), Ui.dp(ctx, 24)))
+                addView(Ui.label(ctx, label, 11f, color).apply {
+                    gravity = Gravity.CENTER; setPadding(0, Ui.dp(ctx, 4), 0, 0); if (on) setTypeface(typeface, Typeface.BOLD)
+                })
+            }, LinearLayout.LayoutParams(Ui.dp(ctx, 80), -2).apply { setMargins(0, Ui.dp(ctx, 3), 0, Ui.dp(ctx, 3)) })
+        }
+        col.addView(mid, LinearLayout.LayoutParams(-1, 0, 1f))
+        val box = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        box.addView(col, LinearLayout.LayoutParams(0, -1, 1f))
+        box.addView(View(ctx).apply { setBackgroundColor(0xFF2A2D33.toInt()) }, LinearLayout.LayoutParams(Ui.dp(ctx, 1), -1))
+        return box
+    }
+
     fun view(a: Activity, remote: Boolean): View {
         val ctx: Context = a
         val box = LinearLayout(ctx).apply {
@@ -372,12 +428,7 @@ object ClipsSwitch {
                 }
                 isClickable = true
                 contentDescription = label + if (on) " (shown)" else ""
-                setOnClickListener {
-                    // the side already shown: back to its first screen (folders / this phone's clips)
-                    if (on) { if (a !is ClipsTabActivity && a !is RemoteTabActivity) { if (isRemote) Nav.setLastFolder(a, null); Nav.popClips(a, isRemote) }; return@setOnClickListener }
-                    Nav.setClipsRemote(a, isRemote)
-                    Nav.open(a, Nav.clipsScreen(a, isRemote))
-                }
+                setOnClickListener { pick(a, isRemote, on) }
             }, LinearLayout.LayoutParams(0, -2, 1f))
         }
         return box

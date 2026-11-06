@@ -602,7 +602,7 @@ open class ClipsActivity : Activity() {
         val out = ArrayList<Row>()
         // in the Clips tab the count is above the tiles; only the badges' legend (collections) is a first row, scrolling away
         // landscape: the count line is the list's first row (it scrolls away instead of crowding the header)
-        if (!asTab || land || legend().isNotEmpty()) out += Row.Title
+        if (!asTab || (land && landInner) || legend().isNotEmpty()) out += Row.Title
         shown = applyFilter(clips)
         updateFilterBar()
         for ((day, items) in shown.groupBy { dayStart(it.startMs) }.toSortedMap(compareByDescending { it })) {
@@ -1175,6 +1175,8 @@ open class ClipsActivity : Activity() {
     /** Landscape header, second row: "‹ name" inside a folder or collection, and the tools on the right. */
     private lateinit var landRow2: LinearLayout
     private lateinit var landRow1: LinearLayout
+    /** Inside a remote folder or a collection (its count line scrolls with the clips). */
+    private val landInner get() = collectionId != null || remote != null
 
     /**
      * Landscape: "Clips" and the switch on their own row (they fit on any phone), then one row with "‹ name" (inside a
@@ -1183,9 +1185,9 @@ open class ClipsActivity : Activity() {
     private fun landHeader(): View = LinearLayout(this).apply {
         tag = "clipsHeader"
         orientation = LinearLayout.VERTICAL
-        setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 6), Ui.dp(this@ClipsActivity, 8), Ui.dp(this@ClipsActivity, 2))
-        landRow1 = ClipsSwitch.header(this@ClipsActivity, remote = remote != null) as LinearLayout
-        addView(landRow1)
+        setPadding(Ui.dp(this@ClipsActivity, 12), Ui.dp(this@ClipsActivity, 4), Ui.dp(this@ClipsActivity, 8), 0)
+        // "Clips" and the switch are in the column beside the tabs (Nav.wrap): one row here
+        landRow1 = LinearLayout(this@ClipsActivity)
         landRow2 = LinearLayout(this@ClipsActivity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1222,14 +1224,14 @@ open class ClipsActivity : Activity() {
             (t.getChildAt(1) as? TextView)?.apply { setPadding(Ui.dp(this@ClipsActivity, 6), 0, 0, 0); textSize = 12f; layoutParams = LinearLayout.LayoutParams(-2, -2) }
             t.layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(Ui.dp(this@ClipsActivity, 3), 0, Ui.dp(this@ClipsActivity, 3), 0) }
         }
-        val inner = collectionId != null || remote != null
-        if (inner) landRow2.addView(actionRow, LinearLayout.LayoutParams(-2, -2))
-        else {
-            // this phone's clips: the tools join "Clips" and the switch on one row (no second row)
-            landRow1.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-            landRow1.addView(actionRow, LinearLayout.LayoutParams(-2, -2))
-            landRow2.visibility = View.GONE
+        if (!landInner) {
+            // this phone's clips: the count goes in the row, left of the tools
+            landRow2.removeAllViews()
+            landRow2.addView(summary.apply {
+                maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(Ui.dp(this@ClipsActivity, 2), 0, Ui.dp(this@ClipsActivity, 8), 0)
+            }, LinearLayout.LayoutParams(0, -2, 1f))
         }
+        landRow2.addView(actionRow, LinearLayout.LayoutParams(-2, -2))
     }
 
     private fun tabHeader(): View = LinearLayout(this).apply {

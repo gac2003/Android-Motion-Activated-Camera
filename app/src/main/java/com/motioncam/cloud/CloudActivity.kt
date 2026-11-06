@@ -192,8 +192,9 @@ class CloudActivity : Activity() {
 
     private fun connectDropbox() {
         if (!DropboxProvider.configured) { android.app.AlertDialog.Builder(this).setTitle("Dropbox isn't set up in this build")
-                .setMessage("This copy of MotionCam was built without a Dropbox app key. Whoever builds it can add their own " +
-                    "(free, a few minutes): see SETUP.md in the project.").setPositiveButton("OK", null).show(); return }
+                .setMessage("This copy of MotionCam (the one to download from the project page) has no Dropbox app of its own. " +
+                    "To use Dropbox, build your own copy with your free Dropbox app: see SETUP.md in the project. " +
+                    "Backup to your own FTP / SFTP server works in every copy.").setPositiveButton("OK", null).show(); return }
         val verifier = Pkce.verifier()
         val state = Pkce.state()
         val rx = try { LoopbackReceiver(DropboxProvider.REDIRECT_PORT) } catch (e: Exception) { toast("Could not start sign-in: ${e.message}"); return }

@@ -32,6 +32,8 @@ android {
         buildConfigField("String", "FIREBASE_DB_URL", str(cred("MC_FIREBASE_DB_URL")))
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", str(cred("MC_GOOGLE_WEB_CLIENT_ID")))
         buildConfigField("String", "DROPBOX_APP_KEY", str(cred("MC_DROPBOX_APP_KEY")))
+        // MC_GOOGLE_DRIVE=off: no Google Drive (the public build of a repository that also makes a personal build)
+        buildConfigField("boolean", "GOOGLE_DRIVE", (cred("MC_GOOGLE_DRIVE") != "off").toString())
         minSdk = 30
         targetSdk = 34
         // CI build number, so every published APK is newer than the previous one

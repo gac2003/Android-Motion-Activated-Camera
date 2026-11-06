@@ -14,8 +14,20 @@ anyone else. GitHub builds the APK for you: you don't need Android Studio or a c
 | [5. Dropbox](#5-dropbox) | backup to Dropbox | 5 min |
 | [6. Build and install](#6-build-and-install) | your APK | 5 min |
 
-Every step after 2 is **optional**: skip one and that feature is simply off in your build. Recording, clips, the
-player, the web viewer and FTP/SFTP backup need no accounts at all. You can add the others later.
+**Why build your own?** The APK you can download from this project has no online accounts built in. These features
+only work in a copy you build with your own free accounts:
+
+| Feature | Needs |
+|---|---|
+| Google Drive backup and remote folders | step 4 |
+| Dropbox backup and remote folders | step 5 |
+| Your phones: alerts, live view, remote control, card pictures, synced activity | step 3 |
+
+Everything else works in the download: recording, clips, the player, search and tags, the web viewer, and backup to
+your own FTP / SFTP server. If that's all you need, you don't have to build anything.
+
+Every step after 2 is **optional**: skip one and that feature is simply off in your build. You can add the others
+later.
 
 > **Keep these private:** your keystore file and its password (step 2). The Firebase, Google and Dropbox values in
 > steps 3 to 5 are identifiers (they end up inside every APK), not secrets, but never paste a Dropbox *app secret*

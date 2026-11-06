@@ -77,6 +77,8 @@ jobs:
           MC_FIREBASE_DB_URL: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && (secrets.MC_FIREBASE_DB_URL || vars.MC_FIREBASE_DB_URL) || '' }}
           MC_GOOGLE_WEB_CLIENT_ID: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && (secrets.MC_GOOGLE_WEB_CLIENT_ID || vars.MC_GOOGLE_WEB_CLIENT_ID) || '' }}
           MC_DROPBOX_APP_KEY: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && (secrets.MC_DROPBOX_APP_KEY || vars.MC_DROPBOX_APP_KEY) || '' }}
+          # Google Drive needs nothing in the APK (Google matches the package and signing key), so switch it off explicitly
+          MC_GOOGLE_DRIVE: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && 'on' || 'off' }}
         run: |
           echo "Building the $VARIANT APK ($( [ "$WITH_KEYS" = true ] && echo 'with' || echo 'without' ) accounts)"
           ./gradlew --no-daemon assembleRelease

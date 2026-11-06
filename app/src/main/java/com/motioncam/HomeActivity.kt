@@ -187,7 +187,9 @@ class HomeActivity : Activity(), Nav.Reselect {
         val c = card()
         val joined = NetJoin.joined(this)
         val s1 = step(1, !joined, "Connect your phones",
-            if (joined) "Connected: " + (com.motioncam.live.LiveNet.account(this) ?: "network code") else "The same on every phone you use, so they find each other.")
+            if (joined) "Connected: " + (com.motioncam.live.LiveNet.account(this) ?: "network code")
+            else if (!LiveConfig.configured) "Needs your own build of MotionCam (SETUP.md on the project page). Skip it: this phone works on its own."
+            else "The same on every phone you use, so they find each other.")
         val col1 = s1.getChildAt(1) as LinearLayout
         if (!joined && LiveConfig.configured) {
             col1.addView(pillButton("Sign in with Google", true) { NetJoin.signInGoogle(this) { render() } }, lp(top = 4))

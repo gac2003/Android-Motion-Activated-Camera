@@ -316,9 +316,13 @@ open class RemoteFoldersActivity : Activity() {
      */
     private fun addSource() {
         val list = ArrayList<com.motioncam.Opt>()
-        list += com.motioncam.Opt("Google Drive", "A Google account — the same one on every phone that should see the clips", IconDrawable.Kind.CLOUD) { googleAccount() }
-        list += com.motioncam.Opt("Dropbox", "Your Dropbox (an app folder)", IconDrawable.Kind.CLOUD) { dropboxAccount { t, w -> dropboxOwn(t, w) } }
-        list += com.motioncam.Opt("Dropbox viewer link", "Someone else's folder they shared with a link (view only)", IconDrawable.Kind.CLOUD) {
+        // services this copy wasn't built for say so up front (they need your own build: SETUP.md)
+        val own = "Needs your own build of MotionCam (see SETUP.md)"
+        list += com.motioncam.Opt("Google Drive", if (com.motioncam.cloud.GoogleAuth.enabled) "A Google account — the same one on every phone that should see the clips" else own,
+            IconDrawable.Kind.CLOUD) { googleAccount() }
+        val dbx = com.motioncam.cloud.DropboxProvider.configured
+        list += com.motioncam.Opt("Dropbox", if (dbx) "Your Dropbox (an app folder)" else own, IconDrawable.Kind.CLOUD) { dropboxAccount { t, w -> dropboxOwn(t, w) } }
+        list += com.motioncam.Opt("Dropbox viewer link", if (dbx) "Someone else's folder they shared with a link (view only)" else own, IconDrawable.Kind.CLOUD) {
             dropboxAccount { t, w -> dropboxLink(t, w) }
         }
         list += com.motioncam.Opt("FTP / FTPS server", "Your own server; clips download before playing", IconDrawable.Kind.FOLDER) { serverChoice(CloudKind.FTP) }
@@ -391,8 +395,9 @@ open class RemoteFoldersActivity : Activity() {
     /** Uses the Dropbox account connected for backup, or signs in (any Dropbox account works for a viewer link). */
     private fun dropboxAccount(then: (refresh: String, who: String) -> Unit) {
         if (!DropboxProvider.configured) { android.app.AlertDialog.Builder(this).setTitle("Dropbox isn't set up in this build")
-                .setMessage("This copy of MotionCam was built without a Dropbox app key. Whoever builds it can add their own " +
-                    "(free, a few minutes): see SETUP.md in the project.").setPositiveButton("OK", null).show(); return }
+                .setMessage("This copy of MotionCam (the one to download from the project page) has no Dropbox app of its own. " +
+                    "To use Dropbox, build your own copy with your free Dropbox app: see SETUP.md in the project. " +
+                    "Backup to your own FTP / SFTP server works in every copy.").setPositiveButton("OK", null).show(); return }
         val known = FolderDests.dropboxAccounts(this)
         if (known.isEmpty()) { dropboxSignIn(then); return }
         com.motioncam.OptionSheet.show(this, "Dropbox account", known.map { acc ->

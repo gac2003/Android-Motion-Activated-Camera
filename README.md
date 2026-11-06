@@ -41,14 +41,21 @@ Tested running 24/7 on a Galaxy S23 Ultra and S20 FE.
 | **Effort** | 2 minutes | About 45 minutes, once |
 | **Recording, clips, player, search, web viewer** | ✅ | ✅ |
 | **Backup to your own FTP / SFTP server** | ✅ | ✅ |
-| **Google Drive, Dropbox, alerts and live view between phones** | – | ✅ with **your own** free accounts |
+| **Google Drive and Dropbox backup** | ❌ | ✅ with **your own** free accounts |
+| **Your phones: alerts, live view and remote control between phones** | ❌ | ✅ with **your own** free Firebase project |
 | **How** | [Download the APK](https://github.com/gac2003/Android-Motion-Activated-Camera/releases/latest/download/MotionCam.apk) on the phone, open it, allow installing (*Install anyway* if Play Protect asks) | Fork this repo and follow **[SETUP.md](SETUP.md)**: GitHub builds the APK for you, no Android Studio needed |
+
+> [!IMPORTANT]
+> **The downloadable APK has no online accounts built in.** Google Drive, Dropbox and connecting your phones
+> (alerts, live view, remote control) only work in a copy you [build yourself](SETUP.md) with your own free
+> accounts; in the download they say "needs your own build". Everything on one phone works, and so does backup to
+> your own FTP / SFTP server (a home NAS, for example).
 
 New versions install over the old one and keep your settings and clips.
 
 ## Quick start
 
-1. **Open MotionCam.** The welcome screen offers to connect your phones (optional) and asks where to start.
+1. **Open MotionCam.** The welcome screen asks where to start (and, in your own build, offers to connect your phones).
 2. **Point a phone at the room**: open the **Camera** tab. The preview shows at once, so you can set the lens,
    exposure and focus first, and draw **ZONES** to ignore parts of the picture.
 3. **Tap START.** Lock the phone; it keeps watching with the screen off. Clips appear in **Clips**, and on your other

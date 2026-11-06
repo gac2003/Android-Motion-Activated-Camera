@@ -1,5 +1,9 @@
 # MotionCam user guide
 
+> **Downloaded the APK?** It has no online accounts built in, so the parts marked **(own build)** below are off:
+> Google Drive and Dropbox backup, and connecting your phones. They need a copy you build yourself with your own free
+> accounts: see [SETUP.md](../SETUP.md). Everything else, including backup to your own FTP / SFTP server, works.
+
 * [The app at a glance](#the-app-at-a-glance)
 * [Camera mode](#camera-mode)
 * [Clips and the player](#clips-and-the-player)
@@ -89,6 +93,8 @@ live in the folder, so every phone sees them. Tags go with a clip when it's save
 
 ## Backup and remote folders
 
+*FTP / SFTP: every copy. Google Drive and Dropbox: **(own build)**.*
+
 <!-- screenshot: remote-folders.png (list with one backup folder) · backup-to.png (Back up to… sheet) · add-folder.png (choosing a folder) -->
 
 A **remote folder** is a cloud folder of clips: on **Google Drive**, **Dropbox**, a Dropbox viewer link, or your
@@ -122,6 +128,8 @@ service), and **Delete from cloud** (protected clips are always kept). Clips str
 * **FTP / SFTP**: the server login (a read-only account is best for viewing).
 
 ## Your phones: alerts, live view, remote control
+
+***(own build)**: needs a copy with your own Firebase project ([SETUP.md](../SETUP.md)).*
 
 <!-- screenshot: home-cards.png (Home with 2-3 camera cards) · camera-screen.png (a camera opened from its card) · alert.png (a motion notification) -->
 

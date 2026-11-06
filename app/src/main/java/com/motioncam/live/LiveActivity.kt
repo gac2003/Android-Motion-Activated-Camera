@@ -57,7 +57,8 @@ class LiveActivity : Activity() {
     private fun render() {
         val box = f.box
         box.removeAllViews()
-        if (!LiveConfig.configured) { f.note("This build has no live-connection project configured (see the setup guide)."); return }
+        if (!LiveConfig.configured) { f.note("Connecting your phones isn't set up in this copy of MotionCam (the one to download from the project page). " +
+            "It needs your own build with your free Firebase project: see SETUP.md in the project. Everything on this phone works without it."); return }
         val mode = LiveNet.mode(this)
         // joining the network is what connects this phone: there is no separate on/off switch
         f.title("Your phones' network")

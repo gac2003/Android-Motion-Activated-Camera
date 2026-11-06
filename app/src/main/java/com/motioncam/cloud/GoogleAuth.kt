@@ -32,7 +32,18 @@ object GoogleAuth {
     }
 
     /** Interactive sign-in from a screen. [onToken] gets an access token; a consent screen may be shown first. */
+    /** Off in the downloadable build (it has no Google project of its own); see SETUP.md. */
+    val enabled get() = com.motioncam.BuildConfig.GOOGLE_DRIVE
+
     fun start(a: Activity, requestCode: Int, onToken: (String) -> Unit, onError: (String) -> Unit, scope: String = SCOPE, account: String? = null) {
+        if (!enabled) {
+            android.app.AlertDialog.Builder(a).setTitle("Google Drive isn't set up in this build")
+                .setMessage("This copy of MotionCam (the one to download from the project page) has no Google project of its own. " +
+                    "To use Google Drive, build your own copy with your free Google Cloud project: see SETUP.md in the project. " +
+                    "Backup to your own FTP / SFTP server works in every copy.")
+                .setPositiveButton("OK", null).show()
+            return
+        }
         Identity.getAuthorizationClient(a).authorize(request(account, scope))
             .addOnSuccessListener { r ->
                 val pi = r.pendingIntent

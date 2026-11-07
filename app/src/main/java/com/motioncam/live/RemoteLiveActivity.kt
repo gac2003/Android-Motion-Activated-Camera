@@ -487,6 +487,8 @@ class RemoteLiveActivity : Activity() {
     }
 
     private fun updateLiveLabel() {
+        // also called while the screen is being built, before the feed exists
+        if (!::feed.isInitialized || !::liveTv.isInitialized) return
         val text = when {
             !r.online() -> "offline"
             !feed.watching -> "paused"

@@ -82,7 +82,7 @@ object Alerts {
     private fun nid(cam: String, kind: String) = (cam + kind).hashCode() and 0x7fffffff
 
     private fun post(ctx: Context, cam: String, kind: String, channel: String, title: String, text: String, silent: Boolean, update: Boolean = false,
-                     clip: JSONObject? = null, at: Long = System.currentTimeMillis()) {
+                     clip: JSONObject? = null, at: Long = System.currentTimeMillis(), picture: android.graphics.Bitmap? = null) {
         // "inside MotionCam only", or MotionCam is open on screen right now: the in-app card (not for silent updates),
         // never a phone notification on top of the app you are looking at (everything is in Activity anyway)
         if (Prefs(ctx).alertsInApp || AlertInbox.front?.get() != null) {
@@ -101,7 +101,15 @@ object Alerts {
                 Intent(ctx, AlertActionReceiver::class.java).putExtra(EXTRA_CAM, cam).putExtra("min", min), PendingIntent.FLAG_IMMUTABLE)).build()
             val n = Notification.Builder(ctx, if (silent) CH_QUIET else channel)
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setContentTitle(title).setContentText(text).setStyle(Notification.BigTextStyle().bigText(text))
+                .setContentTitle(title).setContentText(text)
+                .apply {
+                    // the clip's picture: small beside the text, big when the alert is expanded
+                    if (picture != null) {
+                        setLargeIcon(picture)
+                        setStyle(Notification.BigPictureStyle().bigPicture(picture).setSummaryText(text)
+                            .bigLargeIcon(null as android.graphics.drawable.Icon?))
+                    } else setStyle(Notification.BigTextStyle().bigText(text))
+                }
                 .setContentIntent(open).setAutoCancel(true)
                 .setGroup("cam_$cam")
                 .setOnlyAlertOnce(update)          // updating an alert never rings again
@@ -122,7 +130,8 @@ object Alerts {
 
     // ------------------------------------------------------------------ events from cameras
 
-    private class MotionState(var lastAlert: Long = 0, var count: Int = 0, var since: Long = 0, var clip: JSONObject? = null, var silent: Boolean = false)
+    private class MotionState(var lastAlert: Long = 0, var count: Int = 0, var since: Long = 0, var clip: JSONObject? = null, var silent: Boolean = false,
+                              var pic: android.graphics.Bitmap? = null)
 
     /** The clip a "clip" event is about (name + backup folders), or null for cameras on older versions. */
     fun clipRef(d: JSONObject): JSONObject? {
@@ -151,22 +160,31 @@ object Alerts {
                 if (now - st.lastAlert < p.alertMotionGapMin * 60_000L) {
                     // within the quiet gap: update the same notification, no sound
                     st.count++
-                    post(ctx, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent = true, update = true, clip = st.clip)
+                    post(ctx, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent = true, update = true, clip = st.clip, picture = st.pic)
                 } else {
-                    st.lastAlert = now; st.count = 1; st.since = now; st.clip = null
+                    st.lastAlert = now; st.count = 1; st.since = now; st.clip = null; st.pic = null
                     post(ctx, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent)
                 }
             }
             "clip" -> {
                 val ref = clipRef(d)
-                // the motion alert now leads to the clip it recorded (updated silently)
                 val st = motion[cam]
-                if (ref != null && p.alertMotion && st != null && System.currentTimeMillis() - st.lastAlert < maxOf(p.alertMotionGapMin, 10) * 60_000L) {
-                    st.clip = ref
-                    gate(ctx, cam, false)?.let { post(ctx, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent = true, update = true, clip = ref) }
-                }
-                if (p.alertClip) gate(ctx, cam, false)?.let { s -> post(ctx, cam, "clip", CH_CLIP, "New clip · $name",
-                    d.optString("text") + if (ref != null) " — tap to watch" else "", s, clip = ref) }
+                val toMotion = ref != null && p.alertMotion && st != null && System.currentTimeMillis() - st.lastAlert < maxOf(p.alertMotionGapMin, 10) * 60_000L
+                if (!toMotion && !p.alertClip) return
+                val app = ctx.applicationContext
+                // the clip's picture (fetched in the background, a few KB), then the alerts
+                Thread {
+                    val pic = ref?.let { try { ClipThumbStore.get(app, cam, it.optString("name")) } catch (_: Exception) { null } }
+                    main.post {
+                        // the motion alert now leads to the clip it recorded (updated silently), with its picture
+                        if (toMotion && st != null) {
+                            st.clip = ref; if (pic != null) st.pic = pic
+                            gate(app, cam, false)?.let { post(app, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent = true, update = true, clip = ref, picture = pic) }
+                        }
+                        if (p.alertClip) gate(app, cam, false)?.let { s -> post(app, cam, "clip", CH_CLIP, "New clip · $name",
+                            d.optString("text") + if (ref != null) " — tap to watch" else "", s, clip = ref, picture = pic) }
+                    }
+                }.start()
             }
             "motion_burst" -> {
                 // a very busy hour at the camera: one calm alert instead of one per motion

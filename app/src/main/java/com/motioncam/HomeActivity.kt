@@ -471,8 +471,8 @@ class HomeActivity : Activity(), Nav.Reselect {
 }
 
 /**
- * The picture on a camera's Home card: the newest of the last live frame this phone saw and the camera's card picture
- * (its latest clip's motion frame, or a snapshot every 15 minutes if the camera allows it). A camera whose live view
+ * The picture on a camera's Home card: the camera's card picture (its latest clip's motion frame, or a snapshot every
+ * 15 minutes if the camera allows it); the last live frame this phone saw only when the camera has none yet. A camera whose live view
  * needs the PIN locks its card picture with it: shown once this phone knows the PIN.
  */
 object CardPictures {
@@ -481,9 +481,8 @@ object CardPictures {
     private val listeners = HashMap<String, com.google.firebase.database.ValueEventListener>()
 
     fun picture(ctx: android.content.Context, cam: String): Pair<android.graphics.Bitmap, Long>? {
-        val live = CamRemote.lastFrames[cam]
-        val card = pics[cam]
-        return listOfNotNull(live, card).maxByOrNull { it.second }
+        // the camera's latest clip (or its own snapshot) wins: a live view or screenshot is often just an empty room
+        return pics[cam] ?: CamRemote.lastFrames[cam]
     }
 
     /** Follows the cameras' card pictures while Home is open; [changed] runs on the main thread. */

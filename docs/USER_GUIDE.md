@@ -160,6 +160,8 @@ be a camera needs a **PIN**.
   * **Stop monitoring / Start monitoring**: no detection or recording; the camera stays on and reachable.
   * **Shut off camera** (red): the camera closes. With **Standby** on (default) it stays reachable and can be started
     again from any phone; otherwise only on the phone itself.
+* **Clip pictures**: once a clip is saved, its alert and its row in Activity show a small picture of it (the camera
+  keeps a week of them). A camera's Home card shows its latest clip, not the last live view or screenshot.
 * **A motion alert opens its clip** from the camera's backup folder (add that folder once under Remote folders).
   If the clip is in several of your folders, it plays from one of them; MotionCam only asks which when the copies differ
   (another size or length).

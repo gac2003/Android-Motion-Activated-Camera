@@ -556,6 +556,19 @@ open class ActivityLogActivity : Activity() {
                 maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
                 contentDescription = if (ref != null) "$main, with a clip — tap to watch" else null
             }, LinearLayout.LayoutParams(0, -2, 1f))
+            // the clip's picture, once the camera has made it (a small download, then kept on this phone)
+            if (ref != null) {
+                val iv = ImageView(ctx).apply {
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    visibility = View.GONE
+                    clipToOutline = true
+                    outlineProvider = object : android.view.ViewOutlineProvider() {
+                        override fun getOutline(v: View, o: android.graphics.Outline) { o.setRoundRect(0, 0, v.width, v.height, Ui.dp(ctx, 6).toFloat()) }
+                    }
+                }
+                r.addView(iv, LinearLayout.LayoutParams(Ui.dp(ctx, 64), Ui.dp(ctx, 36)).apply { leftMargin = Ui.dp(ctx, 8) })
+                ClipThumbStore.load(ctx, e.cam, ref.optString("name")) { b -> iv.setImageBitmap(b); iv.visibility = View.VISIBLE }
+            }
             if (clip != null) {
                 val sec = clipSec(clip)
                 r.addView(Ui.label(ctx, (if (ref != null) "▶ " else "") + (sec?.let { durText(it) } ?: "clip"), 13f, if (ref != null) Ui.ACCENT else Ui.GREY)

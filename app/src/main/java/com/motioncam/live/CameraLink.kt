@@ -46,8 +46,8 @@ object CameraLink {
     private var snapL: ChildEventListener? = null
     private var cmdL: ChildEventListener? = null
 
-    private fun me(ctx: Context) = Device.id(ctx)
-    private fun path(ctx: Context, p: String) = Live.ref(ctx, "cams/${me(ctx)}/$p")
+    fun me(ctx: Context) = Device.id(ctx)
+    fun path(ctx: Context, p: String) = Live.ref(ctx, "cams/${me(ctx)}/$p")
 
     fun start(ctx: Context) {
         val c = ctx.applicationContext
@@ -149,9 +149,12 @@ object CameraLink {
                 }
                 val ms = clip.durationMs.takeIf { it > 0 } ?: lastClipMs
                 val sec = (ms / 1000).coerceAtLeast(1)
+                // its picture first (alerts and Activity on the other phones show it), then the clip's event
+                val pic = try { com.motioncam.ClipThumbs.load(c, clip) } catch (_: Exception) { null }
+                if (pic != null) try { ClipThumbStore.publish(c, clip.name, pic) } catch (_: Exception) {}
                 event(c, "clip", "Clip of ${sec}s saved", JSONObject().put("name", clip.name).put("dur", ms).put("folders", folders))
                 // the camera's card on Home: this clip's peak-motion frame
-                if (System.currentTimeMillis() - lastCardAt > 60_000L) com.motioncam.ClipThumbs.load(c, clip)?.let { bmp ->
+                if (System.currentTimeMillis() - lastCardAt > 60_000L) pic?.let { bmp ->
                     lastCardAt = System.currentTimeMillis()
                     val out = java.io.ByteArrayOutputStream()
                     val w = 360
@@ -448,6 +451,9 @@ object CameraLink {
     // ------------------------------------------------------------------ PIN
 
     private fun pin(ctx: Context): String? = SecretStore.get(ctx, "live.pin")?.takeIf { it.isNotEmpty() }
+
+    /** The PIN pictures of this camera are locked with (its live view needs the PIN), or null. */
+    fun pinFor(ctx: Context): String? = pin(ctx)?.takeIf { Prefs(ctx).livePinForView }
     fun setPin(ctx: Context, pin: String?) { SecretStore.put(ctx, "live.pin", pin?.trim()?.ifEmpty { null }); if (running) publishStatus(ctx) }
     fun hasPin(ctx: Context) = pin(ctx) != null
     fun shortPin(ctx: Context) = (pin(ctx)?.length ?: 6) < 6

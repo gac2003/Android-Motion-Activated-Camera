@@ -64,7 +64,7 @@ class RemoteLiveActivity : Activity() {
         if (dr.intrinsicWidth <= 0 || dr.intrinsicHeight <= 0) return null
         val rc = android.graphics.RectF(0f, 0f, dr.intrinsicWidth.toFloat(), dr.intrinsicHeight.toFloat())
         image.imageMatrix.mapRect(rc)
-        rc.offset(image.paddingLeft.toFloat(), image.paddingTop.toFloat())
+        rc.offset((image.left + image.paddingLeft).toFloat(), (image.top + image.paddingTop).toFloat())
         return rc
     }
 
@@ -105,7 +105,8 @@ class RemoteLiveActivity : Activity() {
         if (on == cropFocused || !::startBtn.isInitialized) return
         cropFocused = on
         val vis = if (on) View.GONE else View.VISIBLE
-        for (v in listOf<View>(top, strip, stripRow, startBtn)) v.visibility = vis
+        val hide = if (compact == true) listOf<View>(landTop, landCol) else listOf<View>(top, strip, startBtn)
+        for (v in hide) v.visibility = vis
         if (on) saveBar.visibility = View.GONE else updateSaveBar()
     }
 
@@ -131,6 +132,19 @@ class RemoteLiveActivity : Activity() {
     private lateinit var chipRow: LinearLayout
     private lateinit var startBtn: TextView
     private lateinit var stripRow: LinearLayout
+    // landscape, like camera mode: pills at the top left, a column on the right (controls + a round Start / Stop)
+    private lateinit var texts: LinearLayout
+    private lateinit var backTv: TextView
+    private lateinit var landTop: LinearLayout
+    private lateinit var landCol: LinearLayout
+    private lateinit var chipColumn: android.widget.ScrollView
+    private lateinit var shutter: FrameLayout
+    private lateinit var shutterCore: View
+    private lateinit var shutterLabel: TextView
+    private val statusPill by lazy { pill() }
+    private val infoPill by lazy { pill() }
+    private val livePill by lazy { pill() }
+    private var colPx = 0
     private var compact: Boolean? = null
     private val chips = LinkedHashMap<String, Chip>()
     private var selected: String? = null
@@ -264,15 +278,16 @@ class RemoteLiveActivity : Activity() {
             setBackgroundColor(0xCC000000.toInt() or (Ui.PANEL and 0x00FFFFFF))
             setPadding(d(4), d(6), d(12), d(6))
         }
-        top.addView(Ui.label(this, "‹", 30f).apply {
+        backTv = Ui.label(this, "‹", 30f).apply {
             setPadding(d(10), 0, d(12), d(4)); contentDescription = "Back"; setOnClickListener { finish() }
-        })
-        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        }
+        top.addView(backTv)
+        texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         statusTv = Ui.label(this, "", 15f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
         infoTv = Ui.label(this, "", 11f, 0xFFB0B4BA.toInt()).apply { maxLines = 3; includeFontPadding = false }
         texts.addView(statusTv); texts.addView(infoTv)
         top.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
-        liveTv = Ui.label(this, "", 12f, Ui.GREY).apply { setPadding(d(8), 0, 0, 0) }
+        liveTv = Ui.label(this, "", 12f, Ui.GREY).apply { setPadding(d(8), 0, 0, 0); gravity = Gravity.END }
         top.addView(liveTv)
         root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
 
@@ -326,8 +341,9 @@ class RemoteLiveActivity : Activity() {
         strip.addView(chipRow)
         startBtn = Ui.label(this, "", 16f).apply { gravity = Gravity.CENTER; setOnClickListener { onStartStop() } }
         stripRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        arrangeBottom()
         root.addView(bottomBox, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+        buildLandscape(root)
+        arrangeBottom()
 
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) { if (fromUser && !updating) onSeek(p) }
@@ -343,31 +359,123 @@ class RemoteLiveActivity : Activity() {
         return prefs.chipLayout.split(",").map { it.trim() }.filter { it in all }.distinct().ifEmpty { all }
     }
 
-    /** Portrait: buttons, then a full-width Start/Stop. Landscape phones: one compact row. */
+    private fun pill() = FrameLayout(this).apply {
+        background = pillBg(false)
+        setPadding(d(12), 0, d(12), 0)
+    }
+
+    private fun pillBg(round: Boolean) = android.graphics.drawable.GradientDrawable().apply {
+        if (round) shape = android.graphics.drawable.GradientDrawable.OVAL else cornerRadius = d(16).toFloat()
+        setColor(0x73151719)
+    }
+
+    /** The landscape pieces (hidden in portrait): the pills' row and the right-hand column with the round Start / Stop. */
+    private fun buildLandscape(root: FrameLayout) {
+        landTop = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE }
+        root.addView(landTop, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(d(8), d(8), 0, 0) })
+        landCol = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(0x99141619.toInt())
+            visibility = View.GONE
+        }
+        chipColumn = android.widget.ScrollView(this).apply { isVerticalScrollBarEnabled = false }
+        landCol.addView(chipColumn, LinearLayout.LayoutParams(d(80), -1))
+        val lane = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+        shutter = FrameLayout(this).apply {
+            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setStroke(d(3), Color.WHITE) }
+            isClickable = true
+            setOnClickListener { onStartStop() }
+            com.motioncam.pressFeedback(this)
+        }
+        shutterCore = View(this)
+        shutter.addView(shutterCore, FrameLayout.LayoutParams(d(46), d(46), Gravity.CENTER))
+        lane.addView(shutter, LinearLayout.LayoutParams(d(60), d(60)))
+        shutterLabel = Ui.label(this, "START", 11f).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); gravity = Gravity.CENTER; setPadding(0, d(5), 0, 0) }
+        lane.addView(shutterLabel, LinearLayout.LayoutParams(-1, -2))
+        landCol.addView(lane, LinearLayout.LayoutParams(0, -1, 1f))
+        root.addView(landCol, FrameLayout.LayoutParams(d(148), -1, Gravity.END))
+    }
+
+    /**
+     * Portrait: the top bar, then the picture, the buttons and a full-width Start / Stop. Landscape phones, like camera
+     * mode: the picture beside a column on the right (the controls, scrolling, and a round Start / Stop), the status as
+     * pills at the top left, and the adjust panel floating at the bottom of the picture.
+     */
     private fun arrangeBottom() {
         val cfg = resources.configuration
         val want = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE && cfg.smallestScreenWidthDp < 600
         if (compact == want) return
         compact = want
-        (strip.parent as? ViewGroup)?.removeView(strip)
-        (startBtn.parent as? ViewGroup)?.removeView(startBtn)
-        (stripRow.parent as? ViewGroup)?.removeView(stripRow)
+        fun detach(v: View?) { (v?.parent as? ViewGroup)?.removeView(v) }
+        listOf(strip, startBtn, stripRow, chipRow, statusTv, infoTv, liveTv, backTv).forEach { detach(it) }
         if (want) {
-            stripRow.addView(strip, LinearLayout.LayoutParams(0, -2, 1f))
-            stripRow.addView(startBtn, LinearLayout.LayoutParams(-2, -2).apply { setMargins(d(6), 0, d(12), 0) })
-            bottomBox.addView(stripRow)
-            startBtn.setPadding(d(18), d(10), d(18), d(10)); startBtn.textSize = 14f
+            top.visibility = View.GONE
+            landTop.removeAllViews()
+            backTv.background = pillBg(true); backTv.gravity = Gravity.CENTER; backTv.setPadding(0, 0, 0, d(4))
+            landTop.addView(backTv, LinearLayout.LayoutParams(d(40), d(40)))
+            statusTv.textSize = 13f
+            statusPill.removeAllViews(); statusPill.addView(statusTv, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL))
+            landTop.addView(statusPill, LinearLayout.LayoutParams(-2, d(32)).apply { leftMargin = d(6) })
+            infoTv.maxLines = 1; infoTv.ellipsize = android.text.TextUtils.TruncateAt.END; infoTv.textSize = 12f
+            infoTv.maxWidth = (resources.displayMetrics.widthPixels - d(148 + 420)).coerceAtLeast(d(120))
+            infoPill.removeAllViews(); infoPill.addView(infoTv, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL))
+            landTop.addView(infoPill, LinearLayout.LayoutParams(-2, d(32)).apply { leftMargin = d(6) })
+            livePill.removeAllViews(); livePill.addView(liveTv, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL))
+            liveTv.setPadding(0, 0, 0, 0)
+            landTop.addView(livePill, LinearLayout.LayoutParams(-2, d(32)).apply { leftMargin = d(6) })
+            landTop.visibility = View.VISIBLE
+            // the column: as wide as the picture leaves room for (148–240 dp)
+            val dm = resources.displayMetrics
+            val dr = image.drawable
+            val aspect = if (dr != null && dr.intrinsicHeight > 0) dr.intrinsicWidth.toFloat() / dr.intrinsicHeight else 16f / 9f
+            colPx = (dm.widthPixels - (dm.heightPixels * aspect).toInt()).coerceIn(d(148), d(240))
+            landCol.layoutParams = FrameLayout.LayoutParams(colPx, -1, Gravity.END)
+            chipColumn.layoutParams = LinearLayout.LayoutParams(colPx - d(68), -1)
+            chipRow.orientation = LinearLayout.VERTICAL
+            chipRow.setPadding(d(6), d(8), d(4), d(8))
+            for (i in 0 until chipRow.childCount) chipRow.getChildAt(i).layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, d(3), 0, d(3)) }
+            chipColumn.addView(chipRow)
+            landCol.visibility = View.VISIBLE
+            // the picture beside the column; the panel floats at its bottom
+            image.layoutParams = FrameLayout.LayoutParams(-1, -1).apply { rightMargin = colPx }
+            bottomBox.background = android.graphics.drawable.GradientDrawable().apply { setColor(0x99202328.toInt()); cornerRadius = d(16).toFloat() }
+            // no padding of its own: with nothing to show (no panel, note or unsent changes) it takes no room
+            bottomBox.setPadding(d(4), 0, d(4), 0)
+            bottomBox.layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(d(8), 0, colPx + d(8), d(8)) }
         } else {
+            landTop.visibility = View.GONE
+            landCol.visibility = View.GONE
+            top.visibility = View.VISIBLE
+            backTv.background = null; backTv.gravity = Gravity.NO_GRAVITY; backTv.setPadding(d(10), 0, d(12), d(4))
+            top.addView(backTv, 0)
+            statusTv.textSize = 15f
+            infoTv.maxLines = 3; infoTv.ellipsize = null; infoTv.textSize = 11f; infoTv.maxWidth = Int.MAX_VALUE
+            texts.addView(statusTv); texts.addView(infoTv)
+            liveTv.setPadding(d(8), 0, 0, 0)
+            top.addView(liveTv)
+            chipRow.orientation = LinearLayout.HORIZONTAL
+            chipRow.setPadding(d(8), 0, d(8), 0)
+            for (i in 0 until chipRow.childCount) chipRow.getChildAt(i).layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(d(3), 0, d(3), 0) }
+            strip.addView(chipRow)
+            image.layoutParams = FrameLayout.LayoutParams(-1, -1)
+            bottomBox.background = null
+            bottomBox.setBackgroundColor(0xCC000000.toInt() or (Ui.PANEL and 0x00FFFFFF))
+            bottomBox.setPadding(0, d(6), 0, d(8))
+            bottomBox.layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM)
             bottomBox.addView(strip)
             bottomBox.addView(startBtn, LinearLayout.LayoutParams(-1, -2).apply { setMargins(d(12), d(8), d(12), 0) })
             startBtn.setPadding(0, d(12), 0, d(12)); startBtn.textSize = 16f
         }
+        updateLiveLabel()
         renderStart()
     }
 
+    /** Top bar and controls (portrait), or the pills and the column (landscape). */
+    private fun chrome(): List<View> = if (compact == true) listOf(landTop, landCol, bottomBox) else listOf(top, bottomBox)
+
     private fun toggleControls() {
         controlsShown = !controlsShown
-        for (v in listOf(top, bottomBox)) {
+        for (v in chrome()) {
             v.animate().cancel()
             if (controlsShown) { v.visibility = View.VISIBLE; v.alpha = 0f; v.animate().alpha(1f).setDuration(150).start() }
             else v.animate().alpha(0f).setDuration(150).withEndAction { v.visibility = View.GONE }.start()
@@ -379,7 +487,8 @@ class RemoteLiveActivity : Activity() {
             !r.online() -> "offline"
             !feed.watching -> "paused"
             lastFrameAt <= 0 -> "connecting…"
-            else -> "● LIVE · frame sent " + Fmt.t(prefs, lastFrameAt)
+            // portrait has room under LIVE (the top bar has two or three lines): the time goes there
+            else -> "● LIVE" + (if (compact == true) " · " else "\n") + "frame sent " + Fmt.t(prefs, lastFrameAt)
         }
         liveTv.text = text
         liveTv.setTextColor(if (feed.watching && lastFrameAt > 0 && System.currentTimeMillis() - lastFrameAt < 8000) Ui.RED else Ui.GREY)
@@ -448,6 +557,18 @@ class RemoteLiveActivity : Activity() {
         }
         startBtn.text = if (compact == true) text.substringBefore(" ") else text
         Ui.pill(startBtn, color)
+        // the landscape round button: a green circle to start, a red square to stop, grey when offline
+        if (::shutterCore.isInitialized) {
+            val running = s?.optBoolean("monitoring") == true
+            val off = s == null || !r.online()
+            shutterCore.layoutParams = FrameLayout.LayoutParams(d(if (running) 22 else 46), d(if (running) 22 else 46), Gravity.CENTER)
+            shutterCore.background = android.graphics.drawable.GradientDrawable().apply {
+                if (running) cornerRadius = d(6).toFloat() else shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(color)
+            }
+            shutterLabel.text = if (off) "OFFLINE" else if (running) "STOP" else "START"
+            shutter.contentDescription = if (running) "Stop monitoring" else "Start monitoring"
+        }
     }
 
     private fun onStartStop() {

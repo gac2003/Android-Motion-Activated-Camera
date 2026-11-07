@@ -190,7 +190,7 @@ It's plain HTTP with a simple password: never forward its port to the internet.
 Turn the phone sideways and every screen uses the width (portrait stays the same):
 
 * The tabs become a **rail** on the left (**‹** hides their names; remembered).
-* **Camera mode** works like a phone's camera app: status pills top left; on the right the controls, ⚙, a round
+* **Camera mode** (and a camera's live view on your other phones) works like a phone's camera app: status pills top left; on the right the controls, ⚙, a round
   **Start / Stop** and **FILL / FIT** (the picture uses the whole screen behind the controls, or stays clear of them).
 * **Clips**: *On this phone / Remote folders* move into a narrow column beside the tabs; as many clips per row as fit.
 * **Home** in two columns, **Settings** in two panes, the phone's status bar hidden.

@@ -13,6 +13,7 @@ anyone else. GitHub builds the APK for you: you don't need Android Studio or a c
 | [4. Google Drive](#4-google-drive) | backup to Google Drive | 10 min |
 | [5. Dropbox](#5-dropbox) | backup to Dropbox | 5 min |
 | [6. Build and install](#6-build-and-install) | your APK | 5 min |
+| [7. Push alerts](#7-push-alerts-optional) (optional) | instant alerts with MotionCam closed | 5 min |
 
 **Why build your own?** The APK you can download from this project has no online accounts built in. These features
 only work in a copy you build with your own free accounts:
@@ -170,6 +171,26 @@ then the public APK has no accounts and yours goes to a private repository.
 
 **Check it worked**: Settings → *Your phones* doesn't say "not set up in this build"; Clips → *Remote folders* →
 **＋ Add** offers Google Drive and Dropbox.
+
+## 7. Push alerts (optional)
+
+Without this, phones get alerts while MotionCam is open, with *Stay connected* (an always-on connection), or from a
+check every 15 minutes. With it, a camera pushes each alert to your other phones right away, with MotionCam closed.
+
+1. [Google Cloud console](https://console.cloud.google.com/) (the Firebase project) → **IAM & Admin → Service
+   accounts → Create service account**: a name like `motioncam-push` → role **Firebase Cloud Messaging API Admin**
+   (only that one) → Done.
+2. Open the new account → **Keys → Add key → Create new key → JSON**. A `.json` file downloads.
+3. [Firebase console](https://console.firebase.google.com/) → Project settings → **Cloud Messaging**: *Firebase Cloud
+   Messaging API (V1)* should say **Enabled**.
+4. In your fork's **Secrets**: `MC_FCM_SERVICE_ACCOUNT` = the whole contents of that file. Then build again.
+
+> This key ends up inside your APK, so anyone who has that APK could pull it out. With only the role above it can do
+> nothing but send notifications. Use it with a [personal build](#a-personal-build-in-a-private-repository) (the
+> public APK never gets it), and if an APK leaks, delete the key in step 2 and make a new one.
+
+Pushes are limited per camera (motion at most every 3 minutes, a clip right after its motion alert, other alerts
+every 10 minutes, 30 an hour at most); each phone's own alert settings still decide what it shows.
 
 ## A personal build in a private repository
 

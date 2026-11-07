@@ -87,6 +87,10 @@
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize" />
 
+        <!-- push alerts from your cameras (own build with a push key, see SETUP.md) -->
+        <service android:name=".live.PushService" android:exported="false">
+            <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
+        </service>
         <service
             android:name=".CameraService"
             android:exported="false"

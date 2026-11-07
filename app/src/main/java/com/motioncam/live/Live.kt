@@ -92,6 +92,7 @@ object Live {
         me.onDisconnect().updateChildren(mapOf("online" to false, "seen" to ServerValue.TIMESTAMP))
         me.updateChildren(mapOf("online" to true, "seen" to ServerValue.TIMESTAMP, "d" to LiveNet.seal(app, deviceInfo(app).toString())))
         presenceFor = root
+        Push.publish(app)
         startListening(app)
         if (viewing()) watchKnown(app) else unwatchCameras(app)
     }
@@ -114,6 +115,7 @@ object Live {
     private fun deviceInfo(ctx: Context): JSONObject = JSONObject()
         .put("name", Device.name(ctx)).put("camera", cameraActive).put("viewer", viewerActive)
         .put("canCamera", Prefs(ctx).liveCamera)
+        .put("pushes", Push.canSend)
         .put("app", try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName } catch (_: Exception) { "" })
         .put("sync", syncHealth(ctx))
 
@@ -137,7 +139,9 @@ object Live {
     // ------------------------------------------------------------------ what other phones see (state for screens + alerts)
 
     class Phone(val id: String, var name: String = "", var online: Boolean = false, var seen: Long = 0,
-                var camera: Boolean = false, var viewer: Boolean = false, var sync: JSONObject = JSONObject(), var kicked: Boolean = false)
+                var camera: Boolean = false, var viewer: Boolean = false, var sync: JSONObject = JSONObject(), var kicked: Boolean = false,
+                /** Its push address (to alert it while MotionCam is closed), and whether it sends pushes as a camera. */
+                var push: String? = null, var pushes: Boolean = false)
     class Cam(val id: String) {
         var status: JSONObject? = null
         var statusAt = 0L
@@ -180,11 +184,13 @@ object Live {
                     p.online = c.child("online").value == true
                     p.seen = (c.child("seen").value as? Number)?.toLong() ?: 0
                     p.kicked = c.child("kicked").value == true
+                    p.push = LiveNet.open(ctx, c.child("push").value as? String)
                     LiveNet.open(ctx, c.child("d").value as? String)?.let { d ->
                         try {
                             val o = JSONObject(d)
                             p.name = o.optString("name"); p.camera = o.optBoolean("camera"); p.viewer = o.optBoolean("viewer")
                             p.sync = o.optJSONObject("sync") ?: JSONObject()
+                            p.pushes = o.optBoolean("pushes")
                         } catch (_: Exception) {}
                     }
                     if (id == Device.id(ctx)) { if (p.kicked) main.post { removedByOtherPhone(ctx) }; continue }
@@ -192,6 +198,10 @@ object Live {
                     if (wasOnline != p.online) Alerts.onPresence(ctx, p)
                 }
                 phones.keys.retainAll(seenIds)
+                // every camera alerts this phone by push: no need for the 15-minute check
+                val me = Device.id(ctx)
+                val camsNow = phones.values.filter { it.id != me && it.camera }
+                Push.setCovered(ctx, camsNow.isNotEmpty() && camsNow.all { it.pushes })
                 devicesLoaded = true
                 changed()
             }
@@ -244,7 +254,7 @@ object Live {
                 val d = d0
                 try {
                     val o = JSONObject(d)
-                    Alerts.onEvent(ctx, id, t, o)
+                    Alerts.onEvent(ctx, id, t, o, s.key)
                     main.post { for (l in eventListeners) try { l(id, o.optString("type"), o) } catch (_: Exception) {} }
                 } catch (_: Exception) {}
                 markSeen(ctx, id, t)
@@ -265,6 +275,9 @@ object Live {
     private fun seen(ctx: Context) = ctx.getSharedPreferences("alert_seen", Context.MODE_PRIVATE)
 
     /** Remembers the newest camera event this phone has handled (server time). */
+    /** An event of [cam] was alerted another way (a push): catching up later doesn't alert it again. */
+    fun markHandled(ctx: Context, cam: String, t: Long) = markSeen(ctx, cam, t)
+
     private fun markSeen(ctx: Context, cam: String, t: Long) {
         val sp = seen(ctx)
         if (t > sp.getLong(cam, 0)) sp.edit().putLong(cam, t).apply()

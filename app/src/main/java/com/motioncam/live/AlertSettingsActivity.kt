@@ -109,6 +109,9 @@ class AlertSettingsActivity : Activity() {
         if (p.alertMotion) f.slider("At most one alert per camera every", 1, 60, p.alertMotionGapMin, { "$it min" }) { p.alertMotionGapMin = it }
         if (p.alertMotion) f.note("More motion within that time updates the same alert silently (\"3 times since 1:32\").")
         f.toggle("New clip saved (silent)", p.alertClip) { p.alertClip = it }
+        f.toggle("Show a picture of the clip", p.alertPicture) { p.alertPicture = it }
+        f.note("Once the clip is saved, its alert shows a small picture from it. Turn off to keep alerts to text, e.g. if " +
+            "others can see your lock screen. (Activity still shows the pictures.)")
 
         f.title("Camera health")
         f.toggle("Battery low", p.alertBattery) { p.alertBattery = it; render() }

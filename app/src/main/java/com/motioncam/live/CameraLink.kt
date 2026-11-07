@@ -263,6 +263,8 @@ object CameraLink {
         val d = (extra ?: JSONObject()).put("type", type).put("text", text)
         val ref = path(ctx, "events")?.push() ?: return
         ref.setValue(mapOf("t" to ServerValue.TIMESTAMP, "d" to LiveNet.seal(ctx, d.toString())))
+        // your other phones, also with MotionCam closed (push, rate-limited)
+        try { Push.onEvent(ctx, type, d, ref.key, now + Live.serverOffset) } catch (_: Exception) {}
         if (type == "clip") d.optString("name").takeIf { it.isNotEmpty() }?.let { n -> ref.key?.let { k -> synchronized(clipEvents) { clipEvents[n] = k to d } } }
         kindLetter(type)?.let { dayCount(ctx, it) }
     }

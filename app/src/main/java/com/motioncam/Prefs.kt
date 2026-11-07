@@ -160,6 +160,8 @@ class Prefs(ctx: Context) {
     /** Minutes between motion alerts per camera; motion in between updates the same alert silently. */
     var alertMotionGapMin: Int get() = i("alertMotionGapMin", 5); set(v) = put("alertMotionGapMin", v)
     var alertClip: Boolean get() = b("alertClip", false); set(v) = put("alertClip", v)
+    /** A picture of the clip in its alerts (off: text only, e.g. on a lock screen others can see). */
+    var alertPicture: Boolean get() = b("alertPicture", true); set(v) = put("alertPicture", v)
     var alertBattery: Boolean get() = b("alertBattery", true); set(v) = put("alertBattery", v)
     var alertBatteryPct: Int get() = i("alertBatteryPct", 20); set(v) = put("alertBatteryPct", v)
     var alertCharger: Boolean get() = b("alertCharger", true); set(v) = put("alertCharger", v)
@@ -203,7 +205,7 @@ class Prefs(ctx: Context) {
         val LIVE_KEYS = listOf("liveStay", "livePinForView", "liveCamera", "liveStandby", "cardSnapshot")
         val REMOTE_FOLDER_KEYS = listOf("remoteKeepCopy")
         val PLAYER_KEYS = listOf("skipMs", "stripZoom")
-        val ALERT_KEYS = listOf("alertsOn", "alertsInApp", "alertsPoll", "alertRemote", "alertMotion", "alertMotionGapMin", "alertClip", "alertBattery", "alertBatteryPct",
+        val ALERT_KEYS = listOf("alertsOn", "alertsInApp", "alertsPoll", "alertRemote", "alertMotion", "alertMotionGapMin", "alertClip", "alertPicture", "alertBattery", "alertBatteryPct",
             "alertCharger", "alertHot", "alertOffline", "alertOfflineMin", "alertBackOnline", "alertMonitoring", "alertSync",
             "quietOn", "quietFrom", "quietTo", "quietMode")
         val CAMERA_KEYS = listOf("camera", "exposureAuto", "evIndex", "iso", "shutterNs", "focusAuto", "focusPos",

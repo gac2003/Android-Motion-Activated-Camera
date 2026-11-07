@@ -25,7 +25,8 @@ class AlertCheckJob : JobService() {
         fun schedule(ctx: Context) {
             val p = Prefs(ctx)
             val js = ctx.getSystemService(JobScheduler::class.java) ?: return
-            val want = LiveConfig.configured && p.liveOn && p.alertsOn && p.alertsPoll && !p.liveStay
+            // not needed when every camera alerts this phone by push
+            val want = LiveConfig.configured && p.liveOn && p.alertsOn && p.alertsPoll && !p.liveStay && !Push.covers(ctx)
             if (!want) { js.cancel(ID); return }
             if (js.getPendingJob(ID) != null) return
             try {

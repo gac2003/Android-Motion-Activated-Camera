@@ -32,6 +32,11 @@ android {
         buildConfigField("String", "FIREBASE_DB_URL", str(cred("MC_FIREBASE_DB_URL")))
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", str(cred("MC_GOOGLE_WEB_CLIENT_ID")))
         buildConfigField("String", "DROPBOX_APP_KEY", str(cred("MC_DROPBOX_APP_KEY")))
+        // push alerts: a Firebase service account key that may only send messages (SETUP.md); the JSON file's
+        // contents, or that base64-encoded. Kept base64 in the build. Empty = cameras don't send pushes.
+        val fcm = cred("MC_FCM_SERVICE_ACCOUNT")
+        buildConfigField("String", "FCM_SERVICE_ACCOUNT", str(
+            if (fcm.startsWith("{")) java.util.Base64.getEncoder().encodeToString(fcm.toByteArray()) else fcm.replace(Regex("\\s"), "")))
         // MC_GOOGLE_DRIVE=off: no Google Drive (the public build of a repository that also makes a personal build)
         buildConfigField("boolean", "GOOGLE_DRIVE", (cred("MC_GOOGLE_DRIVE") != "off").toString())
         minSdk = 30
@@ -89,6 +94,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
     implementation("com.google.firebase:firebase-database")
     implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-messaging")
     // Google sign-in for it (basic profile only: no Google verification needed)
     implementation("androidx.credentials:credentials:1.3.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.3.0")

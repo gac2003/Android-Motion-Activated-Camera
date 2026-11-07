@@ -147,7 +147,14 @@ object Alerts {
     }
     private val motion = HashMap<String, MotionState>()
 
-    fun onEvent(ctx: Context, cam: String, t: Long, d: JSONObject) {
+    /** Events already alerted (a push and the live connection can both bring one). */
+    private val handled = LinkedHashSet<String>()
+
+    fun onEvent(ctx: Context, cam: String, t: Long, d: JSONObject, key: String? = null) {
+        if (key != null) synchronized(handled) {
+            if (!handled.add("$cam/$key")) return
+            while (handled.size > 300) handled.remove(handled.first())
+        }
         val p = Prefs(ctx)
         val type = d.optString("type")
         val name = camName(cam)
@@ -174,7 +181,7 @@ object Alerts {
                 val app = ctx.applicationContext
                 // the clip's picture (fetched in the background, a few KB), then the alerts
                 Thread {
-                    val pic = ref?.let { try { ClipThumbStore.get(app, cam, it.optString("name")) } catch (_: Exception) { null } }
+                    val pic = if (!p.alertPicture) null else ref?.let { try { ClipThumbStore.get(app, cam, it.optString("name")) } catch (_: Exception) { null } }
                     main.post {
                         // the motion alert now leads to the clip it recorded (updated silently), with its picture
                         if (toMotion && st != null) {

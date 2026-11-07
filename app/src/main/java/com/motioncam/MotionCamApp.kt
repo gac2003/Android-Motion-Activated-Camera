@@ -24,6 +24,7 @@ class MotionCamApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        try { com.motioncam.live.Push.init(this) } catch (_: Exception) {}   // push alerts (own build with a push key)
         try { com.motioncam.live.AlertCheckJob.schedule(this) } catch (_: Exception) {}   // 15-minute alert check
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(a: Activity) {

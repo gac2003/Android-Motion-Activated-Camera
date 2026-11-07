@@ -45,6 +45,8 @@ class AlertCheckJob : JobService() {
     override fun onStartJob(p: JobParameters): Boolean {
         // already connected (MotionCam open, or Stay connected): alerts arrive live anyway
         if (Live.viewerActive || LiveService.running || !Live.enabled(this)) return false
+        // a phone busy being a camera doesn't check on the other cameras (it would only wake its radio)
+        if (com.motioncam.CameraService.monitoring) return false
         params = p
         started = System.currentTimeMillis()
         Live.bgCheck = true

@@ -18,6 +18,8 @@ class MotionCamApp : Application() {
     private val ui = Handler(Looper.getMainLooper())
     private val idle = Runnable {
         if (started == 0 && !LiveService.running) { Live.viewerActive = false; Live.refresh(this) }
+        // in the background while monitoring: camera duty (Stay connected stops following the other cameras)
+        else if (started == 0 && CameraService.monitoring) { Live.cameraDuty = true; Live.refresh(this) }
     }
 
     override fun onCreate() {
@@ -42,6 +44,8 @@ class MotionCamApp : Application() {
             }
             override fun onActivityCreated(a: Activity, b: Bundle?) {}
             override fun onActivityResumed(a: Activity) {
+                // any screen but camera mode: this phone is being used as a viewer again
+                if (a !is MainActivity && Live.cameraDuty) { Live.cameraDuty = false; try { Live.refresh(a) } catch (_: Exception) {} }
                 com.motioncam.live.AlertInbox.front = java.lang.ref.WeakReference(a)
                 Ui.statusBarForOrientation(a)
             }

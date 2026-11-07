@@ -53,6 +53,16 @@ object Live {
 
     @Volatile var cameraActive = false
     @Volatile var viewerActive = false
+    /**
+     * Camera duty: this phone is monitoring as a camera and nobody is using it as a viewer (camera mode untouched for
+     * a minute, or MotionCam in the background). It then stops following the other cameras (their status every minute,
+     * their events, alerts about them), which keeps its radio and CPU quiet; touching the screen or opening another
+     * tab follows them again within a second.
+     */
+    @Volatile var cameraDuty = false
+
+    /** Following the other cameras (for screens and alerts). */
+    private fun viewing() = viewerActive && !(cameraDuty && cameraActive)
     /** The 15-minute background check is connected (missed alerts then ring like live ones). */
     @Volatile var bgCheck = false
     /** The phone list has arrived since connecting, and no missed-alert read is still running (background check). */
@@ -83,6 +93,22 @@ object Live {
         me.updateChildren(mapOf("online" to true, "seen" to ServerValue.TIMESTAMP, "d" to LiveNet.seal(app, deviceInfo(app).toString())))
         presenceFor = root
         startListening(app)
+        if (viewing()) watchKnown(app) else unwatchCameras(app)
+    }
+
+    /** Follows the camera phones already known (after camera duty ended). */
+    private fun watchKnown(ctx: Context) {
+        if (camListeners.isEmpty()) attachedAt = System.currentTimeMillis()
+        val me = Device.id(ctx)
+        for (p in phones.values.toList()) if (p.id != me && (p.camera || cams.containsKey(p.id))) watchCamera(ctx, p.id)
+    }
+
+    private fun unwatchCameras(ctx: Context) {
+        for ((id, l) in camListeners) {
+            ref(ctx, "cams/$id/status")?.removeEventListener(l.first)
+            ref(ctx, "cams/$id/events")?.removeEventListener(l.second)
+        }
+        camListeners.clear()
     }
 
     private fun deviceInfo(ctx: Context): JSONObject = JSONObject()
@@ -195,7 +221,7 @@ object Live {
 
     /** Follows a camera phone's status and new events (for screens and alerts). */
     private fun watchCamera(ctx: Context, id: String) {
-        if (camListeners.containsKey(id) || !viewerActive) return
+        if (camListeners.containsKey(id) || !viewing()) return
         val cam = cams.getOrPut(id) { Cam(id) }
         val st = object : ValueEventListener {
             override fun onDataChange(s: DataSnapshot) {

@@ -72,7 +72,9 @@ class MainActivity : Activity() {
         override fun run() {
             refreshChips()
             tickPanel()
-            ui.postDelayed(this, 250)
+            // live values 4× a second while you adjust things; once a second when nobody has touched the screen for a minute
+            val busy = selected != null || android.os.SystemClock.uptimeMillis() - lastTouch < 60_000
+            ui.postDelayed(this, if (busy) 250 else 1000)
         }
     }
 
@@ -104,14 +106,35 @@ class MainActivity : Activity() {
         ui.postDelayed(allowSleep, 3 * 60_000L)
     }
 
+    private var lastTouch = 0L
+
+    /** Camera mode left alone for a minute while monitoring: camera duty (see [com.motioncam.live.Live.cameraDuty]). */
+    private val dutyStart = Runnable {
+        if (CameraService.monitoring && !com.motioncam.live.Live.cameraDuty) {
+            com.motioncam.live.Live.cameraDuty = true
+            try { com.motioncam.live.Live.refresh(this) } catch (_: Exception) {}
+        }
+    }
+
+    private fun touched() {
+        lastTouch = android.os.SystemClock.uptimeMillis()
+        ui.removeCallbacks(dutyStart)
+        ui.postDelayed(dutyStart, 60_000L)
+        if (com.motioncam.live.Live.cameraDuty) {
+            com.motioncam.live.Live.cameraDuty = false
+            try { com.motioncam.live.Live.refresh(this) } catch (_: Exception) {}
+        }
+    }
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (ev.actionMasked == MotionEvent.ACTION_DOWN) keepAwake()
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) { keepAwake(); touched() }
         return super.dispatchTouchEvent(ev)
     }
 
     override fun onResume() {
         super.onResume()
         keepAwake()
+        touched()
         resumed = true
         StatusBus.add(statusListener)
         com.motioncam.cloud.CloudSync.kick(this)
@@ -199,6 +222,8 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        // another tab (or the screen going off) decides from here: see MotionCamApp
+        ui.removeCallbacks(dutyStart)
         com.motioncam.live.AlertInbox.listeners -= inboxChanged
         com.motioncam.live.Live.listeners -= inboxChanged
         com.motioncam.live.RemoteSettings.listeners -= remoteChanged

@@ -199,6 +199,9 @@ Turn the phone sideways and every screen uses the width (portrait stays the same
 
 * **Peepholes and windows**: *Light filter → Strong* ignores reflections and glare; mask everything outside the
   peephole with ZONES; raise *Motion must last at least* (e.g. 500 ms) to ignore flashes.
+* **A phone that's a camera** saves power by itself: a minute after you stop touching camera mode while it's
+  monitoring (or with MotionCam in the background), it stops following your other cameras and their alerts. Touch
+  the screen or open another tab and it catches up within a second.
 * **Fixed stand**: set *Video rotation* explicitly (Settings → Camera & recording) so clips are always upright.
 * **Heat**: the camera pauses itself at the temperature limit (Settings → Storage & protection) and Home says so.
   Slow charging and a CPU cap keep a 24/7 phone cool.

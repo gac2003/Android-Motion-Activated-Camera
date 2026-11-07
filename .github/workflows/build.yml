@@ -23,7 +23,6 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         variant: [public, personal]
     env:

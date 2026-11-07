@@ -28,7 +28,8 @@ import java.net.URL
  *
  * Rate limits (per camera), so a busy scene can't flood your phones or the free quota: motion and clips at most every
  * 30 s each (a clip right after its motion alert always goes, to attach it), other kinds at most every 10 min each,
- * and never more than 120 pushes an hour. Motion and clip pushes expire after an hour.
+ * and never more than 120 pushes an hour. Newer pushes of a kind replace older undelivered ones (collapse key), and
+ * motion pushes expire after an hour.
  */
 object Push {
     private val main = Handler(Looper.getMainLooper())
@@ -147,10 +148,9 @@ object Push {
         val msg = JSONObject().put("message", JSONObject()
             .put("token", token)
             .put("data", data)
-            // not collapsible: FCM throttles collapsible pushes to a burst of ~20 and then one every 3 minutes per phone;
-            // plain ones allow ~240 a minute. Motion and clip pushes expire after an hour so an offline phone isn't flooded.
             .put("android", JSONObject().put("priority", "HIGH")
-                .put("ttl", if (type == "motion" || type == "clip") "3600s" else "86400s")))
+                .put("ttl", if (type == "motion" || type == "clip") "3600s" else "86400s")
+                .put("collapse_key", "$cam-$type")))
         val c = URL("https://fcm.googleapis.com/v1/projects/${LiveConfig.PROJECT_ID}/messages:send").openConnection() as HttpURLConnection
         c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 10_000; c.readTimeout = 15_000
         c.setRequestProperty("Authorization", "Bearer $access")

@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.util.Base64
 
 plugins {
     id("com.android.application")
@@ -17,6 +18,9 @@ val credentials = Properties().apply {
 val versionProps = Properties().apply { rootProject.file("version.properties").inputStream().use { load(it) } }
 fun cred(name: String): String = (System.getenv(name)?.takeIf { it.isNotBlank() } ?: credentials.getProperty(name).orEmpty()).trim()
 fun str(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+/** MC_FCM_SERVICE_ACCOUNT as base64 (it may be given as the JSON itself or already encoded). */
+fun fcmKey(raw: String): String =
+    if (raw.startsWith("{")) Base64.getEncoder().encodeToString(raw.toByteArray()) else raw.replace(Regex("\\s"), "")
 
 android {
     namespace = "com.motioncam"
@@ -34,9 +38,7 @@ android {
         buildConfigField("String", "DROPBOX_APP_KEY", str(cred("MC_DROPBOX_APP_KEY")))
         // push alerts: a Firebase service account key that may only send messages (SETUP.md); the JSON file's
         // contents, or that base64-encoded. Kept base64 in the build. Empty = cameras don't send pushes.
-        val fcm = cred("MC_FCM_SERVICE_ACCOUNT")
-        buildConfigField("String", "FCM_SERVICE_ACCOUNT", str(
-            if (fcm.startsWith("{")) java.util.Base64.getEncoder().encodeToString(fcm.toByteArray()) else fcm.replace(Regex("\\s"), "")))
+        buildConfigField("String", "FCM_SERVICE_ACCOUNT", str(fcmKey(cred("MC_FCM_SERVICE_ACCOUNT"))))
         // MC_GOOGLE_DRIVE=off: no Google Drive (the public build of a repository that also makes a personal build)
         buildConfigField("boolean", "GOOGLE_DRIVE", (cred("MC_GOOGLE_DRIVE") != "off").toString())
         minSdk = 30

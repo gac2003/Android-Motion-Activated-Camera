@@ -1104,6 +1104,7 @@ class MainActivity : Activity() {
     }
 
     private var cropFocused = false
+    private var savedBoxBg: android.graphics.drawable.Drawable? = null
 
     /**
      * Cropping: everything but the picture, the frame and the crop's own bar goes away (top bar, controls, Start /
@@ -1117,6 +1118,9 @@ class MainActivity : Activity() {
         if (::landTop.isInitialized) landTop.visibility = if (!on && land) View.VISIBLE else View.GONE
         if (::landCol.isInitialized) landCol.visibility = if (!on && land) View.VISIBLE else View.GONE
         if (::strip.isInitialized) strip.visibility = if (on) View.GONE else View.VISIBLE
+        // the crop's buttons float over the picture: no panel behind them (the text gets a shadow to stay readable)
+        if (on) { savedBoxBg = bottomBox.background; bottomBox.background = null; valueTv.setShadowLayer(6f, 0f, 1f, 0xFF000000.toInt()) }
+        else { bottomBox.background = savedBoxBg; valueTv.setShadowLayer(0f, 0f, 0f, 0) }
         if (::startBtn.isInitialized) startBtn.visibility = if (on) View.GONE else View.VISIBLE
         if (land) (bottomBox.layoutParams as? FrameLayout.LayoutParams)?.let {
             it.rightMargin = Ui.dp(this, if (on) 8 else LAND_COL + 8); bottomBox.layoutParams = it

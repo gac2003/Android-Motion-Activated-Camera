@@ -538,7 +538,7 @@ open class ActivityLogActivity : Activity() {
             // new since activity was last looked at: a yellow dot before the time
             // new = after its camera's activity was last looked at (the same rule as the number on the Activity tab,
             // which doesn't count a clip saved without a motion before it)
-            val isNew = e.type != "clip" && e.t > (seenFor?.invoke(e.cam) ?: newSince)
+            val isNew = e.type != "clip" && e.t > (seenFor?.invoke(e.cam) ?: newSince) && !AlertInbox.isRead(ctx, e.t)
             r.addView(Ui.label(ctx, (if (isNew) "● " else "") + Fmt.t(prefs, e.t, seconds = seconds), 13f,
                 if (bad) 0xFFFF8A85.toInt() else if (isNew) Ui.ACCENT else Ui.GREY).apply {
                 minWidth = Ui.dp(ctx, if (seconds) 100 else 76)

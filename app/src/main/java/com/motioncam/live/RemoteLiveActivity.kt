@@ -99,6 +99,7 @@ class RemoteLiveActivity : Activity() {
     }
 
     private var cropFocused = false
+    private var savedBoxBg: android.graphics.drawable.Drawable? = null
 
     /** Cropping: only the picture, the frame and the crop's bar (the rest comes back when cropping ends). */
     private fun cropFocus(on: Boolean) {
@@ -107,6 +108,9 @@ class RemoteLiveActivity : Activity() {
         val vis = if (on) View.GONE else View.VISIBLE
         val hide = if (compact == true) listOf<View>(landTop, landCol) else listOf<View>(top, strip, startBtn)
         for (v in hide) v.visibility = vis
+        // the crop's buttons float over the picture: no panel behind them (the text gets a shadow to stay readable)
+        if (on) { savedBoxBg = bottomBox.background; bottomBox.background = null; valueTv.setShadowLayer(6f, 0f, 1f, 0xFF000000.toInt()) }
+        else { bottomBox.background = savedBoxBg; valueTv.setShadowLayer(0f, 0f, 0f, 0) }
         if (on) saveBar.visibility = View.GONE else updateSaveBar()
     }
 

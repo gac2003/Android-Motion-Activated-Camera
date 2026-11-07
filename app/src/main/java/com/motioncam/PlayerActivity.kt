@@ -433,6 +433,8 @@ class PlayerActivity : Activity() {
     private fun advanceTo(index: Int) { if (index in clips.indices) startAt(index, 0) else setPlaying(false) }
 
     private fun show(s: Slot) {
+        // watched: its alert / Activity entries aren't new any more
+        clips.getOrNull(s.index)?.let { c -> com.motioncam.live.AlertInbox.clipViewed(this, c.name, c.durationMs) }
         s.tv.alpha = 1f
         (if (s === a) b else a).tv.alpha = 0f
     }

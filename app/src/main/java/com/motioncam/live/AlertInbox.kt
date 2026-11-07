@@ -53,13 +53,40 @@ object AlertInbox {
 
     fun noteEvent(ctx: Context, cam: String, t: Long) = noteEvents(ctx, cam, listOf(t))
 
+    // ---- clips watched: their events are read, wherever the clip was opened (an alert, Activity, Clips)
+
+    @Volatile private var winsCache: Pair<String, List<LongRange>>? = null
+
+    private fun wins(ctx: Context): List<LongRange> {
+        val raw = sp(ctx).getString("readWins", "") ?: ""
+        winsCache?.let { if (it.first == raw) return it.second }
+        val l = raw.split(',').mapNotNull { w -> w.split('-').takeIf { it.size == 2 }?.let { (a, b) -> a.toLongOrNull()?.let { x -> b.toLongOrNull()?.let { y -> x..y } } } }
+        winsCache = raw to l
+        return l
+    }
+
+    /** A clip was watched: the motion and clip events around it (its time, give or take 15 s) aren't new any more. */
+    fun clipViewed(ctx: Context, name: String, durMs: Long) {
+        if (!name.startsWith("MC_") || name.length < 18) return
+        val start = try { java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).parse(name.substring(3, 18))?.time } catch (_: Exception) { null } ?: return
+        val w = "${start - 15_000}-${start + durMs.coerceAtLeast(0) + 15_000}"
+        val sp = sp(ctx)
+        val old = (sp.getString("readWins", "") ?: "").split(',').filter { it.isNotEmpty() }
+        if (w in old) return
+        sp.edit().putString("readWins", (old + w).takeLast(300).joinToString(",")).apply()
+        changed()
+    }
+
+    /** Was the event at [t] (local time) about a clip already watched? */
+    fun isRead(ctx: Context, t: Long): Boolean = wins(ctx).any { t in it }
+
     /** How many camera events this phone has not seen yet (for the number on the Live connection icon). */
     fun newCount(ctx: Context): Int {
         val all = sp(ctx).all
         return all.keys.filter { it.startsWith("times:") }.sumOf { k ->
             val cam = k.removePrefix("times:")
             val seen = seenAt(ctx, cam)
-            (all[k] as? String ?: "").split(',').mapNotNull { it.toLongOrNull() }.count { it > seen }
+            (all[k] as? String ?: "").split(',').mapNotNull { it.toLongOrNull() }.count { it > seen && !isRead(ctx, it) }
         }
     }
 
@@ -77,13 +104,7 @@ object AlertInbox {
     }
 
     /** Some camera has activity this phone has not seen yet. */
-    fun hasNew(ctx: Context): Boolean {
-        val all = sp(ctx).all
-        return all.keys.filter { it.startsWith("latest:") }.any { k ->
-            val cam = k.removePrefix("latest:")
-            ((all[k] as? Long) ?: 0L) > seenAt(ctx, cam)
-        }
-    }
+    fun hasNew(ctx: Context): Boolean = newCount(ctx) > 0
 
     // ------------------------------------------------------------------ in-app banner
 

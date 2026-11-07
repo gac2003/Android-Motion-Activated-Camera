@@ -31,6 +31,8 @@ class CropView(ctx: Context) : View(ctx) {
         set(v) { field = v; isClickable = v; invalidate() }
     /** Called while dragging and once more (final = true) when the finger lifts. */
     var onChange: (rect: RectF?, final: Boolean) -> Unit = { _, _ -> }
+    /** A finger is holding the frame (true) or let go (false): the bars fade so the picture under them shows. */
+    var onHold: (Boolean) -> Unit = {}
 
     /** The area on screen, 0..1; the whole picture = no crop. */
     private val r = RectF(0f, 0f, 1f, 1f)
@@ -122,7 +124,7 @@ class CropView(ctx: Context) : View(ctx) {
                 if (g == 0 && r.contains(u, v)) g = 16
                 dragging = g
                 lastX = u; lastY = v
-                if (g != 0) parent?.requestDisallowInterceptTouchEvent(true)
+                if (g != 0) { parent?.requestDisallowInterceptTouchEvent(true); onHold(true) }
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
@@ -134,7 +136,7 @@ class CropView(ctx: Context) : View(ctx) {
                 onChange(sensorRect(), false)
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (dragging != 0) { dragging = 0; onChange(sensorRect(), true) }
+                if (dragging != 0) { dragging = 0; onHold(false); onChange(sensorRect(), true) }
                 else if (ev.actionMasked == MotionEvent.ACTION_UP) performClick()
             }
         }
@@ -144,6 +146,12 @@ class CropView(ctx: Context) : View(ctx) {
     override fun performClick(): Boolean { super.performClick(); return true }
 
     companion object {
+        /** Fades [v] almost away while the frame is held, back when let go. */
+        fun fade(v: View, holding: Boolean) {
+            v.animate().cancel()
+            v.animate().alpha(if (holding) 0.08f else 1f).setDuration(if (holding) 120 else 200).start()
+        }
+
         /** The bar shown while editing a crop: Cancel · Turn off crop · Done. */
         fun bar(ctx: Context, cancel: () -> Unit, off: () -> Unit, done: () -> Unit): android.widget.LinearLayout {
             val d = { v: Int -> Ui.dp(ctx, v) }

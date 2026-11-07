@@ -619,6 +619,7 @@ class MainActivity : Activity() {
         cropView = CropView(this).apply {
             shape = Crop.SHAPES.getOrNull(prefs.cropShape)?.second ?: 0f
             onChange = { _, _ -> tickPanel() }
+            onHold = { h -> CropView.fade(bottomBox, h) }
         }
         frame.addView(cropView, FrameLayout.LayoutParams(-1, -1))
         // the picture is centred in its stage: the whole screen, or (landscape FIT) the space left of the controls

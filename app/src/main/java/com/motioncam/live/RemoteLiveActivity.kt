@@ -246,6 +246,7 @@ class RemoteLiveActivity : Activity() {
             picture = { imageRect() }
             shape = com.motioncam.Crop.SHAPES.getOrNull(prefs.cropShape)?.second ?: 0f
             onChange = { _, _ -> tickPanel() }
+            onHold = { h -> com.motioncam.CropView.fade(bottomBox, h) }
         }
         root.addView(cropView, FrameLayout.LayoutParams(-1, -1))
         msgTv = Ui.label(this, "Starting live view…", 14f).apply {

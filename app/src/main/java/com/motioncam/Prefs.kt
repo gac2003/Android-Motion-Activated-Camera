@@ -145,6 +145,14 @@ class Prefs(ctx: Context) {
     var livePinForView: Boolean get() = b("livePinForView", true); set(v) = put("livePinForView", v)
     /** This phone may act as a camera on the network (seen and controlled while monitoring). Needs a PIN. Off = viewer only. */
     var liveCamera: Boolean get() = b("liveCamera", false); set(v) = put("liveCamera", v)
+    /** When this phone last started monitoring (standby is only for phones actually used as cameras). */
+    var lastMonitoredAt: Long
+        get() {
+            // phones updated from before this was kept: counted from now (a camera in standby stays reachable)
+            if (!sp.contains("lastMonitoredAt")) sp.edit().putLong("lastMonitoredAt", System.currentTimeMillis()).apply()
+            return sp.getLong("lastMonitoredAt", 0L)
+        }
+        set(v) = sp.edit().putLong("lastMonitoredAt", v).apply()
     /** Camera: when monitoring stops, stay in standby (camera closed) so other phones can start it again. */
     var liveStandby: Boolean get() = b("liveStandby", true); set(v) = put("liveStandby", v)
     /** Camera: also send a fresh card picture every 15 minutes while monitoring (otherwise the latest clip's motion frame). */

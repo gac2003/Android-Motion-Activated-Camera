@@ -201,6 +201,8 @@ Turn the phone sideways and every screen uses the width (portrait stays the same
 
 * **Peepholes and windows**: *Light filter → Strong* ignores reflections and glare; mask everything outside the
   peephole with ZONES; raise *Motion must last at least* (e.g. 500 ms) to ignore flashes.
+* **A phone you watch from** doesn't keep a camera running: camera mode lets go of the camera as soon as you leave it,
+  and *Standby* (reachable to be started from another phone) is only kept on a phone that monitored in the last week.
 * **A phone that's a camera** saves power by itself: a minute after you stop touching camera mode while it's
   monitoring (or with MotionCam in the background), it stops following your other cameras and their alerts. Touch
   the screen or open another tab and it catches up within a second.

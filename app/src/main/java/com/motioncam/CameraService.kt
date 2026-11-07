@@ -40,10 +40,18 @@ class CameraService : Service() {
         /** In standby: reachable by other phones, camera closed. */
         val inStandby: Boolean get() = instance.let { it != null && it.engine == null }
 
-        /** Standby is possible: camera on the live connection with a PIN, and the user hasn't turned standby off. */
+        /** A phone only counts as a camera for standby if it monitored in the last week. */
+        private const val STANDBY_DAYS = 7
+
+        /**
+         * Standby is possible: camera on the live connection with a PIN, the user hasn't turned standby off, and this
+         * phone was actually used as a camera in the last week. (A phone you mostly watch your cameras from never sits
+         * in standby, with its always-on connection, just because its camera role is on.)
+         */
         fun standbyAllowed(ctx: Context): Boolean {
             val p = Prefs(ctx)
             return p.liveStandby && p.liveCamera && com.motioncam.live.Live.enabled(ctx) && com.motioncam.live.CameraLink.hasPin(ctx) &&
+                System.currentTimeMillis() - p.lastMonitoredAt < STANDBY_DAYS * 86_400_000L &&
                 ctx.checkSelfPermission(android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         }
 
@@ -107,6 +115,8 @@ class CameraService : Service() {
     /** Starts monitoring (from the app, the notification, or another phone while in standby). */
     fun startMonitoring() {
         if (engine != null || !foreground) return
+        prefs.lastMonitoredAt = System.currentTimeMillis()
+        main.removeCallbacks(standbyCheck); standbyChecking = false
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "motioncam:monitor").also { it.acquire() }
         com.motioncam.cloud.CloudSync.kick(this)   // resume any pending cloud uploads
@@ -141,7 +151,19 @@ class CameraService : Service() {
         getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notification(text, standby = false))
     }
 
+    /** In standby: checked every hour, it ends by itself once this phone hasn't been a camera for a week. */
+    private val standbyCheck: Runnable = object : Runnable {
+        override fun run() {
+            if (instance == null || engine != null) { standbyChecking = false; return }
+            if (!standbyAllowed(this@CameraService)) { exit(this@CameraService); return }
+            main.postDelayed(this, 3_600_000L)
+        }
+    }
+
+    private var standbyChecking = false
+
     private fun showStandby() {
+        if (!standbyChecking) { standbyChecking = true; main.postDelayed(standbyCheck, 3_600_000L) }
         val text = "Standby · your other phones can start monitoring"
         if (text == lastNotifText) return
         lastNotifText = text

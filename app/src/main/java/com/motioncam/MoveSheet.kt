@@ -22,7 +22,7 @@ import java.io.InputStream
  * "Move or copy to…": puts clips of a remote folder into another remote folder, also on another service (Drive →
  * your own server, Dropbox → Drive…). Each clip is downloaded to this phone, uploaded there with its thumbnail and
  * tags, and for Move then deleted from the first folder (protected clips are copied but stay; see [RemoteRepo.deleteFromCloud]).
- * A clip already in the other folder (same name and size) isn't uploaded again.
+ * A clip already in the other folder (same name) is skipped, unless the user chooses to copy it under a new name.
  */
 object MoveSheet {
     private fun plural(n: Int) = "$n clip${if (n == 1) "" else "s"}"
@@ -109,9 +109,45 @@ object MoveSheet {
         tv.gravity = Gravity.CENTER
     }
 
-    /** Hands the clips to the transfer queue: it runs in the background, with a notification and Transfers. */
+    /**
+     * Looks in the other folder first. Clips already there (same name) aren't copied again unless the user chooses to
+     * copy them under a new name ("MC_…_2.mp4"); by default they're left out (and, for a Move, kept here).
+     */
     private fun run(a: Activity, src: RemoteSource, target: RemoteSource, clips: List<Clip>, move: Boolean, done: () -> Unit) {
-        val n = com.motioncam.remote.TransferQueue.enqueue(a, src, target, clips, move)
+        val wait = AlertDialog.Builder(a).setMessage("Checking ${target.name}…").setCancelable(false).show()
+        Thread {
+            val there = try { RemoteSources.writer(a, target).use { w -> w.list(target.folderId).map { it.name }.toHashSet() } } catch (_: Exception) { null }
+            a.runOnUiThread {
+                try { wait.dismiss() } catch (_: Exception) {}
+                if (a.isFinishing) return@runOnUiThread
+                if (there == null) {
+                    // can't look now: the queue still checks each clip before copying it, and leaves existing ones alone
+                    enqueue(a, src, target, clips, move, emptySet(), done); return@runOnUiThread
+                }
+                val dup = clips.filter { it.name in there }
+                if (dup.isEmpty()) { enqueue(a, src, target, clips, move, emptySet(), done); return@runOnUiThread }
+                val rest = clips.filter { it.name !in there }
+                val all = rest.isEmpty()
+                val msg = (if (all) "All ${plural(clips.size)} are" else "${dup.size} of ${plural(clips.size)} ${if (dup.size == 1) "is" else "are"}") +
+                    " already in ${target.name} (a clip with the same name)." +
+                    "\n\nSkip: ${if (all) "nothing is" else "only the other ${plural(rest.size)} are"} ${if (move) "moved" else "copied"}" +
+                    (if (move) "; the skipped ones stay in ${src.name}." else ".") +
+                    "\n\nCopy with a new name: they're put there again as a separate clip (e.g. …_2.mp4), keeping the one that's there."
+                AlertDialog.Builder(a).setTitle("Already in ${target.name}")
+                    .setMessage(msg)
+                    .setPositiveButton("Skip them") { _, _ ->
+                        if (all) { android.widget.Toast.makeText(a, "Nothing to ${if (move) "move" else "copy"}: they're all in ${target.name} already", android.widget.Toast.LENGTH_LONG).show(); done() }
+                        else enqueue(a, src, target, rest, move, emptySet(), done)
+                    }
+                    .setNeutralButton("Copy with a new name") { _, _ -> enqueue(a, src, target, clips, move, dup.map { it.name }.toSet(), done) }
+                    .setNegativeButton("Cancel", null).show()
+            }
+        }.start()
+    }
+
+    /** Hands the clips to the transfer queue: it runs in the background, with a notification and Transfers. */
+    private fun enqueue(a: Activity, src: RemoteSource, target: RemoteSource, clips: List<Clip>, move: Boolean, rename: Set<String>, done: () -> Unit) {
+        val n = com.motioncam.remote.TransferQueue.enqueue(a, src, target, clips, move, rename)
         val what = (if (move) "Moving " else "Copying ") + plural(n) + " to ${target.name}"
         android.widget.Toast.makeText(a, if (n == 0) "Those clips are already on their way to ${target.name}"
             else "$what in the background · Remote folders → Transfers", android.widget.Toast.LENGTH_LONG).show()

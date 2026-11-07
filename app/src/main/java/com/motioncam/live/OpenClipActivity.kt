@@ -92,8 +92,28 @@ class OpenClipActivity : Activity() {
                 camButtons()
             }
             list.size == 1 -> waitFor(list[0])
-            else -> OptionSheet.show(this, "Which folder?", list.map { s -> Opt(s.name, s.describe) { waitFor(s) } })
+            else -> pick(list)
         }
+    }
+
+    /**
+     * The clip is in several of this phone's folders: the same name is the same clip, so it simply plays from the
+     * best one. Only asks when the copies differ (another size or length), naming what differs.
+     */
+    private fun pick(list: List<RemoteSource>) {
+        val copies = list.mapNotNull { s -> RemoteRepo.cached(this, s).firstOrNull { it.name == name }?.let { s to it } }
+        if (copies.isEmpty()) { waitFor(list[0]); return }
+        val sizes = copies.map { it.second.size }.filter { it > 0 }.toSet()
+        val lengths = copies.map { (it.second.durationMs + 500) / 1000 }.filter { it > 0 }.toSet()
+        if (sizes.size <= 1 && lengths.size <= 1) { waitFor(copies[0].first); return }
+        fun mb(b: Long) = String.format(java.util.Locale.getDefault(), "%.1f MB", b / 1048576.0)
+        fun len(ms: Long) = (ms / 1000).let { "%d:%02d".format(it / 60, it % 60) }
+        val opts = copies.map { (s, c) ->
+            val detail = listOfNotNull(if (c.size > 0) mb(c.size) else null, if (c.durationMs > 0) len(c.durationMs) else null).joinToString(" · ")
+            Opt(s.name, listOf(detail, s.describe).filter { it.isNotEmpty() }.joinToString(" · ")) { waitFor(s) }
+        }
+        val what = listOfNotNull(if (sizes.size > 1) "sizes" else null, if (lengths.size > 1) "lengths" else null).joinToString(" and ")
+        OptionSheet.show(this, "These copies differ ($what): which one?", opts)
     }
 
     private fun camButtons() {

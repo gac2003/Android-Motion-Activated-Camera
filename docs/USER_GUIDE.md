@@ -127,7 +127,8 @@ and are cached.
 each batch (pause, resume, stop, retry failed). Within the same Google Drive or Dropbox account the service copies the
 clips itself, so nothing downloads; to another account or service each clip streams straight across, 3 at a time. A
 Move deletes the originals once its clips are across (protected ones are kept), and unfinished transfers continue
-the next time MotionCam opens.
+the next time MotionCam opens. Clips that are already in the other folder are skipped (and a Move keeps them where
+they were); MotionCam asks first, and you can copy them anyway under a new name (`…_2.mp4`).
 
 * **Google Drive**: sign in with the same Google account the recording phone backs up to.
 * **Dropbox**: the same account, or a **viewer link** made on the recording phone (folder ⋮ → *Backup settings* →
@@ -154,6 +155,8 @@ be a camera needs a **PIN**.
   * **Shut off camera** (red): the camera closes. With **Standby** on (default) it stays reachable and can be started
     again from any phone; otherwise only on the phone itself.
 * **A motion alert opens its clip** from the camera's backup folder (add that folder once under Remote folders).
+  If the clip is in several of your folders, it plays from one of them; MotionCam only asks which when the copies differ
+  (another size or length).
 * **One controller at a time**: your first change takes the remote; other phones see who is changing it.
 * **PIN**: protects controls, settings and (by default) the live view. Requests are signed with it, never sent; 5
   wrong PINs lock remote control for a while.

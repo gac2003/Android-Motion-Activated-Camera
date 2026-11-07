@@ -88,7 +88,7 @@ class TransfersActivity : Activity() {
         }
         val parts = listOfNotNull("$finished of ${b.total}", state,
             if (v.failed > 0) "${v.failed} failed" else null,
-            if (v.skipped > 0) "${v.skipped} skipped (a different clip with that name is there)" else null,
+            if (v.skipped > 0) "${v.skipped} already there (left alone)" else null,
             if (b.kept > 0) "${b.kept} protected, also kept in ${v.srcName}" else null,
             b.note)
         addView(Ui.label(this@TransfersActivity, parts.joinToString("  ·  "), 12f, if (v.failed > 0) 0xFFFF8A85.toInt() else Ui.GREY).apply {

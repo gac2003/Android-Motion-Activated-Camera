@@ -33,7 +33,9 @@ import java.io.InputStream
 object TransferQueue {
     const val WORKERS = 3
 
-    class Item(val clip: String, var state: String = WAIT, var error: String? = null, @Volatile var progress: Int = 0)
+    /** [rename]: the user chose to copy it even though that name is taken there (it gets a free name, e.g. "…_2"). */
+    class Item(val clip: String, var state: String = WAIT, var error: String? = null, @Volatile var progress: Int = 0,
+               val rename: Boolean = false, var dstName: String? = null)
     class Batch(val id: String, val src: String, val dst: String, val move: Boolean, val created: Long,
                 var paused: Boolean = false, var finishedAt: Long = 0, var kept: Int = 0, var note: String? = null,
                 val items: MutableList<Item> = ArrayList()) {
@@ -46,7 +48,7 @@ object TransferQueue {
     const val RUN = "run"
     const val DONE = "done"       // copied (or already there)
     const val FAIL = "fail"
-    const val SKIP = "skip"       // a different clip with the same name is there
+    const val SKIP = "skip"       // a clip with that name is already there (kept where it is, not deleted by a Move)
 
     private val batches = ArrayList<Batch>()
     private var loaded = false
@@ -69,7 +71,8 @@ object TransferQueue {
                 val its = o.getJSONArray("items")
                 for (j in 0 until its.length()) its.getJSONObject(j).let {
                     // one that was running when the app stopped starts again
-                    b.items += Item(it.getString("c"), it.optString("s", WAIT).let { s -> if (s == RUN) WAIT else s }, it.optString("e").ifEmpty { null })
+                    b.items += Item(it.getString("c"), it.optString("s", WAIT).let { s -> if (s == RUN) WAIT else s }, it.optString("e").ifEmpty { null },
+                        rename = it.optBoolean("r"), dstName = it.optString("n").ifEmpty { null })
                 }
                 batches += b
             }
@@ -80,14 +83,14 @@ object TransferQueue {
         val a = JSONArray()
         for (b in batches) a.put(JSONObject().put("id", b.id).put("src", b.src).put("dst", b.dst).put("move", b.move).put("created", b.created)
             .put("paused", b.paused).put("finishedAt", b.finishedAt).put("kept", b.kept).put("note", b.note ?: "")
-            .put("items", JSONArray().apply { for (it in b.items) put(JSONObject().put("c", it.clip).put("s", it.state).put("e", it.error ?: "")) }))
+            .put("items", JSONArray().apply { for (it in b.items) put(JSONObject().put("c", it.clip).put("s", it.state).put("e", it.error ?: "").put("r", it.rename).put("n", it.dstName ?: "")) }))
         try { val t = File(file(ctx).path + ".tmp"); t.writeText(a.toString()); t.renameTo(file(ctx)) } catch (_: Exception) {}
     }
 
     // ------------------------------------------------------------------ the queue
 
     /** Adds clips to move or copy; returns how many were added (clips already waiting for the same move are skipped). */
-    fun enqueue(ctx: Context, src: RemoteSource, dst: RemoteSource, clips: List<Clip>, move: Boolean): Int {
+    fun enqueue(ctx: Context, src: RemoteSource, dst: RemoteSource, clips: List<Clip>, move: Boolean, rename: Set<String> = emptySet()): Int {
         val app = ctx.applicationContext
         val n = synchronized(lock) {
             load(app)
@@ -96,7 +99,7 @@ object TransferQueue {
             val add = clips.map { it.name }.filter { it !in queued }.distinct()
             if (add.isEmpty()) return@synchronized 0
             val b = Batch("t" + System.currentTimeMillis().toString(36), src.id, dst.id, move, System.currentTimeMillis())
-            add.mapTo(b.items) { Item(it) }
+            add.mapTo(b.items) { Item(it, rename = it in rename) }
             batches += b
             save(app)
             add.size
@@ -228,12 +231,15 @@ object TransferQueue {
         val names = targetNames.getOrPut(dst.id) {
             java.util.concurrent.ConcurrentHashMap(w.list(dst.folderId).associate { it.name to it.size })
         }
-        val there = names[e.name]
-        if (there != null && there == e.file.size) { synchronized(lock) { j.item.state = DONE; j.item.error = "already there" }; return }
-        if (there != null) { synchronized(lock) { j.item.state = SKIP; j.item.error = "A different clip with the same name is there" }; return }
+        // a clip with that name already there: left alone unless the user chose to copy it under a new name
+        var name = e.name
+        if (names.containsKey(name)) {
+            if (!j.item.rename) { synchronized(lock) { j.item.state = SKIP; j.item.error = "Already there" }; return }
+            name = freeName(e.name, names)
+        }
         val same = sameAccount(src, dst)
         var copied: RemoteFile? = null
-        if (same) copied = try { w.serverCopy(e.file, dst.folderId, e.name) } catch (_: Exception) { null }
+        if (same) copied = try { w.serverCopy(e.file, dst.folderId, name) } catch (_: Exception) { null }
         if (copied == null) {
             // stream it across: read from the folder while uploading (resumes from where it stopped)
             val r = conn.readers.getOrPut(src.id) { RemoteSources.reader(ctx, src) }
@@ -242,18 +248,19 @@ object TransferQueue {
                 override val size = e.file.size
                 override fun open(offset: Long): InputStream = r.open(e.file, offset)
             }
-            copied = w.upload(dst.folderId, e.name, source, null, {}) { sent ->
+            copied = w.upload(dst.folderId, name, source, null, {}) { sent ->
                 if (j.b.paused) throw java.io.IOException("Paused")
                 j.item.progress = (sent * 100 / size).toInt().coerceIn(0, 100)
             }
         }
-        names[e.name] = copied.size.takeIf { it > 0 } ?: e.file.size
+        names[name] = copied.size.takeIf { it > 0 } ?: e.file.size
+        j.item.dstName = name
         // its thumbnail, so the other folder shows the right picture without downloading the clip
         try {
             val tf = thumbFolders.getOrPut(dst.id) {
                 (w.listFolders(dst.folderId).firstOrNull { it.name == THUMB_FOLDER } ?: w.createFolder(dst.folderId, THUMB_FOLDER)).id
             }
-            val tn = thumbName(e.name, e.durationMs)
+            val tn = thumbName(name, e.durationMs)
             val thumb = e.thumb
             if (same && thumb != null) w.serverCopy(thumb, tf, tn)
             else RemoteRepo.thumbJpeg(ctx, clip.id)?.let { jpg ->
@@ -266,6 +273,14 @@ object TransferQueue {
         synchronized(lock) { j.item.state = DONE; j.item.progress = 100 }
     }
 
+    /** "MC_…_2.mp4", "MC_…_3.mp4"… (the date and time at the start of the name stay the clip's). */
+    private fun freeName(name: String, taken: Map<String, Long>): String {
+        val base = name.removeSuffix(".mp4")
+        var i = 2
+        while (taken.containsKey("${base}_$i.mp4")) i++
+        return "${base}_$i.mp4"
+    }
+
     /** A batch with nothing left to do: its tags, the Move's deletions, refreshed listings and a notification. */
     private fun finishBatches(ctx: Context) {
         val ready = synchronized(lock) {
@@ -274,11 +289,15 @@ object TransferQueue {
         for (b in ready) {
             val src = RemoteSources.get(ctx, b.src)
             val dst = RemoteSources.get(ctx, b.dst)
-            val ok = synchronized(lock) { b.items.filter { it.state == DONE }.map { it.clip }.toHashSet() }
+            val okItems = synchronized(lock) { b.items.filter { it.state == DONE }.toList() }
+            val ok = okItems.map { it.clip }.toHashSet()
+            val newName = okItems.associate { it.clip to (it.dstName ?: it.clip) }
             if (src != null && dst != null && ok.isNotEmpty()) {
                 val clips = RemoteRepo.cached(ctx, src).filter { it.name in ok }
                 // tags go along (written together, one listing of the folder's tags)
-                try { RemoteSources.writer(ctx, dst).use { w -> TagStore.writeTo(ctx, w, dst.folderId, TagStore.byName(ctx, src.id, clips)) } } catch (_: Exception) {}
+                try { RemoteSources.writer(ctx, dst).use { w ->
+                    TagStore.writeTo(ctx, w, dst.folderId, TagStore.byName(ctx, src.id, clips).mapKeys { (k, _) -> newName[k] ?: k })
+                } } catch (_: Exception) {}
                 if (b.move) try {
                     val d = RemoteRepo.deleteFromCloud(ctx, src, clips) { _, _ -> }
                     b.kept = d.protectedKept
@@ -329,7 +348,7 @@ object TransferQueue {
             val text = listOfNotNull(
                 if (b.move && b.kept > 0) "${b.kept} protected clip${if (b.kept == 1) "" else "s"} also kept in $srcName" else null,
                 if (failed > 0) "$failed failed" else null,
-                if (skipped > 0) "$skipped skipped (same name)" else null,
+                if (skipped > 0) "$skipped already there (left alone)" else null,
                 b.note,
             ).joinToString(" · ").ifEmpty { "From $srcName" }
             ctx.getSystemService(NotificationManager::class.java).notify(4200 + (b.id.hashCode() and 0xfff), Notification.Builder(ctx, CHANNEL)

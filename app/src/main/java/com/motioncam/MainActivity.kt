@@ -35,6 +35,7 @@ class MainActivity : Activity() {
     private lateinit var texture: TextureView
     private lateinit var overlay: ImageView
     private lateinit var cropView: CropView
+    private lateinit var cropBar: View
     private val cropCommit = Runnable { commitCrop() }
     private lateinit var offLabel: TextView
     private lateinit var statusTv: TextView
@@ -507,6 +508,14 @@ class MainActivity : Activity() {
             val ed = selected == "CROP"
             if (cropView.editing && !ed) { ui.removeCallbacks(cropCommit); commitCrop() }
             cropView.editing = ed
+            // while cropping, only the crop's own buttons work
+            if (::cropBar.isInitialized) cropBar.visibility = if (ed) View.VISIBLE else View.GONE
+            for ((n, c) in chips) { c.view.alpha = if (ed && n != "CROP") 0.35f else 1f }
+            val others = ArrayList<View>()
+            if (::startBtn.isInitialized) others += startBtn
+            if (::shutter.isInitialized) others += shutter
+            if (::gearV.isInitialized) others += gearV
+            for (v in others) { v.isEnabled = !ed; v.alpha = if (ed) 0.35f else 1f }
         }
     }
 
@@ -613,11 +622,7 @@ class MainActivity : Activity() {
         frame.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         cropView = CropView(this).apply {
             shape = Crop.SHAPES.getOrNull(prefs.cropShape)?.second ?: 0f
-            onChange = { _, final ->
-                ui.removeCallbacks(cropCommit)
-                if (final) ui.postDelayed(cropCommit, 600)
-                tickPanel()
-            }
+            onChange = { _, _ -> tickPanel() }
         }
         frame.addView(cropView, FrameLayout.LayoutParams(-1, -1))
         // the picture is centred in its stage: the whole screen, or (landscape FIT) the space left of the controls
@@ -709,6 +714,12 @@ class MainActivity : Activity() {
         panel.addView(seek, LinearLayout.LayoutParams(0, -2, 1f))
         panel.addView(autoBtn)
         bottom.addView(panel)
+        // editing a crop: Cancel · Turn off crop · Done (the other controls wait until then)
+        cropBar = CropView.bar(this,
+            cancel = { cropView.set(Crop.parse(prefs.crop)); onChip("CROP") },
+            off = { cropView.reset(); onChip("CROP") },
+            done = { onChip("CROP") })
+        bottom.addView(cropBar)
 
         strip = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         chipRow = LinearLayout(this).apply {
@@ -1116,6 +1127,7 @@ class MainActivity : Activity() {
     }
 
     private fun onChip(name: String) {
+        if (selected == "CROP" && name != "CROP") { Toast.makeText(this, "Finish the crop first: Done or Cancel", Toast.LENGTH_SHORT).show(); return }
         when (name) {
             "LENS" -> { showLensDialog(); return }
             "FORMAT" -> { showFormatDialog(); return }
@@ -1181,9 +1193,9 @@ class MainActivity : Activity() {
                 seek.max = MotionDetector.MAX_SENSITIVITY - 1
                 seek.progress = prefs.sensitivity - 1
             }
-            "CROP" -> setAutoBtn("OFF", false, prefs.crop.isNotEmpty() || cropView.sensorRect() != null)
         }
         seek.visibility = if (selected == "CROP") View.INVISIBLE else View.VISIBLE
+        if (selected == "CROP") autoBtn.visibility = View.GONE
         updating = false
         tickPanel()
     }

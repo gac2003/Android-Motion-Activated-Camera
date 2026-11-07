@@ -143,6 +143,30 @@ class CropView(ctx: Context) : View(ctx) {
 
     override fun performClick(): Boolean { super.performClick(); return true }
 
+    companion object {
+        /** The bar shown while editing a crop: Cancel · Turn off crop · Done. */
+        fun bar(ctx: Context, cancel: () -> Unit, off: () -> Unit, done: () -> Unit): android.widget.LinearLayout {
+            val d = { v: Int -> Ui.dp(ctx, v) }
+            fun btn(text: String, fill: Int, fg: Int, act: () -> Unit) = Ui.label(ctx, text, 14f, fg).apply {
+                gravity = android.view.Gravity.CENTER
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setPadding(d(10), d(10), d(10), d(10))
+                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = d(20).toFloat(); setColor(fill) }
+                isClickable = true
+                setOnClickListener { act() }
+            }
+            return android.widget.LinearLayout(ctx).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                setPadding(d(12), 0, d(12), d(6))
+                visibility = GONE
+                fun lp(l: Int) = android.widget.LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = l }
+                addView(btn("Cancel", 0xFF3C4048.toInt(), Color.WHITE, cancel), lp(0))
+                addView(btn("Turn off crop", 0xFF3C4048.toInt(), 0xFFFF8A80.toInt(), off), lp(d(8)))
+                addView(btn("Done", Ui.ACCENT, Color.BLACK, done), lp(d(8)))
+            }
+        }
+    }
+
     private fun drag(du: Float, dv: Float) {
         val g = dragging
         if (g == 16) {

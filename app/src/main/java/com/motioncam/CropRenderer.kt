@@ -41,9 +41,14 @@ class CropRenderer(inW: Int, inH: Int, private val output: Surface, private val 
     @Volatile private var released = false
 
     init {
-        // (x, y) corners: bottom-left, bottom-right, top-left, top-right; texture t runs upwards (sensor y downwards)
+        // (x, y) corners: bottom-left, bottom-right, top-left, top-right. The camera's buffer is read as it is in
+        // memory (texture t = 0 is its first row, the sensor's top) and the encoder's top row is GL's y = +1, so the
+        // clip comes out exactly as the camera would have sent it (sensor orientation; the clip's rotation flag turns
+        // it upright). SurfaceTexture's own transform is NOT used: for a camera it also turns the picture for the
+        // screen, which the rotation flag would then turn a second time (and squeeze into the wrong shape).
         quad = buf(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
-        uv = buf(floatArrayOf(crop.left, 1f - crop.bottom, crop.right, 1f - crop.bottom, crop.left, 1f - crop.top, crop.right, 1f - crop.top))
+        uv = buf(floatArrayOf(crop.left, crop.bottom, crop.right, crop.bottom, crop.left, crop.top, crop.right, crop.top))
+        android.opengl.Matrix.setIdentityM(m, 0)
         var err: Throwable? = null
         val done = CountDownLatch(1)
         h.post {
@@ -92,7 +97,6 @@ class CropRenderer(inW: Int, inH: Int, private val output: Surface, private val 
         if (released) return
         try {
             st.updateTexImage()
-            st.getTransformMatrix(m)
             GLES20.glViewport(0, 0, outW, outH)
             GLES20.glUseProgram(program)
             val pos = GLES20.glGetAttribLocation(program, "aPos"); val tc = GLES20.glGetAttribLocation(program, "aTex")

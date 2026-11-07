@@ -47,6 +47,16 @@ class RemoteLiveActivity : Activity() {
 
     private lateinit var image: ImageView
     private lateinit var cropView: com.motioncam.CropView
+    private lateinit var cropBar: View
+
+    /** Leaves crop editing; [keep]: lines up the frame as it is now. */
+    private fun endCrop(keep: Boolean) {
+        if (keep) stage(JSONObject().put("crop", com.motioncam.Crop.format(cropView.sensorRect())), refresh = false)
+        selected = null
+        panel.visibility = View.GONE
+        refreshChips()
+        updateSaveBar()
+    }
 
     /** Where the live picture is drawn (it's fitted inside the screen). */
     private fun imageRect(): android.graphics.RectF? {
@@ -81,7 +91,11 @@ class RemoteLiveActivity : Activity() {
         if (!::cropView.isInitialized) return
         cropView.rotation = status()?.optInt("rotation") ?: 0
         if (selected != "CROP" || !draft.has("crop")) cropView.set(com.motioncam.Crop.parse(st().optString("crop")))
-        cropView.editing = selected == "CROP"
+        val ed = selected == "CROP"
+        cropView.editing = ed
+        if (::cropBar.isInitialized) cropBar.visibility = if (ed) View.VISIBLE else View.GONE
+        for ((n, c) in chips) c.view.alpha = if (ed && n != "CROP") 0.35f else 1f
+        if (::startBtn.isInitialized) { startBtn.isEnabled = !ed; startBtn.alpha = if (ed) 0.35f else 1f }
     }
     private lateinit var msgTv: TextView
     /** Under the picture (top of the controls), in colour: why no new picture arrives; the last one stays as it is. */
@@ -213,10 +227,7 @@ class RemoteLiveActivity : Activity() {
         cropView = com.motioncam.CropView(this).apply {
             picture = { imageRect() }
             shape = com.motioncam.Crop.SHAPES.getOrNull(prefs.cropShape)?.second ?: 0f
-            onChange = { rect, final ->
-                if (final) { stage(JSONObject().put("crop", com.motioncam.Crop.format(rect)), refresh = false); refreshChips() }
-                tickPanel()
-            }
+            onChange = { _, _ -> tickPanel() }
         }
         root.addView(cropView, FrameLayout.LayoutParams(-1, -1))
         msgTv = Ui.label(this, "Starting live view…", 14f).apply {
@@ -279,6 +290,12 @@ class RemoteLiveActivity : Activity() {
         bottomBox.addView(liveNote)
         bottomBox.addView(saveBar)
         bottomBox.addView(panel)
+        // editing a crop: Cancel · Turn off crop · Done (Done lines it up; Save sends it, like the other controls)
+        cropBar = com.motioncam.CropView.bar(this,
+            cancel = { cropView.set(com.motioncam.Crop.parse(st().optString("crop"))); endCrop(false) },
+            off = { cropView.reset(); endCrop(true) },
+            done = { endCrop(true) })
+        bottomBox.addView(cropBar)
         strip = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         chipRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(d(8), 0, d(8), 0) }
         for (name in chipNames()) {
@@ -470,6 +487,10 @@ class RemoteLiveActivity : Activity() {
         if (status()?.has("settings") != true) { Toast.makeText(this, "Loading the camera's settings…", Toast.LENGTH_SHORT).show(); return }
         // another phone has the remote: offer to take it over (it is told) instead of changing anything
         if (r.lockedOut()) { r.touch(); return }
+        if (selected == "CROP") {
+            if (name == "CROP") endCrop(true) else Toast.makeText(this, "Finish the crop first: Done or Cancel", Toast.LENGTH_SHORT).show()
+            return
+        }
         when (name) {
             "LENS" -> { showLensDialog(); return }
             "FORMAT" -> { showFormatDialog(); return }
@@ -541,7 +562,7 @@ class RemoteLiveActivity : Activity() {
                 seek.isEnabled = seek.isEnabled && can
                 seek.progress = ((st.optDouble("zoom", 1.0) - zMin) / max(0.01, zMax - zMin) * 1000).roundToInt().coerceIn(0, 1000)
             }
-            "CROP" -> setAutoBtn("OFF", false, st.optString("crop").isNotEmpty() || cropView.sensorRect() != null)
+            "CROP" -> setAutoBtn("", false, false)
         }
         seek.visibility = if (selected == "CROP") View.INVISIBLE else View.VISIBLE
         updating = false

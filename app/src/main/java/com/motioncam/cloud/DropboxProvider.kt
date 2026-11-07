@@ -237,6 +237,13 @@ class DropboxProvider(private val appKey: String, private val refreshToken: Stri
         catch (e: CloudException) { if (e.kind != CloudException.Kind.NOT_FOUND && !(e.message ?: "").contains("shared_link_not_found")) throw e }
     }
 
+    override fun serverCopy(file: RemoteFile, toFolder: String, name: String): RemoteFile? {
+        val o = rpc("files/copy_v2", JSONObject().put("from_path", file.id).put("to_path", toFolder.trimEnd('/') + "/" + name)
+            .put("autorename", false), "Copy")
+        val m = o.optJSONObject("metadata") ?: return null
+        return RemoteFile(m.getString("path_display"), m.getString("name"), m.optLong("size"), parseTime(m.optString("client_modified")))
+    }
+
     override fun delete(folder: String, file: RemoteFile) {
         try { rpc("files/delete_v2", JSONObject().put("path", file.id), "Delete") }
         catch (e: CloudException) { if (e.kind != CloudException.Kind.NOT_FOUND) throw e }

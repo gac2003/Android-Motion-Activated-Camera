@@ -45,6 +45,10 @@ object FolderSettings {
             val c = CloudSync.counts(a, null)
             (if (c.queued == 0) "Nothing waiting" else "${c.queued} waiting") + (if (c.failed > 0) " · ${c.failed} failed" else "")
         }, com.motioncam.IconDrawable.Kind.CLOUD_UP, live) { a.startActivity(android.content.Intent(a, com.motioncam.cloud.UploadQueueActivity::class.java)) })
+        box.addView(navRow(a, "Transfers", {
+            val n = TransferQueue.pending(a)
+            if (n == 0) "Moving and copying between folders: nothing in progress" else "$n clip${if (n == 1) "" else "s"} being moved or copied"
+        }, com.motioncam.IconDrawable.Kind.MOVE, live) { a.startActivity(android.content.Intent(a, TransfersActivity::class.java)) })
         box.addView(navRow(a, "Clear downloaded clips", { "${StreamCache.cacheBytes(a) / 1_000_000} MB used by clips played from remote folders" },
             com.motioncam.IconDrawable.Kind.TRASH, live) {
             android.app.AlertDialog.Builder(a).setTitle("Clear downloaded clips?")

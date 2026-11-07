@@ -32,6 +32,7 @@ class MotionCamApp : Application() {
                     Live.viewerActive = true
                     try { Live.refresh(this@MotionCamApp) } catch (_: Exception) {}
                     if (Prefs(a).liveOn && Prefs(a).liveStay) LiveService.start(a)
+                    com.motioncam.remote.TransferQueue.start(a)   // moves / copies left from before continue
                 }
             }
             override fun onActivityStopped(a: Activity) {

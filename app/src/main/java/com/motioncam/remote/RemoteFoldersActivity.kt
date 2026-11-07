@@ -299,6 +299,19 @@ open class RemoteFoldersActivity : Activity() {
             "Upload queue (" + (if (c.queued == 0) "nothing waiting" else "${c.queued} waiting") + (if (c.failed > 0) ", ${c.failed} failed" else "") +
                 "), downloaded clips, upload rules"
         }, IconDrawable.Kind.SETTINGS, liveLines) { startActivity(Intent(ctx, FolderSettingsActivity::class.java)) }.also { backupTitle = it })
+        // moves and copies in progress (or finished, until cleared)
+        if (TransferQueue.views(ctx).isNotEmpty()) box.addView(FolderSettings.navRow(this, "Transfers", { transfersLine() },
+            IconDrawable.Kind.MOVE, liveLines) { startActivity(Intent(ctx, TransfersActivity::class.java)) },
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(ctx, 8) })
+    }
+
+    private fun transfersLine(): String {
+        val vs = TransferQueue.views(this)
+        val active = vs.filter { it.b.active }
+        if (active.isEmpty()) return "Done · ${vs.size} finished"
+        val total = active.sumOf { it.b.total }
+        val done = active.sumOf { it.done + it.failed + it.skipped }
+        return "$done of $total clips" + (if (active.any { it.b.paused }) " · paused" else "") + (if (active.sumOf { it.failed } > 0) " · some failed" else "")
     }
 
     private fun open(s: RemoteSource) {

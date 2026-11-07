@@ -98,6 +98,11 @@ interface CloudProvider : java.io.Closeable {
     /** Reads [file] from byte [offset] to the end (used by remote folders, which only ever read). */
     fun open(file: RemoteFile, offset: Long): InputStream =
         throw CloudException("Reading is not supported here", CloudException.Kind.OTHER)
+    /**
+     * Copies [file] into [toFolder] as [name] on the service itself (nothing passes through the phone), or returns null
+     * when the service can't. Only between folders of the same account.
+     */
+    fun serverCopy(file: RemoteFile, toFolder: String, name: String): RemoteFile? = null
     /** The service's own preview image of a video, if it has one (JPEG bytes). */
     fun serviceThumbnail(file: RemoteFile): ByteArray? = null
     override fun close() {}

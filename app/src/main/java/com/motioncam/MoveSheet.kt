@@ -109,102 +109,12 @@ object MoveSheet {
         tv.gravity = Gravity.CENTER
     }
 
-    private class Result(var copied: Int = 0, var already: Int = 0, var clash: Int = 0, var failed: Int = 0, var lastError: String? = null,
-                         var deleted: Int = 0, var kept: Int = 0, val ok: ArrayList<Clip> = ArrayList())
-
-    private fun fileSource(f: File) = object : UploadSource {
-        override val size = f.length()
-        override fun open(offset: Long): InputStream = FileInputStream(f).also { it.channel.position(offset) }
-    }
-
+    /** Hands the clips to the transfer queue: it runs in the background, with a notification and Transfers. */
     private fun run(a: Activity, src: RemoteSource, target: RemoteSource, clips: List<Clip>, move: Boolean, done: () -> Unit) {
-        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
-        val tv = Ui.label(a, "Starting…", 14f).apply { val p = Ui.dp(a, 20); setPadding(p, p, p, 0) }
-        val dlg = AlertDialog.Builder(a).setTitle((if (move) "Moving " else "Copying ") + plural(clips.size) + " to ${target.name}")
-            .setView(tv).setCancelable(false)
-            .setNegativeButton("Stop") { _, _ -> cancelled.set(true) }.show()
-        fun status(s: String) = a.runOnUiThread { tv.text = s }
-        val app = a.applicationContext
-        Thread {
-            val r = Result()
-            try {
-                RemoteSources.writer(app, target).use { w ->
-                    val existing = w.list(target.folderId).associateBy { it.name }
-                    var thumbs: String? = null
-                    var thumbNames: Set<String>? = null
-                    val list = clips.sortedBy { it.startMs }
-                    list.forEachIndexed { i, c ->
-                        if (cancelled.get()) return@forEachIndexed
-                        val head = "Clip ${i + 1} of ${list.size}"
-                        val e = RemoteRepo.entry(c.id) ?: run { r.failed++; r.lastError = "not in the folder's list any more"; return@forEachIndexed }
-                        val there = existing[e.name]
-                        try {
-                            when {
-                                there != null && there.size == e.file.size -> r.already++
-                                there != null -> { r.clash++; return@forEachIndexed }
-                                else -> {
-                                    val f = StreamCache.downloadBlocking(app, e, { cancelled.get() }) { pct -> status("$head  ·  downloading $pct%") }
-                                    if (cancelled.get()) return@forEachIndexed
-                                    val total = f.length().coerceAtLeast(1)
-                                    w.upload(target.folderId, e.name, fileSource(f), null, {}) { sent ->
-                                        if (cancelled.get()) throw java.io.IOException("stopped")
-                                        status("$head  ·  uploading ${(sent * 100 / total).toInt()}%")
-                                    }
-                                    r.copied++
-                                }
-                            }
-                            r.ok += c
-                            // its thumbnail, so the other folder shows the right picture without downloading the clip
-                            RemoteRepo.thumbJpeg(app, c.id)?.let { jpg ->
-                                try {
-                                    if (thumbs == null) {
-                                        val tf = w.listFolders(target.folderId).firstOrNull { it.name == THUMB_FOLDER } ?: w.createFolder(target.folderId, THUMB_FOLDER)
-                                        thumbs = tf.id
-                                        thumbNames = w.list(tf.id).map { it.name }.toHashSet()
-                                    }
-                                    val tn = thumbName(e.name, e.durationMs)
-                                    if (thumbNames?.contains(tn) != true) w.upload(thumbs!!, tn, fileSource(jpg), null, {}, {})
-                                } catch (_: Exception) {}
-                            }
-                        } catch (ex: Exception) {
-                            if (cancelled.get()) { try { w.discardPartial(target.folderId, e.name) } catch (_: Exception) {} }
-                            else { r.failed++; r.lastError = ex.message ?: ex.javaClass.simpleName }
-                        }
-                    }
-                    status("Copying tags…")
-                    try { TagStore.writeTo(app, w, target.folderId, TagStore.byName(app, src.id, r.ok)) } catch (_: Exception) {}
-                }
-            } catch (ex: Exception) {
-                r.failed += clips.size - r.ok.size - r.clash - r.failed
-                r.lastError = ex.message ?: ex.javaClass.simpleName
-            }
-            // the other folder: show the new clips, and tell its other viewers
-            try { RemoteRepo.refresh(app, target) } catch (_: Exception) {}
-            com.motioncam.live.Live.nudge(app, target.kind, target.folderId, "clips")
-            TagStore.syncAsync(app, target)
-            if (move && r.ok.isNotEmpty() && !cancelled.get()) {
-                status("Deleting from ${src.name}…")
-                try {
-                    val d = RemoteRepo.deleteFromCloud(app, src, r.ok) { _, _ -> }
-                    r.deleted = d.deleted; r.kept = d.protectedKept
-                    if (d.failed > 0) { r.lastError = "couldn't delete ${d.failed} from ${src.name}: ${d.lastError}" }
-                } catch (ex: Exception) { r.lastError = "couldn't delete from ${src.name}: ${ex.message}" }
-            }
-            a.runOnUiThread {
-                try { dlg.dismiss() } catch (_: Exception) {}
-                val parts = ArrayList<String>()
-                val got = r.copied + r.already
-                parts += (if (move) "Moved " + plural(r.deleted) else "Copied " + plural(got)) + " to ${target.name}."
-                if (r.already > 0) parts += "${plural(r.already)} were already there (not uploaded again)."
-                if (move && r.kept > 0) parts += "${plural(r.kept)} protected: copied, and also kept in ${src.name}."
-                if (r.clash > 0) parts += "${plural(r.clash)} skipped: a different clip with the same name is already there."
-                if (r.failed > 0) parts += "${r.failed} failed" + (r.lastError?.let { ": $it" } ?: ".")
-                else r.lastError?.let { parts += it.replaceFirstChar { ch -> ch.uppercase() } + "." }
-                if (cancelled.get()) parts += "Stopped" + if (move) "; nothing was deleted from ${src.name}." else "."
-                if (!a.isFinishing) AlertDialog.Builder(a).setTitle(if (move) "Move" else "Copy").setMessage(parts.joinToString("\n\n"))
-                    .setPositiveButton("OK", null).show()
-                done()
-            }
-        }.start()
+        val n = com.motioncam.remote.TransferQueue.enqueue(a, src, target, clips, move)
+        val what = (if (move) "Moving " else "Copying ") + plural(n) + " to ${target.name}"
+        android.widget.Toast.makeText(a, if (n == 0) "Those clips are already on their way to ${target.name}"
+            else "$what in the background · Remote folders → Transfers", android.widget.Toast.LENGTH_LONG).show()
+        done()
     }
 }

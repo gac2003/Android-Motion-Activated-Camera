@@ -221,6 +221,10 @@ class DriveProvider(private val accessToken: () -> String, private val invalidat
     private fun fileOf(o: JSONObject) = RemoteFile(o.getString("id"), o.optString("name"),
         o.optString("size", "0").toLongOrNull() ?: 0L, parseTime(o.optString("createdTime")).takeIf { it > 0 } ?: System.currentTimeMillis())
 
+    override fun serverCopy(file: RemoteFile, toFolder: String, name: String): RemoteFile? =
+        fileOf(call("POST", "$api/files/${file.id}/copy?fields=id,name,size,createdTime",
+            JSONObject().put("name", name).put("parents", JSONArray().put(toFolder)), "Copy"))
+
     override fun delete(folder: String, file: RemoteFile) {
         val tok = accessToken()
         val r = Http.request("DELETE", "$api/files/${file.id}", mapOf("Authorization" to "Bearer $tok"))

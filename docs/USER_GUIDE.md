@@ -120,7 +120,14 @@ protection.
 
 **Watching a remote folder**: the same gallery and player, with **shared collections** and tags (the same on every
 phone, synced within seconds), **Save to phone**, **Move or copy to…** another remote folder (also on another
-service), and **Delete from cloud** (protected clips are always kept). Clips stream when played and are cached.
+service or another account), and **Delete from cloud** (protected clips are always kept). Clips stream when played
+and are cached.
+
+**Moving and copying** runs in the background with a progress notification; **Remote folders → Transfers** shows
+each batch (pause, resume, stop, retry failed). Within the same Google Drive or Dropbox account the service copies the
+clips itself, so nothing downloads; to another account or service each clip streams straight across, 3 at a time. A
+Move deletes the originals once its clips are across (protected ones are kept), and unfinished transfers continue
+the next time MotionCam opens.
 
 * **Google Drive**: sign in with the same Google account the recording phone backs up to.
 * **Dropbox**: the same account, or a **viewer link** made on the recording phone (folder ⋮ → *Backup settings* →

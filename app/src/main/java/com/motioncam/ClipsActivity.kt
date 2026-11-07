@@ -294,7 +294,7 @@ open class ClipsActivity : Activity() {
         summary = Ui.label(this, "", 12f, Ui.GREY)
         if (land) fillLandHeader(normalBar as LinearLayout)
         else {
-            if (asTab) root.addView(summary.apply { setPadding(Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 2), Ui.dp(this@ClipsActivity, 16), Ui.dp(this@ClipsActivity, 2)) })
+            // the count line is the list's first row (it scrolls away): see buildRows
             root.addView(actionRow)
         }
         root.addView(buildFilterBar())
@@ -602,7 +602,7 @@ open class ClipsActivity : Activity() {
         val out = ArrayList<Row>()
         // in the Clips tab the count is above the tiles; only the badges' legend (collections) is a first row, scrolling away
         // landscape: the count line is the list's first row (it scrolls away instead of crowding the header)
-        if (!asTab || (land && landInner) || legend().isNotEmpty()) out += Row.Title
+        if (!(land && !landInner)) out += Row.Title
         shown = applyFilter(clips)
         updateFilterBar()
         for ((day, items) in shown.groupBy { dayStart(it.startMs) }.toSortedMap(compareByDescending { it })) {
@@ -944,9 +944,10 @@ open class ClipsActivity : Activity() {
                     visibility = if (asTab) View.GONE else View.VISIBLE
                 }
                 (v.getChildAt(1) as TextView).apply {
-                    text = if (land) android.text.SpannableStringBuilder(summary.text).append(legend()) else if (asTab) legend().trim() else summary.text
+                    text = if (asTab) android.text.SpannableStringBuilder(summary.text).append(legend()) else summary.text
                     setPadding(if (asTab) 0 else Ui.dp(this@ClipsActivity, 10), 0, 0, 0)
                     maxLines = if (land) 2 else Int.MAX_VALUE
+                    setTextColor(Ui.GREY)
                 }
                 // remote folder that could not be refreshed: tap for the reason
                 v.setOnClickListener(if (remote != null && lastError != null) View.OnClickListener {

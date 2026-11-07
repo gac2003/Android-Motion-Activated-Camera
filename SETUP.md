@@ -189,8 +189,8 @@ check every 15 minutes. With it, a camera pushes each alert to your other phones
 > nothing but send notifications. Use it with a [personal build](#a-personal-build-in-a-private-repository) (the
 > public APK never gets it), and if an APK leaks, delete the key in step 2 and make a new one.
 
-Pushes are limited per camera (motion at most every 3 minutes, a clip right after its motion alert, other alerts
-every 10 minutes, 30 an hour at most); each phone's own alert settings still decide what it shows.
+Pushes are limited per camera (motion and clips at most every 30 seconds each, other alerts every 10 minutes,
+120 an hour at most); each phone's own alert settings still decide what it shows.
 
 ## A personal build in a private repository
 

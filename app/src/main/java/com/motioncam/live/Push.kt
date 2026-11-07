@@ -26,9 +26,9 @@ import java.net.URL
  * - The receiving phone opens it and alerts exactly as if it had been connected (its own alert settings, quiet
  *   hours and mutes apply), once: an event that also arrives over the live connection isn't alerted twice.
  *
- * Rate limits (per camera), so a busy scene can't flood your phones or the free quota: motion at most every 3 min,
- * a clip right after its motion alert (to attach it) and otherwise every 5 min, other kinds at most every 10 min each,
- * and never more than 30 pushes an hour. Newer pushes of a kind replace older undelivered ones (collapse key), and
+ * Rate limits (per camera), so a busy scene can't flood your phones or the free quota: motion and clips at most every
+ * 30 s each (a clip right after its motion alert always goes, to attach it), other kinds at most every 10 min each,
+ * and never more than 120 pushes an hour. Newer pushes of a kind replace older undelivered ones (collapse key), and
  * motion pushes expire after an hour.
  */
 object Push {
@@ -113,11 +113,11 @@ object Push {
     @Synchronized
     private fun allow(type: String, now: Long): Boolean {
         while (sent.isNotEmpty() && now - sent.first() > 3_600_000L) sent.removeFirst()
-        if (sent.size >= 30) return false
+        if (sent.size >= 120) return false
         val last = lastOf[type] ?: 0L
         val ok = when (type) {
-            "motion" -> now - last >= 3 * 60_000L
-            "clip" -> motionSince || now - last >= 5 * 60_000L
+            "motion" -> now - last >= 30_000L
+            "clip" -> motionSince || now - last >= 30_000L
             else -> now - last >= 10 * 60_000L
         }
         if (!ok) return false

@@ -95,7 +95,25 @@ class RemoteLiveActivity : Activity() {
         cropView.editing = ed
         if (::cropBar.isInitialized) cropBar.visibility = if (ed) View.VISIBLE else View.GONE
         for ((n, c) in chips) c.view.alpha = if (ed && n != "CROP") 0.35f else 1f
-        if (::startBtn.isInitialized) { startBtn.isEnabled = !ed; startBtn.alpha = if (ed) 0.35f else 1f }
+        cropFocus(ed)
+    }
+
+    private var cropFocused = false
+
+    /** Cropping: only the picture, the frame and the crop's bar (the rest comes back when cropping ends). */
+    private fun cropFocus(on: Boolean) {
+        if (on == cropFocused || !::startBtn.isInitialized) return
+        cropFocused = on
+        val vis = if (on) View.GONE else View.VISIBLE
+        for (v in listOf<View>(top, strip, stripRow, startBtn)) v.visibility = vis
+        if (on) saveBar.visibility = View.GONE else updateSaveBar()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        // back while cropping leaves cropping (as Cancel), not the camera
+        if (selected == "CROP") { cropView.set(com.motioncam.Crop.parse(st().optString("crop"))); endCrop(false); return }
+        @Suppress("DEPRECATION") super.onBackPressed()
     }
     private lateinit var msgTv: TextView
     /** Under the picture (top of the controls), in colour: why no new picture arrives; the last one stays as it is. */
@@ -690,7 +708,7 @@ class RemoteLiveActivity : Activity() {
     }
 
     private fun updateSaveBar() {
-        if (!::saveBar.isInitialized) return
+        if (!::saveBar.isInitialized || cropFocused) return
         val n = draft.length()
         val show = n > 0 || saving
         saveInfo.text = if (saving) "Sending…" else "$n change${if (n == 1) "" else "s"} not sent yet"

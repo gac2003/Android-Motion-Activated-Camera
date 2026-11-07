@@ -43,7 +43,7 @@ where you were.
   * **ZONES** shows motion in red; drag on the picture to mask areas (dark = ignored). Its slider is the sensitivity.
   * **CROP** records only part of the picture, e.g. a door peephole: drag the corners in, move the frame, tap the
     text for a shape (square, 4:3, 16:9…), then **Done** (or **Cancel**, or **Turn off crop** for the whole
-    picture); the other controls wait until then. The clip is that area at the camera's full
+    picture); the other controls are hidden until then, and Back leaves cropping. The clip is that area at the camera's full
     detail, so it's smaller in proportion (a quarter of the picture ≈ a quarter of the file size), and motion
     outside it is ignored. Your other phones can set it too, from the camera's live view.
   * Long-press any button to choose which buttons show and in what order.

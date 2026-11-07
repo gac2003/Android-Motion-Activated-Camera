@@ -511,11 +511,7 @@ class MainActivity : Activity() {
             // while cropping, only the crop's own buttons work
             if (::cropBar.isInitialized) cropBar.visibility = if (ed) View.VISIBLE else View.GONE
             for ((n, c) in chips) { c.view.alpha = if (ed && n != "CROP") 0.35f else 1f }
-            val others = ArrayList<View>()
-            if (::startBtn.isInitialized) others += startBtn
-            if (::shutter.isInitialized) others += shutter
-            if (::gearV.isInitialized) others += gearV
-            for (v in others) { v.isEnabled = !ed; v.alpha = if (ed) 0.35f else 1f }
+            cropFocus(ed)
         }
     }
 
@@ -976,6 +972,7 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         val e = editor
         if (e != null) { (e.parent as? ViewGroup)?.removeView(e); editor = null; return }
+        if (cancelCrop()) return
         backHome()
     }
 
@@ -1103,6 +1100,34 @@ class MainActivity : Activity() {
         val full = caps?.recordSize(prefs.resHeight)
         val pct = if (full != null) (100f * sz.width * sz.height / (full.width * full.height)).roundToInt() else 0
         return "$shape ▾ · records ${Crop.label(sz, imageRotation())}" + if (pct > 0) " · ≈$pct% of the file size" else ""
+    }
+
+    private var cropFocused = false
+
+    /**
+     * Cropping: everything but the picture, the frame and the crop's own bar goes away (top bar, controls, Start /
+     * Stop, the landscape column), so the whole picture can be seen; it all comes back when cropping ends.
+     */
+    private fun cropFocus(on: Boolean) {
+        if (on == cropFocused) return
+        cropFocused = on
+        val land = compact == true
+        topBarView?.visibility = if (on || land) View.GONE else View.VISIBLE
+        if (::landTop.isInitialized) landTop.visibility = if (!on && land) View.VISIBLE else View.GONE
+        if (::landCol.isInitialized) landCol.visibility = if (!on && land) View.VISIBLE else View.GONE
+        if (::strip.isInitialized) strip.visibility = if (on) View.GONE else View.VISIBLE
+        if (::startBtn.isInitialized) startBtn.visibility = if (on) View.GONE else View.VISIBLE
+        if (land) (bottomBox.layoutParams as? FrameLayout.LayoutParams)?.let {
+            it.rightMargin = Ui.dp(this, if (on) 8 else LAND_COL + 8); bottomBox.layoutParams = it
+        }
+    }
+
+    /** Back while cropping: leaves cropping (as Cancel) instead of the camera. */
+    private fun cancelCrop(): Boolean {
+        if (selected != "CROP") return false
+        cropView.set(Crop.parse(prefs.crop))
+        onChip("CROP")
+        return true
     }
 
     /** The frame was let go: that's what the camera records from now on (a short pause while it switches). */

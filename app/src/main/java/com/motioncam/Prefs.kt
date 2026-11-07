@@ -48,7 +48,17 @@ class Prefs(ctx: Context) {
     /** false = 12-hour clock with AM/PM (default). */
     var use24h: Boolean get() = b("use24h", false); set(v) = put("use24h", v)
     /** Visible Pro-mode buttons in order, comma separated. */
-    var chipLayout: String get() = s("chipLayout", ALL_CHIPS.joinToString(",")); set(v) = put("chipLayout", v)
+    var chipLayout: String
+        get() {
+            var v = s("chipLayout", ALL_CHIPS.joinToString(","))
+            // CROP came later: shown once on layouts saved before it (it can be hidden again like any button)
+            if (!b("chipCropSeen", false)) {
+                if ("CROP" !in v.split(",")) v = if (v.isBlank()) ALL_CHIPS.joinToString(",") else "$v,CROP"
+                sp.edit().putBoolean("chipCropSeen", true).putString("chipLayout", v).apply()
+            }
+            return v
+        }
+        set(v) = put("chipLayout", v)
 
     // ---- camera / recording ----
     /** "<logicalId>" or "<logicalId>:<physicalId>". Empty = first rear camera. */
@@ -94,6 +104,10 @@ class Prefs(ctx: Context) {
     var maxClipMin: Int get() = i("maxClipMin", 10); set(v) = put("maxClipMin", v)
     /** Detection zones, 16x9 cells as '1'/'0'. Empty = whole frame. */
     var zones: String get() = s("zones", ""); set(v) = put("zones", v)
+    /** CROP: the part of the picture recorded, "l,t,r,b" (see [Crop]). Empty = the whole picture. */
+    var crop: String get() = s("crop", ""); set(v) = put("crop", v)
+    /** CROP's shape on screen (index into [Crop.SHAPES]). */
+    var cropShape: Int get() = i("cropShape", 0); set(v) = put("cropShape", v)
 
     // ---- storage / protection (0 = off) ----
     var maxStorageGb: Int get() = i("maxStorageGb", 0); set(v) = put("maxStorageGb", v)
@@ -176,10 +190,10 @@ class Prefs(ctx: Context) {
     }
 
     companion object {
-        val ALL_CHIPS = listOf("LENS", "FORMAT", "EV", "ISO", "SPEED", "FOCUS", "WB", "ZOOM", "ZONES")
+        val ALL_CHIPS = listOf("LENS", "FORMAT", "EV", "ISO", "SPEED", "FOCUS", "WB", "ZOOM", "ZONES", "CROP")
 
         val PREVIEW_KEYS = listOf("previewOn", "peaking", "lowPowerIdle", "use24h")
-        val RECORDING_KEYS = listOf("resHeight", "fps", "hevc", "bitrateMbps", "audio", "rotation", "preRecordMs", "discardShortOnStop", "discardShortMs")
+        val RECORDING_KEYS = listOf("resHeight", "fps", "hevc", "bitrateMbps", "audio", "rotation", "preRecordMs", "discardShortOnStop", "discardShortMs", "crop", "cropShape")
         val MOTION_KEYS = listOf("sensitivity", "lightFilter", "minAreaPct", "minMotionMs", "stopDelaySec", "maxClipMin", "zones")
         val STORAGE_KEYS = listOf("maxStorageGb", "keepDays", "autoDeleteLow")
         val PROTECTION_KEYS = listOf("minBattery", "maxTempC")

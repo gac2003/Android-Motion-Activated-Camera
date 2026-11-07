@@ -340,6 +340,8 @@ object CameraLink {
             .put("charging", s.charging).put("tempC", s.tempC.toDouble()).put("lens", s.lens).put("format", s.format)
             .put("pin", pin(ctx) != null).put("pinForView", pin(ctx) != null && p.livePinForView)
             .put("settings", settings(p))
+            // for the CROP frame on the live picture: how the picture is turned and the full recording size
+            .put("rotation", e?.recordRotation() ?: 0).put("recW", e?.fullSize?.width ?: 0).put("recH", e?.fullSize?.height ?: 0)
             .put("live", JSONObject().put("iso", e?.liveIso ?: 0).put("shutterNs", e?.liveShutterNs ?: 0L)
                 .put("kelvin", e?.liveKelvin ?: 0).put("focus", (e?.liveFocusDiopter ?: -1f).toDouble())
                 .put("meter", e?.liveMeterEv?.takeIf { !it.isNaN() }?.toDouble() ?: JSONObject.NULL))
@@ -358,7 +360,7 @@ object CameraLink {
         .put("sensitivity", p.sensitivity).put("lightFilter", p.lightFilter).put("minAreaPct", p.minAreaPct.toDouble())
         .put("minMotionMs", p.minMotionMs).put("exposureAuto", p.exposureAuto).put("evIndex", p.evIndex).put("iso", p.iso)
         .put("shutterNs", p.shutterNs).put("focusAuto", p.focusAuto).put("focusPos", p.focusPos.toDouble())
-        .put("wbAuto", p.wbAuto).put("wbKelvin", p.wbKelvin).put("zoom", p.zoom.toDouble())
+        .put("wbAuto", p.wbAuto).put("wbKelvin", p.wbKelvin).put("zoom", p.zoom.toDouble()).put("crop", p.crop)
 
     /** What the remote controls may offer (lenses, ranges). */
     private fun caps(ctx: Context): JSONObject? {

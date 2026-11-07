@@ -46,6 +46,43 @@ class RemoteLiveActivity : Activity() {
     private val ui = Handler(Looper.getMainLooper())
 
     private lateinit var image: ImageView
+    private lateinit var cropView: com.motioncam.CropView
+
+    /** Where the live picture is drawn (it's fitted inside the screen). */
+    private fun imageRect(): android.graphics.RectF? {
+        val dr = image.drawable ?: return null
+        if (dr.intrinsicWidth <= 0 || dr.intrinsicHeight <= 0) return null
+        val rc = android.graphics.RectF(0f, 0f, dr.intrinsicWidth.toFloat(), dr.intrinsicHeight.toFloat())
+        image.imageMatrix.mapRect(rc)
+        rc.offset(image.paddingLeft.toFloat(), image.paddingTop.toFloat())
+        return rc
+    }
+
+    /** The clip size a crop gives on the camera (null = whole picture). */
+    private fun cropSize(rc: android.graphics.RectF?): android.util.Size? {
+        rc ?: return null
+        val s = status() ?: return null
+        val h = st().optInt("resHeight", 1080)
+        val full = android.util.Size(s.optInt("recW", h * 16 / 9).takeIf { it > 0 } ?: (h * 16 / 9), s.optInt("recH", h).takeIf { it > 0 } ?: h)
+        return com.motioncam.Crop.encodeSize(rc, full)
+    }
+
+    private fun cropText(): String {
+        val rc = cropView.sensorRect()
+        val shape = com.motioncam.Crop.SHAPES.getOrNull(prefs.cropShape)?.first ?: "Free"
+        val sz = cropSize(rc) ?: return "$shape ▾ · whole picture: drag the corners in"
+        val s = status()
+        val fw = s?.optInt("recW") ?: 0; val fh = s?.optInt("recH") ?: 0
+        val pct = if (fw > 0 && fh > 0) (100f * sz.width * sz.height / (fw * fh)).roundToInt() else 0
+        return "$shape ▾ · records ${com.motioncam.Crop.label(sz, s?.optInt("rotation") ?: 0)}" + if (pct > 0) " · ≈$pct% of the file size" else ""
+    }
+
+    private fun syncCropView() {
+        if (!::cropView.isInitialized) return
+        cropView.rotation = status()?.optInt("rotation") ?: 0
+        if (selected != "CROP" || !draft.has("crop")) cropView.set(com.motioncam.Crop.parse(st().optString("crop")))
+        cropView.editing = selected == "CROP"
+    }
     private lateinit var msgTv: TextView
     /** Under the picture (top of the controls), in colour: why no new picture arrives; the last one stays as it is. */
     private lateinit var liveNote: TextView
@@ -173,6 +210,15 @@ class RemoteLiveActivity : Activity() {
             setOnClickListener { if (!feed.watching) feed.start() else toggleControls() }
         }
         root.addView(image, FrameLayout.LayoutParams(-1, -1))
+        cropView = com.motioncam.CropView(this).apply {
+            picture = { imageRect() }
+            shape = com.motioncam.Crop.SHAPES.getOrNull(prefs.cropShape)?.second ?: 0f
+            onChange = { rect, final ->
+                if (final) { stage(JSONObject().put("crop", com.motioncam.Crop.format(rect)), refresh = false); refreshChips() }
+                tickPanel()
+            }
+        }
+        root.addView(cropView, FrameLayout.LayoutParams(-1, -1))
         msgTv = Ui.label(this, "Starting live view…", 14f).apply {
             gravity = Gravity.CENTER
             setPadding(d(16), d(10), d(16), d(10))
@@ -255,7 +301,7 @@ class RemoteLiveActivity : Activity() {
         setContentView(root)
     }
 
-    /** The same buttons, in the same order, as on this phone's camera screen (zones excluded). */
+    /** The same buttons, in the same order, as on the camera phone's screen (zones excluded). */
     private fun chipNames(): List<String> {
         val all = Prefs.ALL_CHIPS.filter { it != "ZONES" }
         return prefs.chipLayout.split(",").map { it.trim() }.filter { it in all }.distinct().ifEmpty { all }
@@ -402,13 +448,15 @@ class RemoteLiveActivity : Activity() {
         if (st.optBoolean("wbAuto", true)) set("WB", lv.optInt("kelvin").takeIf { it > 0 }?.let { "${it}K" } ?: "AUTO", true)
         else set("WB", "${ProCaps.wbPresets[ProCaps.nearestPreset(st.optInt("wbKelvin", 5200))].second}K", false)
         set("ZOOM", "%.1fx".format(st.optDouble("zoom", 1.0)), false)
+        set("CROP", cropSize(com.motioncam.Crop.parse(st.optString("crop")))?.let { com.motioncam.Crop.label(it, status()?.optInt("rotation") ?: 0) } ?: "off", false)
+        syncCropView()
         // values changed here but not sent yet: a dot on their control (Save sends them)
         for ((n, keys) in CHIP_KEYS) chips[n]?.mark(keys.any { draft.has(it) })
     }
 
     private val CHIP_KEYS = mapOf("LENS" to listOf("camera"), "FORMAT" to listOf("resHeight", "fps"),
         "EV" to listOf("evIndex", "exposureAuto"), "ISO" to listOf("iso", "exposureAuto"), "SPEED" to listOf("shutterNs", "exposureAuto"),
-        "FOCUS" to listOf("focusPos", "focusAuto"), "WB" to listOf("wbKelvin", "wbAuto"), "ZOOM" to listOf("zoom"))
+        "FOCUS" to listOf("focusPos", "focusAuto"), "WB" to listOf("wbKelvin", "wbAuto"), "ZOOM" to listOf("zoom"), "CROP" to listOf("crop"))
 
     private fun lensLabel(st: JSONObject, c: JSONObject): String {
         val lenses = c.optJSONArray("lenses")
@@ -430,6 +478,7 @@ class RemoteLiveActivity : Activity() {
         panel.visibility = if (selected == null) View.GONE else View.VISIBLE
         if (selected != null) configurePanel()
         refreshChips()
+        syncCropView()
     }
 
     private fun setAutoBtn(text: String, on: Boolean, visible: Boolean = true) {
@@ -492,7 +541,9 @@ class RemoteLiveActivity : Activity() {
                 seek.isEnabled = seek.isEnabled && can
                 seek.progress = ((st.optDouble("zoom", 1.0) - zMin) / max(0.01, zMax - zMin) * 1000).roundToInt().coerceIn(0, 1000)
             }
+            "CROP" -> setAutoBtn("OFF", false, st.optString("crop").isNotEmpty() || cropView.sensorRect() != null)
         }
+        seek.visibility = if (selected == "CROP") View.INVISIBLE else View.VISIBLE
         updating = false
         tickPanel(st)
     }
@@ -531,6 +582,7 @@ class RemoteLiveActivity : Activity() {
                 if (k > 0) "AWB ≈${k}K" else "AWB"
             } else ProCaps.wbPresets[ProCaps.nearestPreset(st.optInt("wbKelvin", 5200))].let { "${it.first} ${it.second}K" }
             "ZOOM" -> "Zoom %.1fx".format(st.optDouble("zoom", 1.0))
+            "CROP" -> cropText()
             else -> ""
         }
         if (valueTv.text != text) valueTv.text = text
@@ -596,6 +648,7 @@ class RemoteLiveActivity : Activity() {
                 if (k > 0) a.put("wbKelvin", ProCaps.wbPresets[ProCaps.nearestPreset(k)].second)
             } else a.put("wbAuto", true)
             "ZOOM" -> a.put("zoom", 1.0.coerceIn(zMin, zMax))
+            "CROP" -> { cropView.reset(); configurePanel(); return }
             else -> return
         }
         apply(a)
@@ -666,6 +719,17 @@ class RemoteLiveActivity : Activity() {
     /** Tap the value: type the exact number (as on the camera screen). */
     private fun askExact() {
         val sel = selected ?: return
+        if (sel == "CROP") {
+            OptionSheet.show(this, "Shape of the recorded area", com.motioncam.Crop.SHAPES.mapIndexed { i, (name, _) ->
+                Opt(name, if (i == 0) "Any rectangle" else "Keeps this shape while you resize it", checked = i == prefs.cropShape) {
+                    prefs.cropShape = i
+                    cropView.shape = com.motioncam.Crop.SHAPES[i].second
+                    cropView.sensorRect()?.let { rc -> stage(JSONObject().put("crop", com.motioncam.Crop.format(rc)), refresh = false); refreshChips() }
+                    tickPanel()
+                }
+            })
+            return
+        }
         val st = st(); val c = caps(); val lv = live()
         if (sel == "EV" && !st.optBoolean("exposureAuto", true)) return
         val evStep = c.optDouble("evStep", 0.1667)

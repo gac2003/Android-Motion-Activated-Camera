@@ -41,6 +41,10 @@ where you were.
     the slider to go manual from that value; **AUTO** goes back; tap the value to type an exact number.
   * **FOCUS** shows green focus peaking (sharp edges) while it is open.
   * **ZONES** shows motion in red; drag on the picture to mask areas (dark = ignored). Its slider is the sensitivity.
+  * **CROP** records only part of the picture, e.g. a door peephole: drag the corners in, move the frame, tap the
+    text for a shape (square, 4:3, 16:9…), **OFF** for the whole picture. The clip is that area at the camera's full
+    detail, so it's smaller in proportion (a quarter of the picture ≈ a quarter of the file size), and motion
+    outside it is ignored. Your other phones can set it too, from the camera's live view.
   * Long-press any button to choose which buttons show and in what order.
 * **START / STOP** monitoring. Stop also works from the notification. Lock the phone: it keeps watching with the
   screen off and dims the camera's frame rate between clips to save power.

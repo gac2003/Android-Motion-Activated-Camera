@@ -133,6 +133,15 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     private var reader: ImageReader? = null
     private var persistent: Surface? = null
     private var recordSize = Size(1920, 1080)
+    /** What clips are encoded at: [recordSize], or the CROP area's own size. */
+    @Volatile var encodeSize = Size(1920, 1080); private set
+    /** The CROP area being recorded (sensor coordinates), null = the whole picture. */
+    @Volatile var cropRect: android.graphics.RectF? = null; private set
+    private var cropper: CropRenderer? = null
+    /** The full recording size (before CROP). */
+    val fullSize: Size get() = recordSize
+    /** Where the camera sends the frames to be recorded: the encoder, or the cropper in front of it. */
+    private val recTarget: Surface? get() = cropper?.input ?: persistent
     private var effectiveFps = 30
     private var sessionGen = 0
     private var comboIndex = 0
@@ -298,7 +307,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     // ================================================================== camera lifecycle
 
     private fun signature() =
-        "${prefs.camera}|${prefs.resHeight}|${prefs.fps}|${prefs.hevc}|${prefs.bitrateMbps}|${prefs.audio}|${prefs.preRecordMs}"
+        "${prefs.camera}|${prefs.resHeight}|${prefs.fps}|${prefs.hevc}|${prefs.bitrateMbps}|${prefs.audio}|${prefs.preRecordMs}|${prefs.crop}"
 
     @SuppressLint("MissingPermission")
     private fun openCamera() {
@@ -316,13 +325,31 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             activeSig = signature()
             effectiveFps = if (c.supportsFps(prefs.fps)) prefs.fps else 30
             recordSize = c.recordSize(prefs.resHeight)
-            if (prefs.preRecordMs > 0) {
-                pre = try {
-                    PreRecorder(recordSize.width, recordSize.height, effectiveFps, bitrate(), prefs.hevc,
-                        prefs.preRecordMs, audioAllowed())
-                } catch (e: Exception) { message = "Pre-record unavailable: ${e.message}"; null }
+            val want = Crop.parse(prefs.crop)
+            val enc = want?.let { Crop.encodeSize(it, recordSize) }
+            cropRect = if (want != null && enc != null) Crop.fitted(want, enc, recordSize) else null
+            encodeSize = enc ?: recordSize
+            fun encoderSurface() {
+                if (prefs.preRecordMs > 0) {
+                    pre = try {
+                        PreRecorder(encodeSize.width, encodeSize.height, effectiveFps, bitrate(), prefs.hevc,
+                            prefs.preRecordMs, audioAllowed())
+                    } catch (e: Exception) { message = "Pre-record unavailable: ${e.message}"; null }
+                }
+                persistent = pre?.surface ?: createPersistentSurface()
             }
-            persistent = pre?.surface ?: createPersistentSurface()
+            encoderSurface()
+            cropRect?.let { r ->
+                cropper = try { CropRenderer(recordSize.width, recordSize.height, persistent!!, encodeSize.width, encodeSize.height, r) }
+                catch (e: Exception) {
+                    // this phone can't crop (GPU): record the whole picture rather than nothing
+                    message = "Crop unavailable on this phone, recording the whole picture"
+                    if (pre != null) { pre?.release(); pre = null } else try { persistent?.release() } catch (_: Exception) {}
+                    cropRect = null; encodeSize = recordSize
+                    encoderSurface()
+                    null
+                }
+            }
             comboIndex = 0
             mgr.openCamera(c.lens.logicalId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
@@ -372,6 +399,8 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         device = null
         try { reader?.close() } catch (_: Exception) {}
         reader = null
+        cropper?.release()
+        cropper = null
         if (pre != null) {
             preClip?.let { ClipStore.finish(ctx, it, pre?.stopClip() == true, recordStartedWall) }
             preClip = null
@@ -403,12 +432,14 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     private fun newRecorder(): MediaRecorder =
         if (Build.VERSION.SDK_INT >= 31) MediaRecorder(ctx) else @Suppress("DEPRECATION") MediaRecorder()
 
+    /** A cropped clip gets the bitrate of its share of the picture (same quality there, smaller file). */
     private fun bitrate(): Int {
-        if (prefs.bitrateMbps > 0) return prefs.bitrateMbps * 1_000_000
+        val share = encodeSize.width.toFloat() * encodeSize.height / (recordSize.width.toFloat() * recordSize.height)
+        if (prefs.bitrateMbps > 0) return (prefs.bitrateMbps * 1_000_000 * share.coerceAtMost(1f)).toInt().coerceAtLeast(500_000)
         val r = recordSize.height / 1080f
-        var mbps = 8f * r * r * (effectiveFps / 30f)
+        var mbps = 8f * r * r * (effectiveFps / 30f) * share.coerceAtMost(1f)
         if (prefs.hevc) mbps *= 0.6f
-        return (mbps.coerceIn(1.5f, 60f) * 1_000_000).toInt()
+        return (mbps.coerceIn(if (share < 1f) 0.5f else 1.5f, 60f) * 1_000_000).toInt()
     }
 
     private fun configure(rec: MediaRecorder, audio: Boolean, surface: Surface, output: (MediaRecorder) -> Unit) {
@@ -418,7 +449,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         output(rec)
         rec.setVideoEncodingBitRate(bitrate())
         rec.setVideoFrameRate(effectiveFps)
-        rec.setVideoSize(recordSize.width, recordSize.height)
+        rec.setVideoSize(encodeSize.width, encodeSize.height)
         rec.setVideoEncoder(if (prefs.hevc) MediaRecorder.VideoEncoder.HEVC else MediaRecorder.VideoEncoder.H264)
         if (audio) {
             rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
@@ -661,7 +692,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             try {
                 ensureReader(combo.yuv)
                 fun oc(s: Surface) = OutputConfiguration(s).also { if (phys != null) it.setPhysicalCameraId(phys) }
-                val outs = arrayListOf(oc(reader!!.surface), oc(ps))
+                val outs = arrayListOf(oc(reader!!.surface), oc(recTarget ?: ps))
                 var st: SurfaceTexture? = null
                 if (combo.preview != null) {
                     st = previewSt!!
@@ -739,7 +770,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             b.addTarget(rd.surface)
             sessionSt?.let { b.addTarget(surfaceFor(it)) }
             // pre-record mode feeds the encoder the whole time we are monitoring
-            if (mode == Mode.RECORDING || (pre != null && monitoring)) persistent?.let { b.addTarget(it) }
+            if (mode == Mode.RECORDING || (pre != null && monitoring)) recTarget?.let { b.addTarget(it) }
             b.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
 
             val low = lowPowerIdle()
@@ -843,8 +874,19 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         if (motionDue) {
             lastMotionRun = now
             if (resetDetector) { detector.reset(); resetDetector = false; consecutive = 0 }
-            val z = prefs.zones
-            if (z != zonesSrc) { zonesSrc = z; zoneBlocks = if (z.isEmpty()) null else Zones.blockMask(Zones.parse(z)) }
+            // zones, and only inside the CROP area (the rest isn't recorded)
+            val cr = cropRect
+            val z = prefs.zones + "|" + (cr?.toShortString() ?: "")
+            if (z != zonesSrc) {
+                zonesSrc = z
+                val zb = if (prefs.zones.isEmpty()) null else Zones.blockMask(Zones.parse(prefs.zones))
+                val cb = cr?.let { Crop.blockMask(it) }
+                zoneBlocks = when {
+                    zb == null -> cb
+                    cb == null -> zb
+                    else -> BooleanArray(zb.size) { zb[it] && cb[it] }
+                }
+            }
             val largest = detector.analyze(f, prefs.sensitivity, prefs.lightFilter, zoneBlocks)
             motionBlocks = largest
             val need = max(1, ceil(prefs.minAreaPct / 100f * MotionDetector.N).toInt())
@@ -1001,7 +1043,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
                 monitoring = monitoring,
                 message = message,
                 lens = caps?.lens?.label ?: "",
-                format = "${recordSize.width}x${recordSize.height} @ $effectiveFps fps",
+                format = (if (cropRect != null) "${Crop.label(encodeSize, recordRotation())} crop of " else "") + "${recordSize.width}x${recordSize.height} @ $effectiveFps fps",
                 recordingSinceWall = if (mode == Mode.RECORDING) recordStartedWall else 0,
                 lastMotionWall = lastMotionWall,
                 motionBlocks = motionBlocks,

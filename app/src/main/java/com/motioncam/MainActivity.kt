@@ -34,6 +34,8 @@ class MainActivity : Activity() {
     private lateinit var frame: AspectFrame
     private lateinit var texture: TextureView
     private lateinit var overlay: ImageView
+    private lateinit var cropView: CropView
+    private val cropCommit = Runnable { commitCrop() }
     private lateinit var offLabel: TextView
     private lateinit var statusTv: TextView
     private lateinit var infoTv: TextView
@@ -469,6 +471,7 @@ class MainActivity : Activity() {
 
     private fun updateGeometry() {
         frame.aspect = if (imageRotation() % 180 != 0) 9f / 16f else 16f / 9f
+        if (::cropView.isInitialized) { cropView.rotation = imageRotation(); if (cropView.sensorRect() == null || selected != "CROP") cropView.set(Crop.parse(prefs.crop)) }
         updateTransform()
     }
 
@@ -500,6 +503,11 @@ class MainActivity : Activity() {
     private fun updateFlags() {
         FrameHub.peaking = resumed && prefs.peaking && selected == "FOCUS"
         FrameHub.showMotion = resumed && selected == "ZONES"
+        if (::cropView.isInitialized) {
+            val ed = selected == "CROP"
+            if (cropView.editing && !ed) { ui.removeCallbacks(cropCommit); commitCrop() }
+            cropView.editing = ed
+        }
     }
 
     // ------------------------------------------------------------------ UI construction
@@ -603,6 +611,15 @@ class MainActivity : Activity() {
         overlay = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_XY }
         frame.addView(texture, FrameLayout.LayoutParams(-1, -1))
         frame.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+        cropView = CropView(this).apply {
+            shape = Crop.SHAPES.getOrNull(prefs.cropShape)?.second ?: 0f
+            onChange = { _, final ->
+                ui.removeCallbacks(cropCommit)
+                if (final) ui.postDelayed(cropCommit, 600)
+                tickPanel()
+            }
+        }
+        frame.addView(cropView, FrameLayout.LayoutParams(-1, -1))
         // the picture is centred in its stage: the whole screen, or (landscape FIT) the space left of the controls
         stage = FrameLayout(this)
         stage.addView(frame, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
@@ -750,7 +767,7 @@ class MainActivity : Activity() {
     private var editor: View? = null
 
     private val chipNames = mapOf("LENS" to "Lens", "FORMAT" to "Format", "EV" to "EV / meter", "ISO" to "ISO",
-        "SPEED" to "Shutter", "FOCUS" to "Focus", "WB" to "White bal.", "ZOOM" to "Zoom", "ZONES" to "Zones")
+        "SPEED" to "Shutter", "FOCUS" to "Focus", "WB" to "White bal.", "ZOOM" to "Zoom", "ZONES" to "Zones", "CROP" to "Crop")
 
     /**
      * Long-press a control button: Samsung-style editor. Touch and hold a button to drag it between the
@@ -1055,6 +1072,47 @@ class MainActivity : Activity() {
         else set("WB", "${ProCaps.wbPresets[ProCaps.nearestPreset(prefs.wbKelvin)].second}K", false)
         set("ZOOM", "%.1fx".format(prefs.zoom), false)
         set("ZONES", if (prefs.zones.isEmpty()) "all" else "custom", false)
+        set("CROP", cropSize(Crop.parse(prefs.crop))?.let { Crop.label(it, imageRotation()) } ?: "off", false)
+        if (selected != "CROP") { cropView.rotation = imageRotation(); cropView.set(Crop.parse(prefs.crop)) }
+    }
+
+    // ------------------------------------------------------------------ CROP
+
+    /** The clip size [r] gives at the current format (null = whole picture). */
+    private fun cropSize(r: android.graphics.RectF?): android.util.Size? {
+        r ?: return null
+        val full = caps?.recordSize(prefs.resHeight) ?: android.util.Size(prefs.resHeight * 16 / 9, prefs.resHeight)
+        return Crop.encodeSize(r, full)
+    }
+
+    private fun cropText(): String {
+        val r = cropView.sensorRect()
+        val shape = Crop.SHAPES.getOrNull(prefs.cropShape)?.first ?: "Free"
+        val sz = cropSize(r) ?: return "$shape ▾ · whole picture: drag the corners in"
+        val full = caps?.recordSize(prefs.resHeight)
+        val pct = if (full != null) (100f * sz.width * sz.height / (full.width * full.height)).roundToInt() else 0
+        return "$shape ▾ · records ${Crop.label(sz, imageRotation())}" + if (pct > 0) " · ≈$pct% of the file size" else ""
+    }
+
+    /** The frame was let go: that's what the camera records from now on (a short pause while it switches). */
+    private fun commitCrop() {
+        val v = Crop.format(cropView.sensorRect())
+        if (v == prefs.crop) return
+        prefs.crop = v
+        engine?.applyConfig()
+        refreshChips()
+        tickPanel()
+    }
+
+    private fun pickCropShape() {
+        OptionSheet.show(this, "Shape of the recorded area", Crop.SHAPES.mapIndexed { i, (name, _) ->
+            Opt(name, if (i == 0) "Any rectangle" else "Keeps this shape while you resize it", checked = i == prefs.cropShape) {
+                prefs.cropShape = i
+                cropView.shape = Crop.SHAPES[i].second
+                if (cropView.sensorRect() != null) { ui.removeCallbacks(cropCommit); ui.postDelayed(cropCommit, 600) }
+                tickPanel()
+            }
+        })
     }
 
     private fun onChip(name: String) {
@@ -1123,7 +1181,9 @@ class MainActivity : Activity() {
                 seek.max = MotionDetector.MAX_SENSITIVITY - 1
                 seek.progress = prefs.sensitivity - 1
             }
+            "CROP" -> setAutoBtn("OFF", false, prefs.crop.isNotEmpty() || cropView.sensorRect() != null)
         }
+        seek.visibility = if (selected == "CROP") View.INVISIBLE else View.VISIBLE
         updating = false
         tickPanel()
     }
@@ -1169,6 +1229,7 @@ class MainActivity : Activity() {
             } else text = ProCaps.wbPresets[ProCaps.nearestPreset(prefs.wbKelvin)].let { "${it.first} ${it.second}K" }
             "ZOOM" -> text = "Zoom %.1fx".format(prefs.zoom)
             "ZONES" -> text = "Sensitivity ${prefs.sensitivity} · drag on image to mask areas"
+            "CROP" -> text = cropText()
             else -> text = ""
         }
         if (valueTv.text != text) valueTv.text = text
@@ -1188,6 +1249,7 @@ class MainActivity : Activity() {
             "WB" -> if (prefs.wbAuto) seedManualWb() else prefs.wbAuto = true
             "ZOOM" -> prefs.zoom = 1f.coerceIn(c.zoomMin, c.zoomMax)
             "ZONES" -> prefs.zones = ""
+            "CROP" -> { ui.removeCallbacks(cropCommit); cropView.reset(); ui.removeCallbacks(cropCommit); commitCrop() }
         }
         engine?.applyPro()
         configurePanel()
@@ -1242,6 +1304,7 @@ class MainActivity : Activity() {
     private fun askExact() {
         val c = caps ?: return
         val sel = selected ?: return
+        if (sel == "CROP") { pickCropShape(); return }
         if (sel == "EV" && !prefs.exposureAuto) return   // the meter is read-only in manual exposure
         val (title, hint, cur) = when (sel) {
             "EV" -> Triple("Exposure compensation (EV)", "e.g. -0.7", "%.1f".format(prefs.evIndex * c.evStep))

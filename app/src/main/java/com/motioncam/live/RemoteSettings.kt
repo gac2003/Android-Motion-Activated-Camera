@@ -51,6 +51,7 @@ object RemoteSettings {
                     "focusPos" -> dbl().let { s -> if (s in 0.0..1.0) { p.focusPos = s.toFloat(); true } else false }   // 1 = far … 0 = closest
                     "wbKelvin" -> int().let { s -> if (s in 2000..10000) { p.wbKelvin = s; true } else false }
                     "zoom" -> dbl().let { s -> if (c == null || range(s, c.zoomMin, c.zoomMax)) { p.zoom = s.toFloat(); true } else false }
+                    "crop" -> (v as String).let { x -> if (x.isEmpty() || com.motioncam.Crop.parse(x) != null) { p.crop = com.motioncam.Crop.format(com.motioncam.Crop.parse(x)); true } else false }
                     "camera" -> (v as String).let { key -> if (Lenses.list(ctx).any { it.key == key }) { p.camera = key; p.zoom = 1f; true } else false }
                     else -> false
                 }

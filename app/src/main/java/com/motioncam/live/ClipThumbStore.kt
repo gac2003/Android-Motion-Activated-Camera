@@ -28,6 +28,10 @@ object ClipThumbStore {
     private val mem = LruCache<String, Bitmap>(80)
     private val missing = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val main = Handler(Looper.getMainLooper())
+    /** Downloads at most 3 at a time (a long Activity list doesn't fire off a request per row at once). */
+    private val pool = java.util.concurrent.Executors.newFixedThreadPool(3)
+    /** Pictures are small and opaque: half the memory of the default format. */
+    private val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.RGB_565 }
 
     private fun key(name: String) = name.removeSuffix(".mp4").replace('.', '_')
 
@@ -65,7 +69,7 @@ object ClipThumbStore {
         mem.get(k)?.let { return it }
         val f = file(ctx, cam, name)
         if (!f.exists()) return null
-        return BitmapFactory.decodeFile(f.path)?.also { mem.put(k, it) }
+        return BitmapFactory.decodeFile(f.path, opts)?.also { mem.put(k, it) }
     }
 
     /**
@@ -93,7 +97,7 @@ object ClipThumbStore {
             val pin = com.motioncam.cloud.SecretStore.get(ctx, "live.pin.$cam") ?: return null
             bytes = CameraLink.pinOpen(cam, pin, bytes) ?: return null
         }
-        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return null
         try { file(ctx, cam, name).writeBytes(bytes) } catch (_: Exception) {}
         mem.put(k, bmp)
         return bmp
@@ -101,8 +105,42 @@ object ClipThumbStore {
 
     /** [get] in the background; [done] on the main thread (only when there is a picture). */
     fun load(ctx: Context, cam: String, name: String, done: (Bitmap) -> Unit) {
-        cached(ctx, cam, name)?.let { done(it); return }
+        mem.get("$cam/$name")?.let { done(it); return }
         val app = ctx.applicationContext
-        Thread { get(app, cam, name)?.let { b -> main.post { done(b) } } }.start()
+        pool.execute { get(app, cam, name)?.let { b -> main.post { done(b) } } }
+    }
+
+    /**
+     * [load], but only once [row] is on screen: a long Activity list only fetches the pictures you scroll to
+     * (from this phone's cache when it has them, else a few KB each, 3 at a time).
+     */
+    fun loadWhenShown(row: android.view.View, cam: String, name: String, done: (Bitmap) -> Unit) {
+        mem.get("$cam/$name")?.let { done(it); return }
+        var started = false
+        val rect = android.graphics.Rect()
+        lateinit var check: () -> Unit
+        val onScroll = android.view.ViewTreeObserver.OnScrollChangedListener { check() }
+        val onLayout = android.view.ViewTreeObserver.OnGlobalLayoutListener { check() }
+        fun unhook() {
+            if (!row.viewTreeObserver.isAlive) return
+            row.viewTreeObserver.removeOnScrollChangedListener(onScroll)
+            row.viewTreeObserver.removeOnGlobalLayoutListener(onLayout)
+        }
+        check = {
+            if (!started && row.isShown && row.getGlobalVisibleRect(rect)) {
+                started = true
+                unhook()
+                load(row.context, cam, name, done)
+            }
+        }
+        row.addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: android.view.View) {
+                if (started) return
+                row.viewTreeObserver.addOnScrollChangedListener(onScroll)
+                row.viewTreeObserver.addOnGlobalLayoutListener(onLayout)
+                row.post { check() }
+            }
+            override fun onViewDetachedFromWindow(v: android.view.View) = unhook()
+        })
     }
 }

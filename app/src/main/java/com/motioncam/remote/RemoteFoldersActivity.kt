@@ -306,10 +306,29 @@ open class RemoteFoldersActivity : Activity() {
             "Upload queue (" + (if (c.queued == 0) "nothing waiting" else "${c.queued} waiting") + (if (c.failed > 0) ", ${c.failed} failed" else "") +
                 "), downloaded clips, upload rules"
         }, IconDrawable.Kind.SETTINGS, liveLines) { startActivity(Intent(ctx, FolderSettingsActivity::class.java)) }.also { backupTitle = it })
-        // moves and copies in progress (or finished, until cleared)
-        if (TransferQueue.views(ctx).isNotEmpty()) box.addView(FolderSettings.navRow(this, "Transfers", { transfersLine() },
-            IconDrawable.Kind.MOVE, liveLines) { startActivity(Intent(ctx, TransfersActivity::class.java)) },
-            LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(ctx, 8) })
+        // what's being processed right now: the upload queue and transfers, only while they have work (both are
+        // always in Remote folder settings); they appear and go away by themselves
+        val busy = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        box.addView(busy)
+        var shownFor = ""
+        val rowLines = ArrayList<() -> Unit>()
+        fun fill() {
+            val uploads = com.motioncam.cloud.CloudSync.counts(ctx, null).queued > 0
+            val moving = TransferQueue.views(ctx).any { it.b.active }
+            val sig = "$uploads/$moving"
+            if (sig == shownFor) { rowLines.forEach { try { it() } catch (_: Exception) {} }; return }
+            shownFor = sig
+            busy.removeAllViews(); rowLines.clear()
+            fun lp() = LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(ctx, 8) }
+            if (uploads) busy.addView(FolderSettings.navRow(this, "Upload queue", {
+                val c = com.motioncam.cloud.CloudSync.counts(ctx, null)
+                "${c.queued} waiting" + (if (c.failed > 0) " · ${c.failed} failed" else "")
+            }, IconDrawable.Kind.CLOUD_UP, rowLines) { startActivity(Intent(ctx, com.motioncam.cloud.UploadQueueActivity::class.java)) }, lp())
+            if (moving) busy.addView(FolderSettings.navRow(this, "Transfers", { transfersLine() },
+                IconDrawable.Kind.MOVE, rowLines) { startActivity(Intent(ctx, TransfersActivity::class.java)) }, lp())
+        }
+        fill()
+        liveLines += { fill() }
     }
 
     private fun transfersLine(): String {

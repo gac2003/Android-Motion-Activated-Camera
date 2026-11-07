@@ -567,7 +567,7 @@ open class ActivityLogActivity : Activity() {
                     }
                 }
                 r.addView(iv, LinearLayout.LayoutParams(Ui.dp(ctx, 64), Ui.dp(ctx, 36)).apply { leftMargin = Ui.dp(ctx, 8) })
-                ClipThumbStore.load(ctx, e.cam, ref.optString("name")) { b -> iv.setImageBitmap(b); iv.visibility = View.VISIBLE }
+                ClipThumbStore.loadWhenShown(r, e.cam, ref.optString("name")) { b -> iv.setImageBitmap(b); iv.visibility = View.VISIBLE }
             }
             if (clip != null) {
                 val sec = clipSec(clip)

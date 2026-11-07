@@ -216,8 +216,9 @@ open class RemoteFoldersActivity : Activity() {
             pm.menu.add(0, 1, 0, "Open")
             pm.menu.add(0, 2, 1, "Collections")
             if (s.mode != RemoteSources.MODE_LINK) pm.menu.add(0, 6, 2, if (f.backingUp) "Stop backing up here" else "Back up new clips here")
-            val settingsDest = destsOf(s, onOnly = false).firstOrNull()
-            if (settingsDest != null) pm.menu.add(0, 5, 3, "Backup settings…")
+            // every folder this phone can write to has them, backing up here or not: the clean-up rules (size cap, keep
+            // time, when full) belong to the folder, so a viewer phone can change them for every phone
+            if (s.mode != RemoteSources.MODE_LINK) pm.menu.add(0, 5, 3, "Backup settings…")
             pm.menu.add(0, 3, 4, "Rename")
             pm.menu.add(0, 4, 5, "Remove from this device")
             pm.setOnMenuItemClickListener {
@@ -237,7 +238,11 @@ open class RemoteFoldersActivity : Activity() {
                             render()
                         }
                         .setNegativeButton("Cancel", null).show()
-                    5 -> settingsDest?.let { d -> startActivity(Intent(ctx, com.motioncam.cloud.CloudActivity::class.java).putExtra(com.motioncam.cloud.CloudActivity.EXTRA_KIND, d.key)) }
+                    5 -> {
+                        // no backup set up here: a switched-off one holds this folder's settings (it uploads nothing)
+                        val d = destsOf(s, onOnly = false).firstOrNull() ?: FolderDests.destFor(ctx, s)
+                        startActivity(Intent(ctx, com.motioncam.cloud.CloudActivity::class.java).putExtra(com.motioncam.cloud.CloudActivity.EXTRA_KIND, d.key))
+                    }
                     6 -> if (f.backingUp) AlertDialog.Builder(ctx).setTitle("Stop backing up to \"${s.name}\"?")
                             .setMessage("New clips are no longer uploaded here. Clips already in the folder stay, and you can still watch them.")
                             .setPositiveButton("Stop") { _, _ -> stopBackup(s, forget = false); render() }
@@ -284,7 +289,9 @@ open class RemoteFoldersActivity : Activity() {
         for (d in destsOf(s, onOnly = false)) {
             val c = CloudConfig(this, d)
             com.motioncam.cloud.CloudSync.dropJobs(this, d)
-            if (d.isPrimary) { c.enabled = false; if (forget) { c.folderId = null; c.folderName = null } }
+            // stopping keeps the folder's settings here (switched off, it uploads nothing); removing the folder forgets them
+            if (!forget) c.enabled = false
+            else if (d.isPrimary) { c.enabled = false; c.folderId = null; c.folderName = null }
             else { c.clearAll(); com.motioncam.cloud.Dest.remove(this, d) }
         }
         com.motioncam.cloud.CloudSync.kick(this)

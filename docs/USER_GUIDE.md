@@ -110,7 +110,8 @@ folder → choose whether this phone backs up its new clips there.
 * **Back up to…** (select clips → *Back up*): ticks show which folders have the clips. Tick to upload, untick to
   remove them from that folder (confirmed; the phone copies stay).
 * **Folder settings** (the folder's ⋮ → *Backup settings*) are shared by every phone using that folder: when the
-  cloud is full (delete oldest or pause), a size cap, delete after N days.
+  cloud is full (delete oldest or pause), a size cap, delete after N days. Any phone that has the folder can change
+  them, also one that only watches it.
 * MotionCam only ever sees its own files: Drive's `drive.file` access, Dropbox's app folder (`Apps/<app name>`), and
   only its own `MC_….mp4` clips are ever deleted.
 

@@ -11,6 +11,12 @@ object FrameHub {
     /** UI wants the zone/motion view (ZONES control open). */
     @Volatile var showMotion = false
 
+    /**
+     * Smooth live video (WebRTC) wants frames: (width, height, fill an I420 buffer, rotation, timestamp ns). Called
+     * on the analysis thread with every camera frame while someone watches; it takes at most 15 a second.
+     */
+    @Volatile var rtcSink: ((Int, Int, (org.webrtc.JavaI420Buffer) -> Unit, Int, Long) -> Unit)? = null
+
     /** Number of connected MJPEG viewers. JPEGs are only produced while this is > 0. */
     @Volatile var clients = 0
     /** A high-quality frame was asked for (live connection): full analysis resolution, high JPEG quality. */

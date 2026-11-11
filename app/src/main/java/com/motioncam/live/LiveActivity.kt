@@ -111,6 +111,14 @@ class LiveActivity : Activity() {
                 else "they are shown when you next open MotionCam. ") +
                 "Nothing is missed either way: cameras keep their activity. Turn this on for instant alerts.")
 
+        if (Rtc.enabled) {
+            f.title("Live view")
+            f.toggle("Smooth live video", prefs.liveSmooth) { prefs.liveSmooth = it }
+            f.note("Live view as real video (up to 15 frames a second), straight between the phones or through your Cloudflare " +
+                "relay when the network doesn't allow that. Off: a picture every 2 seconds, as before. If video can't connect, " +
+                "the pictures are used automatically.")
+        }
+
         f.title("This phone as a camera")
         f.toggle("Let other phones see and control this phone while it is monitoring", prefs.liveCamera) { on ->
             if (on) NetJoin.withCameraPin(this) { prefs.liveCamera = true; com.motioncam.CameraService.settingsChanged(this); render(); NetJoin.askRemoteStart(this) }   // the PIN is always asked to turn this on

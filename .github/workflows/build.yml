@@ -77,6 +77,8 @@ jobs:
           MC_GOOGLE_WEB_CLIENT_ID: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && (secrets.MC_GOOGLE_WEB_CLIENT_ID || vars.MC_GOOGLE_WEB_CLIENT_ID) || '' }}
           MC_DROPBOX_APP_KEY: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && (secrets.MC_DROPBOX_APP_KEY || vars.MC_DROPBOX_APP_KEY) || '' }}
           MC_FCM_SERVICE_ACCOUNT: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && secrets.MC_FCM_SERVICE_ACCOUNT || '' }}
+          MC_CF_TURN_KEY_ID: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && secrets.MC_CF_TURN_KEY_ID || '' }}
+          MC_CF_TURN_API_TOKEN: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && secrets.MC_CF_TURN_API_TOKEN || '' }}
           # Google Drive needs nothing in the APK (Google matches the package and signing key), so switch it off explicitly
           MC_GOOGLE_DRIVE: ${{ (matrix.variant == 'personal' || secrets.PRIVATE_RELEASE_TOKEN == '') && 'on' || 'off' }}
         run: |

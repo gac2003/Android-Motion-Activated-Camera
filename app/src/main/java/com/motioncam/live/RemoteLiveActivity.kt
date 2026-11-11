@@ -46,6 +46,35 @@ class RemoteLiveActivity : Activity() {
     private val ui = Handler(Looper.getMainLooper())
 
     private lateinit var image: ImageView
+    // smooth live video (WebRTC), when this build has it: shown over the pictures once its first frame arrives
+    private var renderer: org.webrtc.SurfaceViewRenderer? = null
+    private var rtc: RtcViewer? = null
+    private var rtcOn = false
+    private var rtcFailed = false
+    private var rtcW = 0; private var rtcH = 0
+
+    /** Video if possible: this build has it, it's on here, the camera supports it, and the PIN is known if needed. */
+    private fun maybeStartRtc() {
+        val rd = renderer ?: return
+        if (rtc != null || rtcFailed || !prefs.liveSmooth || !r.online()) return
+        val s = status() ?: return
+        if (!s.optBoolean("rtc")) return
+        val pin = r.pinFor()
+        if (s.optBoolean("pinForView") && pin == null) return
+        rtc = RtcViewer(this, cam, pin, rd) {
+            // no connection: keep (or go back to) the pictures
+            rtcFailed = true; rtc = null; rtcOn = false
+            rd.visibility = View.GONE; image.visibility = View.VISIBLE
+            if (!feed.watching) feed.start()
+            updateLiveLabel()
+        }.also { it.start() }
+    }
+
+    private fun stopRtc() {
+        rtc?.stop(); rtc = null; rtcOn = false
+        renderer?.visibility = View.GONE
+        if (::image.isInitialized) image.visibility = View.VISIBLE
+    }
     private lateinit var cropView: com.motioncam.CropView
     private lateinit var cropBar: View
 
@@ -60,6 +89,13 @@ class RemoteLiveActivity : Activity() {
 
     /** Where the live picture is drawn (it's fitted inside the screen). */
     private fun imageRect(): android.graphics.RectF? {
+        // the video: fitted inside its view
+        renderer?.takeIf { rtcOn && rtcW > 0 && rtcH > 0 }?.let { v ->
+            val sc = minOf(v.width.toFloat() / rtcW, v.height.toFloat() / rtcH)
+            val w = rtcW * sc; val h = rtcH * sc
+            val l = v.left + (v.width - w) / 2; val t = v.top + (v.height - h) / 2
+            return android.graphics.RectF(l, t, l + w, t + h)
+        }
         val dr = image.drawable ?: return null
         if (dr.intrinsicWidth <= 0 || dr.intrinsicHeight <= 0) return null
         val rc = android.graphics.RectF(0f, 0f, dr.intrinsicWidth.toFloat(), dr.intrinsicHeight.toFloat())
@@ -201,6 +237,8 @@ class RemoteLiveActivity : Activity() {
         Live.refresh(this)
         refreshAll()
         feed.start()
+        rtcFailed = false
+        maybeStartRtc()
         ui.post(tick)
     }
 
@@ -209,8 +247,14 @@ class RemoteLiveActivity : Activity() {
         Live.eventListeners -= events
         r.leave()   // gives the remote back
         if (::feed.isInitialized) feed.stop()
+        stopRtc()
         ui.removeCallbacks(tick)
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        try { renderer?.release() } catch (_: Throwable) {}
+        super.onDestroy()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -236,7 +280,7 @@ class RemoteLiveActivity : Activity() {
         override fun run() {
             renderStatus(); updateLiveLabel()
             // why no new picture arrives (with a picture on screen the reason goes under it; with none, in the middle)
-            val h = if (feed.watching) feed.health() else null
+            val h = if (feed.watching && !rtcOn) feed.health() else null
             if (h != null && lastFrameAt > 0) {
                 liveNote.text = "⚠ $h · showing the picture from " + Fmt.t(prefs, lastFrameAt); liveNote.visibility = View.VISIBLE
                 msgTv.visibility = View.GONE
@@ -260,6 +304,30 @@ class RemoteLiveActivity : Activity() {
             setOnClickListener { if (!feed.watching) feed.start() else toggleControls() }
         }
         root.addView(image, FrameLayout.LayoutParams(-1, -1))
+        if (Rtc.enabled) try {
+            renderer = org.webrtc.SurfaceViewRenderer(this).apply {
+                visibility = View.GONE
+                init(Rtc.egl.eglBaseContext, object : org.webrtc.RendererCommon.RendererEvents {
+                    override fun onFirstFrameRendered() {
+                        runOnUiThread {
+                            if (rtc == null) return@runOnUiThread
+                            rtcOn = true
+                            visibility = View.VISIBLE
+                            image.visibility = View.INVISIBLE
+                            if (feed.watching) feed.stop()   // the pictures aren't needed while video plays
+                            msgTv.visibility = View.GONE
+                            updateLiveLabel()
+                        }
+                    }
+                    override fun onFrameResolutionChanged(w: Int, h: Int, rot: Int) {
+                        runOnUiThread { if (rot % 180 != 0) { rtcW = h; rtcH = w } else { rtcW = w; rtcH = h }; cropView.invalidate() }
+                    }
+                })
+                setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FIT)
+                setOnClickListener { toggleControls() }
+            }
+            root.addView(renderer, FrameLayout.LayoutParams(-1, -1))
+        } catch (_: Throwable) { renderer = null }
         cropView = com.motioncam.CropView(this).apply {
             picture = { imageRect() }
             shape = com.motioncam.Crop.SHAPES.getOrNull(prefs.cropShape)?.second ?: 0f
@@ -442,6 +510,7 @@ class RemoteLiveActivity : Activity() {
             landCol.visibility = View.VISIBLE
             // the picture beside the column; the panel floats at its bottom
             image.layoutParams = FrameLayout.LayoutParams(-1, -1).apply { rightMargin = colPx }
+            renderer?.layoutParams = FrameLayout.LayoutParams(-1, -1).apply { rightMargin = colPx }
             bottomBox.background = android.graphics.drawable.GradientDrawable().apply { setColor(0x99202328.toInt()); cornerRadius = d(16).toFloat() }
             // no padding of its own: with nothing to show (no panel, note or unsent changes) it takes no room
             bottomBox.setPadding(d(4), 0, d(4), 0)
@@ -462,6 +531,7 @@ class RemoteLiveActivity : Activity() {
             for (i in 0 until chipRow.childCount) chipRow.getChildAt(i).layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(d(3), 0, d(3), 0) }
             strip.addView(chipRow)
             image.layoutParams = FrameLayout.LayoutParams(-1, -1)
+            renderer?.layoutParams = FrameLayout.LayoutParams(-1, -1)
             bottomBox.background = null
             bottomBox.setBackgroundColor(0xCC000000.toInt() or (Ui.PANEL and 0x00FFFFFF))
             bottomBox.setPadding(0, d(6), 0, d(8))
@@ -490,6 +560,7 @@ class RemoteLiveActivity : Activity() {
         // also called while the screen is being built, before the feed exists
         if (!::feed.isInitialized || !::liveTv.isInitialized) return
         val text = when {
+            rtcOn && r.online() -> "● LIVE · video"
             !r.online() -> "offline"
             !feed.watching -> "paused"
             lastFrameAt <= 0 -> "connecting…"
@@ -497,7 +568,7 @@ class RemoteLiveActivity : Activity() {
             else -> "● LIVE" + (if (compact == true) " · " else "\n") + "frame sent " + Fmt.t(prefs, lastFrameAt)
         }
         liveTv.text = text
-        liveTv.setTextColor(if (feed.watching && lastFrameAt > 0 && System.currentTimeMillis() - lastFrameAt < 8000) Ui.RED else Ui.GREY)
+        liveTv.setTextColor(if (rtcOn || feed.watching && lastFrameAt > 0 && System.currentTimeMillis() - lastFrameAt < 8000) Ui.RED else Ui.GREY)
     }
 
     // ------------------------------------------------------------------ the camera's state
@@ -520,6 +591,7 @@ class RemoteLiveActivity : Activity() {
 
     private fun refreshAll() {
         if (isFinishing) return
+        maybeStartRtc()   // the camera's status (or the PIN) may only have arrived now
         renderStatus()
         refreshChips()
         if (selected != null && !touching) configurePanel()

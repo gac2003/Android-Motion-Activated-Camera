@@ -147,6 +147,8 @@ class Prefs(ctx: Context) {
     var liveCamera: Boolean get() = b("liveCamera", false); set(v) = put("liveCamera", v)
     /** Your other phones may start MotionCam here by push (even locked, even if MotionCam was closed). On by default (it still needs the PIN and "Display over other apps"). */
     var liveRemoteStart: Boolean get() = b("liveRemoteStart", true); set(v) = put("liveRemoteStart", v)
+    /** Live view as smooth video (WebRTC, own build with a Cloudflare key) instead of a picture every 2 s. */
+    var liveSmooth: Boolean get() = b("liveSmooth", true); set(v) = put("liveSmooth", v)
     /** When this phone last started monitoring (standby is only for phones actually used as cameras). */
     var lastMonitoredAt: Long
         get() {
@@ -218,7 +220,7 @@ class Prefs(ctx: Context) {
         val REMOTE_KEYS = listOf("serverOn", "streamHd", "port")
         val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal", "cloudThumbs", "cloudPaused")
         /** Stay connected, PIN for the view, camera role (the network sign-in, its connection and PINs are kept). */
-        val LIVE_KEYS = listOf("liveStay", "livePinForView", "liveCamera", "liveStandby", "liveRemoteStart", "cardSnapshot")
+        val LIVE_KEYS = listOf("liveStay", "livePinForView", "liveCamera", "liveStandby", "liveRemoteStart", "liveSmooth", "cardSnapshot")
         val REMOTE_FOLDER_KEYS = listOf("remoteKeepCopy")
         val PLAYER_KEYS = listOf("skipMs", "stripZoom")
         val ALERT_KEYS = listOf("alertsOn", "alertsInApp", "alertsAlways", "alertsNoCard", "alertsPoll", "alertRemote", "alertMotion", "alertMotionGapMin", "alertMotionGapSec", "alertClip", "alertPicture", "alertBattery", "alertBatteryPct",

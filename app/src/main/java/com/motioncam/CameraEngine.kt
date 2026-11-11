@@ -760,7 +760,8 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         }
     }
 
-    private fun lowPowerIdle() = pre == null && monitoring && mode != Mode.RECORDING && sessionSt == null && FrameHub.overlaySink == null && prefs.lowPowerIdle
+    private fun lowPowerIdle() = pre == null && monitoring && mode != Mode.RECORDING && sessionSt == null && FrameHub.overlaySink == null &&
+        FrameHub.rtcSink == null && prefs.lowPowerIdle
 
     private fun pushRepeating() {
         val s = session ?: return
@@ -845,7 +846,30 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
 
     private fun onImage(r: ImageReader) {
         val img: Image = try { r.acquireLatestImage() } catch (e: Exception) { null } ?: return
-        try { processFrame(img) } catch (_: Exception) {} finally { img.close() }
+        try {
+            FrameHub.rtcSink?.let { sink -> try { sink(img.width, img.height, { buf -> toI420(img, buf) }, recordRotation(), img.timestamp) } catch (_: Exception) {} }
+            processFrame(img)
+        } catch (_: Exception) {} finally { img.close() }
+    }
+
+    /** Copies a YUV_420_888 camera image into a WebRTC I420 buffer (any row / pixel strides). */
+    private fun toI420(img: Image, out: org.webrtc.JavaI420Buffer) {
+        val w = img.width; val h = img.height
+        fun plane(src: Image.Plane, dst: java.nio.ByteBuffer, dstStride: Int, pw: Int, ph: Int) {
+            val sb = src.buffer; val rs = src.rowStride; val ps = src.pixelStride
+            val row = ByteArray(rs)
+            for (y in 0 until ph) {
+                sb.position(y * rs)
+                val n = minOf(rs, sb.remaining())
+                sb.get(row, 0, n)
+                dst.position(y * dstStride)
+                if (ps == 1) dst.put(row, 0, pw) else for (x in 0 until pw) dst.put(row[x * ps])
+            }
+        }
+        val p = img.planes
+        plane(p[0], out.dataY, out.strideY, w, h)
+        plane(p[1], out.dataU, out.strideU, (w + 1) / 2, (h + 1) / 2)
+        plane(p[2], out.dataV, out.strideV, (w + 1) / 2, (h + 1) / 2)
     }
 
     private fun processFrame(img: Image) {

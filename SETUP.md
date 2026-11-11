@@ -14,6 +14,7 @@ anyone else. GitHub builds the APK for you: you don't need Android Studio or a c
 | [5. Dropbox](#5-dropbox) | backup to Dropbox | 5 min |
 | [6. Build and install](#6-build-and-install) | your APK | 5 min |
 | [7. Push alerts](#7-push-alerts-optional) (optional) | instant alerts with MotionCam closed | 5 min |
+| [8. Smooth live video](#8-smooth-live-video-optional) (optional) | live view as video, on any network | 5 min |
 
 **Why build your own?** The APK you can download from this project has no online accounts built in. These features
 only work in a copy you build with your own free accounts:
@@ -191,6 +192,23 @@ check every 15 minutes. With it, a camera pushes each alert to your other phones
 
 Pushes are limited per camera (motion and clips at most every 5 seconds each, other alerts every 10 minutes,
 240 an hour at most); each phone's own alert settings still decide what it shows.
+
+## 8. Smooth live video (optional)
+
+Without this, the live view shows a picture every 2 seconds (through Firebase). With it, it's real video (up to 15
+frames a second, WebRTC): straight between the phones when the network allows, otherwise through a relay at
+Cloudflare, which also works on guest / hotel Wi-Fi that keeps devices apart.
+
+1. [Cloudflare dashboard](https://dash.cloudflare.com/) (a free account) → **Realtime** → **TURN Server** →
+   **Create**. Copy the **TURN Key ID** and the **API Token** (shown once).
+2. In your fork's **Secrets**: `MC_CF_TURN_KEY_ID` and `MC_CF_TURN_API_TOKEN`. Then build again.
+
+Cloudflare's relay costs $0.05 per GB after the first 1,000 GB each month; an hour of live view is roughly 100–250 MB,
+and only video that can't go straight between the phones uses the relay. The token ends up inside your APK (use a
+[personal build](#a-personal-build-in-a-private-repository)); if an APK leaks, delete the TURN key and make a new one.
+
+**To turn it off again**: on a phone, Settings → Your phones → *Smooth live video*; for everyone, delete the two
+secrets and build again (the live view goes back to pictures).
 
 ## A personal build in a private repository
 

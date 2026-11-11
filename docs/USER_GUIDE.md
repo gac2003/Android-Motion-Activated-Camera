@@ -155,7 +155,8 @@ be a camera needs a **PIN**.
 * **Alerts** that don't nag: one motion alert per camera per few minutes, battery low, too hot, offline (only for a
   camera that was monitoring), quiet hours, mute per camera. **Stay connected** gets them instantly with the app
   closed; otherwise MotionCam checks about every 15 minutes. Nothing is lost: **Activity** keeps everything.
-* **Tap a camera** for its screen: live view (a frame every 2 s), a high-quality **Screenshot**, its controls and
+* **Tap a camera** for its screen: live view (a frame every 2 s, or smooth video with your own Cloudflare key:
+  [SETUP.md](../SETUP.md#8-smooth-live-video-optional)), a high-quality **Screenshot**, its controls and
   settings (sent when you tap **Save**), and:
   * **Stop monitoring / Start monitoring**: no detection or recording. The camera stays on for 10 minutes (start
     again instantly, watch live), then turns off by itself to save battery and heat, but only if it can still be

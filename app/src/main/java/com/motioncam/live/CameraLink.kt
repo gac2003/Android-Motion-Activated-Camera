@@ -57,6 +57,7 @@ object CameraLink {
         app = c
         Live.cameraActive = true
         Live.refresh(c)
+        try { RtcCamera.start(c) } catch (_: Throwable) {}   // smooth live video, own build with a Cloudflare key
         last = null
         val l: (Status) -> Unit = { s -> try { onStatus(c, s) } catch (_: Exception) {} }
         statusListener = l
@@ -111,6 +112,7 @@ object CameraLink {
         val c = ctx.applicationContext
         if (!running) return
         running = false
+        try { RtcCamera.stop(c) } catch (_: Throwable) {}
         main.removeCallbacks(dailyTrim)
         c.getSharedPreferences("motioncam", Context.MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(prefsL)
         main.removeCallbacks(publishSoon)
@@ -361,7 +363,8 @@ object CameraLink {
             .put("name", Device.name(ctx)).put("mode", s.mode.name).put("monitoring", s.monitoring).put("message", s.message)
             .put("remote", holderJson())
             .put("standby", CameraService.inStandby).put("standbyOn", CameraService.standbyAllowed(ctx))
-            .put("offAt", CameraService.instance?.autoOffAt ?: 0L).put("canStart", CameraService.inStandby || (CameraService.monitoring && !s.monitoring))
+            .put("offAt", CameraService.instance?.autoOffAt ?: 0L)
+            .put("rtc", Rtc.enabled).put("canStart", CameraService.inStandby || (CameraService.monitoring && !s.monitoring))
             .put("recSince", s.recordingSinceWall).put("lastMotion", s.lastMotionWall).put("battery", s.batteryPct)
             .put("charging", s.charging).put("tempC", s.tempC.toDouble()).put("lens", s.lens).put("format", s.format)
             .put("pin", pin(ctx) != null).put("pinForView", pin(ctx) != null && p.livePinForView)
@@ -503,6 +506,9 @@ object CameraLink {
     private var fails = 0
     private var lockedUntil = 0L
     private var lockouts = 0
+
+    /** A live video request signed with this camera's PIN (when its live view needs the PIN). */
+    fun verifyView(ctx: Context, sealed: String, sig: String?): Boolean = pinOk(ctx, sealed, sig) == true
 
     /** A remote start (by push) signed with this camera's PIN; it must have a PIN. Counts towards the lock-out. */
     fun verifyStart(ctx: Context, sealed: String, sig: String?): Boolean = hasPin(ctx) && pinOk(ctx, sealed, sig) == true

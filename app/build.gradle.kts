@@ -39,6 +39,11 @@ android {
         // push alerts: a Firebase service account key that may only send messages (SETUP.md); the JSON file's
         // contents, or that base64-encoded. Kept base64 in the build. Empty = cameras don't send pushes.
         buildConfigField("String", "FCM_SERVICE_ACCOUNT", str(fcmKey(cred("MC_FCM_SERVICE_ACCOUNT"))))
+        // smooth live video (WebRTC) through your Cloudflare TURN key; empty = off (the live view stays as pictures)
+        buildConfigField("String", "CF_TURN_KEY_ID", str(cred("MC_CF_TURN_KEY_ID")))
+        buildConfigField("String", "CF_TURN_API_TOKEN", str(cred("MC_CF_TURN_API_TOKEN")))
+        // phones only (the video library's emulator builds would add ~25 MB)
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         // MC_GOOGLE_DRIVE=off: no Google Drive (the public build of a repository that also makes a personal build)
         buildConfigField("boolean", "GOOGLE_DRIVE", (cred("MC_GOOGLE_DRIVE") != "off").toString())
         minSdk = 30
@@ -97,6 +102,8 @@ dependencies {
     implementation("com.google.firebase:firebase-database")
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-messaging")
+    // WebRTC for smooth live video (inactive without a Cloudflare TURN key)
+    implementation("io.getstream:stream-webrtc-android:1.3.10")
     // Google sign-in for it (basic profile only: no Google verification needed)
     implementation("androidx.credentials:credentials:1.3.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.3.0")

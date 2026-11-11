@@ -89,6 +89,8 @@ class RemoteCameraActivity : Activity() {
     }
     private lateinit var r: CamRemote
     private lateinit var feed: CamRemote.Feed
+    /** Smooth video in the picture, when this build has it (else the pictures). */
+    private var video: LiveVideo? = null
     private var lastSettings = ""
     private val refresh: () -> Unit = { renderIfChanged() }
     /** Settings changed here but not sent yet (sent together with Save). */
@@ -140,7 +142,7 @@ class RemoteCameraActivity : Activity() {
         // live view · screenshot (one high-quality picture, shown below) · activity log
         val gap = Ui.dp(this, 6)
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; val p = Ui.dp(this@RemoteCameraActivity, 8); setPadding(p, p, p, if (land) p else 0) }
-        liveBtn = Ui.chip(this, "▶ Live view").apply { setOnClickListener { if (feed.watching) stopWatching() else startWatching() } }
+        liveBtn = Ui.chip(this, "▶ Live view").apply { setOnClickListener { if (feed.watching || video?.active == true) stopWatching() else startWatching() } }
         buttons.addView(liveBtn, LinearLayout.LayoutParams(0, -2, 1f))
         buttons.addView(Ui.chip(this, "Screenshot").apply {
             contentDescription = "Ask the camera for one high-quality picture (shown below)"
@@ -170,6 +172,16 @@ class RemoteCameraActivity : Activity() {
             })
         } else setContentView(root)
         f = Form(this, box)
+        video = LiveVideo(this, cam, r, frame, image,
+            playing = {
+                if (feed.watching) feed.stop()   // the pictures aren't needed while video plays
+                imageLabel.text = "● LIVE · video"
+                liveBtn.text = "■ Stop live"
+                liveNote.visibility = android.view.View.GONE
+            }) { why ->
+            Toast.makeText(this, "Video didn't connect ($why): showing pictures", Toast.LENGTH_LONG).show()
+            if (!feed.watching) feed.start()
+        }
         feed = r.Feed(3 * 60_000L, { bmp, at ->
             image.setImageBitmap(bmp)
             imageLabel.text = "● LIVE · frame sent " + Fmt.t(prefs, at)
@@ -188,7 +200,7 @@ class RemoteCameraActivity : Activity() {
     /** Once a second while watching: under the picture, why no new one arrives (the last one stays as it is). */
     private val liveTick = object : Runnable {
         override fun run() {
-            val h = if (feed.watching) feed.health() else null
+            val h = if (feed.watching && video?.on != true) feed.health() else null
             if (h != null) {
                 val last = CamRemote.lastFrames[cam]
                 liveNote.text = "⚠ " + h + (last?.let { " · showing the picture from " + Fmt.t(prefs, it.second) } ?: "")
@@ -373,13 +385,21 @@ class RemoteCameraActivity : Activity() {
     // ------------------------------------------------------------------ live view / frames
 
     private fun startWatching() {
+        // pictures right away; video takes over once its first frame shows
         feed.start()
-        if (feed.watching) liveBtn.text = "■ Stop live"
+        video?.start()
+        if (feed.watching || video?.active == true) liveBtn.text = "■ Stop live"
     }
 
     private fun stopWatching() {
         feed.stop()
+        video?.stop()
         liveBtn.text = "▶ Live view"
+    }
+
+    override fun onDestroy() {
+        video?.release()
+        super.onDestroy()
     }
 
     private fun requestFrame() {

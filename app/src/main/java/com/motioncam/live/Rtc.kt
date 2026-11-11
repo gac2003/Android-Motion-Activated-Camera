@@ -445,3 +445,67 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
         r?.removeValue()
     }
 }
+
+/**
+ * Smooth live video in a small picture (the camera's screen): a video surface placed under [under] in [frame], the
+ * relay allowance checked first, and a fallback to the pictures with a reason. [playing] when video shows.
+ */
+class LiveVideo(private val a: android.app.Activity, private val cam: String, private val r: CamRemote,
+                frame: android.widget.FrameLayout, private val under: android.view.View,
+                private val playing: () -> Unit, private val fallback: (why: String) -> Unit) {
+    private val renderer: org.webrtc.SurfaceViewRenderer? = if (!Rtc.enabled) null else try {
+        org.webrtc.SurfaceViewRenderer(a).apply {
+            init(Rtc.egl.eglBaseContext, object : org.webrtc.RendererCommon.RendererEvents {
+                override fun onFirstFrameRendered() {
+                    a.runOnUiThread {
+                        if (viewer == null) return@runOnUiThread
+                        on = true
+                        under.visibility = android.view.View.INVISIBLE
+                        com.motioncam.Health.log(a, "Live video from ${r.name()}: playing")
+                        playing()
+                    }
+                }
+                override fun onFrameResolutionChanged(w: Int, h: Int, rot: Int) {}
+            })
+            setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FIT)
+            setOnClickListener { under.performClick() }   // same as tapping the picture (full screen)
+        }.also { frame.addView(it, 0, android.widget.FrameLayout.LayoutParams(-1, -1)) }   // under the pictures (see RemoteLiveActivity)
+    } catch (_: Throwable) { null }
+
+    private var viewer: RtcViewer? = null
+    /** Video is showing. */
+    var on = false; private set
+    /** Video was tried (and is connecting or showing). */
+    val active get() = viewer != null
+
+    /** Tries video; false when it can't be used here (then the pictures are the live view). */
+    fun start(): Boolean {
+        val rd = renderer ?: return false
+        if (viewer != null) return true
+        if (!com.motioncam.Prefs(a).liveSmooth || !r.online()) return false
+        val s = r.status() ?: return false
+        if (!s.optBoolean("rtc")) return false
+        val pin = r.pinFor()
+        if (s.optBoolean("pinForView") && pin == null) return false
+        Rtc.usage(a) { used, capGb ->
+            if (a.isFinishing || viewer != null) return@usage
+            viewer = RtcViewer(a, cam, pin, rd, used < capGb * 1_000_000_000L, used, capGb,
+                overCap = { done("this month's relay allowance is used up") }) { why -> done(why) }.also { it.start() }
+        }
+        return true
+    }
+
+    private fun done(why: String) {
+        stop()
+        com.motioncam.Health.log(a, "Live video from ${r.name()} didn't work: $why")
+        fallback(why)
+    }
+
+    fun stop() {
+        viewer?.stop(); viewer = null; on = false
+        renderer?.clearImage()
+        under.visibility = android.view.View.VISIBLE
+    }
+
+    fun release() { stop(); try { renderer?.release() } catch (_: Throwable) {} }
+}

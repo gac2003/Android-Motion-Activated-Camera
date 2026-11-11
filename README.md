@@ -44,7 +44,7 @@ Tested running 24/7 on a Galaxy S23 Ultra and S20 FE.
 | **Google Drive and Dropbox backup** | ❌ | ✅ with **your own** free accounts |
 | **Your phones: alerts, live view and remote control between phones** | ❌ | ✅ with **your own** free Firebase project |
 | **Push alerts with MotionCam closed** | ❌ | ✅ optional, a send-only key from the same project |
-| **Smooth live video on any network** | ❌ | ✅ optional, with **your own** Cloudflare account (free tier) |
+| **Smooth live video stream on any network** | ❌ | ✅ optional, with **your own** Cloudflare account (free tier) |
 | **How** | [Download the APK](https://github.com/gac2003/Android-Motion-Activated-Camera/releases/latest/download/MotionCam.apk) on the phone, open it, allow installing (*Install anyway* if Play Protect asks) | Fork this repo and follow **[SETUP.md](SETUP.md)**: GitHub builds the APK for you, no Android Studio needed |
 
 > [!IMPORTANT]

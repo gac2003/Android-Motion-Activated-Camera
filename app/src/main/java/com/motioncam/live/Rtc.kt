@@ -81,6 +81,41 @@ object Rtc {
         return out
     }
 
+    // ------------------------------------------------------------------ the relay's monthly allowance (Cloudflare has no cap)
+    //
+    // Only video through the relay costs anything (Cloudflare bills what it sends out). Each viewing phone measures the
+    // video it receives through the relay (plus 10% for overhead) and adds it to one counter for the whole network:
+    // rtcUsage/<yyyyMM, UTC> = bytes. The cap (settings/relayCapGb, default 975 GB of Cloudflare's free 1,000) is the
+    // same for every phone. Once it's reached, live video only uses direct connections (free) until next month, and
+    // falls back to pictures where that isn't possible.
+
+    const val DEFAULT_CAP_GB = 975
+    private fun month() = java.text.SimpleDateFormat("yyyyMM", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date())
+
+    /** This month's relayed bytes and the cap (GB) on [done] (main thread). */
+    fun usage(ctx: Context, done: (used: Long, capGb: Int) -> Unit) {
+        val m = Handler(Looper.getMainLooper())
+        val u = Live.ref(ctx, "rtcUsage/${month()}"); val c = Live.ref(ctx, "settings/relayCapGb")
+        if (u == null || c == null) { done(0, DEFAULT_CAP_GB); return }
+        u.addListenerForSingleValueEvent(object : ValueEventListener {
+            override fun onDataChange(s: DataSnapshot) {
+                val used = (s.value as? Number)?.toLong() ?: 0L
+                c.addListenerForSingleValueEvent(object : ValueEventListener {
+                    override fun onDataChange(cs: DataSnapshot) { val cap = (cs.value as? Number)?.toInt() ?: DEFAULT_CAP_GB; m.post { done(used, cap) } }
+                    override fun onCancelled(e: DatabaseError) { m.post { done(used, DEFAULT_CAP_GB) } }
+                })
+            }
+            override fun onCancelled(e: DatabaseError) { m.post { done(0, DEFAULT_CAP_GB) } }
+        })
+    }
+
+    fun setCap(ctx: Context, gb: Int) { Live.ref(ctx, "settings/relayCapGb")?.setValue(gb) }
+
+    fun addUsage(ctx: Context, bytes: Long) { if (bytes > 0) Live.ref(ctx, "rtcUsage/${month()}")?.setValue(ServerValue.increment(bytes)) }
+
+    /** STUN only: direct connections, no relay (free). */
+    val stunOnly: List<PeerConnection.IceServer> get() = listOf(PeerConnection.IceServer.builder("stun:stun.cloudflare.com:3478").createIceServer())
+
     // ------------------------------------------------------------------ WebRTC itself (one factory per process)
 
     val egl: EglBase by lazy { EglBase.create() }
@@ -182,7 +217,8 @@ object RtcCamera {
         // the live view needs the PIN on this camera: the offer must be signed with it
         if (CameraLink.pinFor(ctx) != null && !CameraLink.verifyView(ctx, sealed, s.child("offer/sig").value as? String)) return
         val f = Rtc.factory(ctx)
-        val servers = Rtc.iceServers()
+        // the month's relay allowance is used up: direct connections only (the viewer says so)
+        val servers = if (o.optBoolean("relay", true)) Rtc.iceServers() else Rtc.stunOnly
         main.post {
             if (sessions.containsKey(id) || sessions.size >= 3) return@post
             ensureTrack(ctx, f)
@@ -259,7 +295,8 @@ object RtcCamera {
  * [stop] (or if the phone drops: the session is removed by the server). [failed] when no connection comes up.
  */
 class RtcViewer(private val ctx: Context, private val cam: String, private val pin: String?, private val renderTo: VideoSink,
-                private val failed: () -> Unit) {
+                private val allowRelay: Boolean, private val usedBefore: Long, private val capGb: Int,
+                private val overCap: () -> Unit, private val failed: () -> Unit) {
     private val main = Handler(Looper.getMainLooper())
     private val id = Device.id(ctx) + "-" + System.currentTimeMillis()
     private var pc: PeerConnection? = null
@@ -271,7 +308,7 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
     fun start() {
         Thread {
             val f = try { Rtc.factory(ctx) } catch (_: Exception) { null }
-            val servers = Rtc.iceServers()
+            val servers = if (allowRelay) Rtc.iceServers() else Rtc.stunOnly
             main.post { if (!stopped && f != null) connect(f, servers) else if (f == null) failed() }
         }.start()
         main.postDelayed({ if (!stopped && pc?.iceConnectionState() != PeerConnection.IceConnectionState.CONNECTED &&
@@ -296,7 +333,7 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
                 if (stopped) return@post
                 p.setLocalDescription(Rtc.Sdp(), d)
                 val sealed = LiveNet.seal(ctx, JSONObject().put("sdp", d.description).put("by", Device.id(ctx)).put("byName", Device.name(ctx))
-                    .put("at", System.currentTimeMillis()).toString())
+                    .put("at", System.currentTimeMillis()).put("relay", allowRelay).toString())
                 val offer = HashMap<String, Any>(); offer["d"] = sealed
                 pin?.let { offer["sig"] = CameraLink.sign(cam, it, sealed) }
                 r.child("offer").setValue(offer)
@@ -316,13 +353,44 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
                     override fun onChildMoved(c: DataSnapshot, prev: String?) {}
                     override fun onCancelled(e: DatabaseError) {}
                 }.also { r.child("c").addChildEventListener(it) }
+                main.postDelayed(meter, 10_000)
             }
         }, MediaConstraints())
+    }
+
+    // ---- relay metering: every 10 s, what came through the relay since last time goes to the month's counter
+    private var lastBytes = 0L
+    private var relayed = 0L
+    private val meter: Runnable = object : Runnable {
+        override fun run() {
+            val p = pc ?: return
+            if (stopped) return
+            p.getStats { rep ->
+                val m = rep.statsMap
+                val pair = m.values.firstOrNull { it.type == "transport" }?.members?.get("selectedCandidatePairId")?.let { m[it.toString()] }
+                    ?: m.values.firstOrNull { it.type == "candidate-pair" && it.members["nominated"] == true && it.members["state"] == "succeeded" }
+                if (pair != null) {
+                    val bytes = (pair.members["bytesReceived"] as? Number)?.toLong() ?: (pair.members["bytesReceived"]?.toString()?.toLongOrNull() ?: 0L)
+                    fun type(id: Any?) = m[id?.toString()]?.members?.get("candidateType")?.toString()
+                    val relay = type(pair.members["localCandidateId"]) == "relay" || type(pair.members["remoteCandidateId"]) == "relay"
+                    val delta = (bytes - lastBytes).coerceAtLeast(0L)
+                    lastBytes = bytes
+                    if (relay && delta > 0) {
+                        val billed = delta + delta / 10   // + TURN overhead
+                        relayed += billed
+                        Rtc.addUsage(ctx, billed)
+                        if (usedBefore + relayed >= capGb * 1_000_000_000L) main.post { if (!stopped) { stop(); overCap() } }
+                    }
+                }
+            }
+            main.postDelayed(this, 10_000)
+        }
     }
 
     fun stop() {
         if (stopped) return
         stopped = true
+        main.removeCallbacks(meter)
         val r = ref
         answerL?.let { r?.child("answer")?.removeEventListener(it) }
         candL?.let { r?.child("c")?.removeEventListener(it) }

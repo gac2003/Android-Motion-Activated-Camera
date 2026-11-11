@@ -149,6 +149,8 @@ class Prefs(ctx: Context) {
     var liveRemoteStart: Boolean get() = b("liveRemoteStart", true); set(v) = put("liveRemoteStart", v)
     /** Live view as smooth video (WebRTC, own build with a Cloudflare key) instead of a picture every 2 s. */
     var liveSmooth: Boolean get() = b("liveSmooth", true); set(v) = put("liveSmooth", v)
+    /** The network's monthly relay limit as last seen here (the network's own value is in the live connection). */
+    var relayCapGb: Int get() = i("relayCapGb", 975); set(v) = put("relayCapGb", v)
     /** When this phone last started monitoring (standby is only for phones actually used as cameras). */
     var lastMonitoredAt: Long
         get() {

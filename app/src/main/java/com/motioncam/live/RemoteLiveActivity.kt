@@ -56,19 +56,37 @@ class RemoteLiveActivity : Activity() {
     /** Video if possible: this build has it, it's on here, the camera supports it, and the PIN is known if needed. */
     private fun maybeStartRtc() {
         val rd = renderer ?: return
-        if (rtc != null || rtcFailed || !prefs.liveSmooth || !r.online()) return
+        if (rtc != null || rtcFailed || rtcChecking || !prefs.liveSmooth || !r.online()) return
         val s = status() ?: return
         if (!s.optBoolean("rtc")) return
         val pin = r.pinFor()
         if (s.optBoolean("pinForView") && pin == null) return
-        rtc = RtcViewer(this, cam, pin, rd) {
-            // no connection: keep (or go back to) the pictures
-            rtcFailed = true; rtc = null; rtcOn = false
-            rd.visibility = View.GONE; image.visibility = View.VISIBLE
-            if (!feed.watching) feed.start()
-            updateLiveLabel()
-        }.also { it.start() }
+        rtcChecking = true
+        // the relay's monthly allowance (Cloudflare has no cap of its own): over it, direct connections only
+        Rtc.usage(this) { used, capGb ->
+            rtcChecking = false
+            if (isFinishing || rtc != null || rtcFailed || !resumedNow) return@usage
+            val allowRelay = used < capGb * 1_000_000_000L
+            relayNote = if (allowRelay) null else "relay limit reached this month"
+            fun backToPictures() {
+                rtc = null; rtcOn = false
+                rd.visibility = View.GONE; image.visibility = View.VISIBLE
+                if (!feed.watching) feed.start()
+                updateLiveLabel()
+            }
+            rtc = RtcViewer(this, cam, pin, rd, allowRelay, used, capGb,
+                overCap = {
+                    rtcFailed = true; backToPictures()
+                    Toast.makeText(this, "This month's video relay allowance ($capGb GB) is used up: back to pictures", Toast.LENGTH_LONG).show()
+                }) {
+                // no connection: keep (or go back to) the pictures
+                rtcFailed = true; backToPictures()
+            }.also { it.start() }
+        }
     }
+    private var rtcChecking = false
+    private var relayNote: String? = null
+    private var resumedNow = false
 
     private fun stopRtc() {
         rtc?.stop(); rtc = null; rtcOn = false
@@ -238,6 +256,7 @@ class RemoteLiveActivity : Activity() {
         refreshAll()
         feed.start()
         rtcFailed = false
+        resumedNow = true
         maybeStartRtc()
         ui.post(tick)
     }
@@ -247,6 +266,7 @@ class RemoteLiveActivity : Activity() {
         Live.eventListeners -= events
         r.leave()   // gives the remote back
         if (::feed.isInitialized) feed.stop()
+        resumedNow = false
         stopRtc()
         ui.removeCallbacks(tick)
         super.onPause()
@@ -560,7 +580,7 @@ class RemoteLiveActivity : Activity() {
         // also called while the screen is being built, before the feed exists
         if (!::feed.isInitialized || !::liveTv.isInitialized) return
         val text = when {
-            rtcOn && r.online() -> "● LIVE · video"
+            rtcOn && r.online() -> "● LIVE · video" + (relayNote?.let { " (direct only: $it)" } ?: "")
             !r.online() -> "offline"
             !feed.watching -> "paused"
             lastFrameAt <= 0 -> "connecting…"

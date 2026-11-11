@@ -117,6 +117,14 @@ class LiveActivity : Activity() {
             f.note("Live view as real video (up to 15 frames a second), straight between the phones or through your Cloudflare " +
                 "relay when the network doesn't allow that. Off: a picture every 2 seconds, as before. If video can't connect, " +
                 "the pictures are used automatically.")
+            // Cloudflare has no spending cap: MotionCam keeps count and stops using the relay at this limit
+            val bar = f.slider("Monthly relay limit (all phones)", 10, 1000, prefs.relayCapGb, { "$it GB" }) { prefs.relayCapGb = it; Rtc.setCap(this, it) }
+            val usageTv = f.note("Relay used this month: …")
+            Rtc.usage(this) { used, capGb ->
+                if (capGb != prefs.relayCapGb) { prefs.relayCapGb = capGb; bar.progress = capGb - 10 }
+                usageTv.text = "Relay used this month: %.1f GB of your %d GB limit (Cloudflare: first 1,000 GB free, then \$0.05/GB). ".format(used / 1e9, capGb) +
+                    "At the limit, live video only connects directly (free) until next month, otherwise pictures."
+            }
         }
 
         f.title("This phone as a camera")

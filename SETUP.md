@@ -204,7 +204,9 @@ Cloudflare, which also works on guest / hotel Wi-Fi that keeps devices apart.
 2. In your fork's **Secrets**: `MC_CF_TURN_KEY_ID` and `MC_CF_TURN_API_TOKEN`. Then build again.
 
 Cloudflare's relay costs $0.05 per GB after the first 1,000 GB each month; an hour of live view is roughly 100–250 MB,
-and only video that can't go straight between the phones uses the relay. The token ends up inside your APK (use a
+and only video that can't go straight between the phones uses the relay. Cloudflare has no spending cap, so MotionCam
+keeps count: every phone adds the video it gets through the relay to one monthly total, and at the limit (975 GB by
+default, Settings → Your phones → *Monthly relay limit*) live video only connects directly (free) until next month. The token ends up inside your APK (use a
 [personal build](#a-personal-build-in-a-private-repository)); if an APK leaks, delete the TURN key and make a new one.
 
 **To turn it off again**: on a phone, Settings → Your phones → *Smooth live video*; for everyone, delete the two

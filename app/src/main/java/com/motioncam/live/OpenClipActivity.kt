@@ -59,6 +59,13 @@ class OpenClipActivity : Activity() {
 
     override fun onDestroy() { stopped = true; ui.removeCallbacksAndMessages(null); super.onDestroy() }
 
+    /** Leaving (Back, ‹) cancels the search at once: the clip never opens after you've left this screen. */
+    override fun finish() {
+        stopped = true
+        ui.removeCallbacksAndMessages(null)
+        super.finish()
+    }
+
     private val name get() = clip.optString("name")
 
     /** This phone's remote folders that are the camera's backup folders (same folder), best first. */
@@ -91,7 +98,7 @@ class OpenClipActivity : Activity() {
                 f.button("Open Remote Folders") { startActivity(Intent(this, RemoteFoldersActivity::class.java)) }
                 camButtons()
             }
-            list.size == 1 -> waitFor(list[0])
+            list.size == 1 -> waitFor(list[0])   // (cancelled with the screen, see finish)
             else -> pick(list)
         }
     }
@@ -134,6 +141,7 @@ class OpenClipActivity : Activity() {
         var tries = 0
         var decided = false
         fun play() {
+            if (stopped || isFinishing) return
             startActivity(Intent(this, PlayerActivity::class.java)
                 .putExtra(PlayerActivity.EXTRA_REMOTE, src.id).putExtra(PlayerActivity.EXTRA_START_ID, RemoteRepo.idFor(src.id, name)))
             finish()

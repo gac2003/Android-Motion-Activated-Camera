@@ -70,7 +70,7 @@ class RemoteLiveActivity : Activity() {
             val allowRelay = used < capGb * 1_000_000_000L
             relayNote = if (allowRelay) null else "relay limit reached this month"
             fun backToPictures() {
-                rtc = null; rtcOn = false
+                rtc = null; rtcOn = false; reconnecting = false
                 rd.clearImage(); image.visibility = View.VISIBLE
                 if (!feed.watching) feed.start()
                 updateLiveLabel()
@@ -81,6 +81,15 @@ class RemoteLiveActivity : Activity() {
                     Toast.makeText(this, "This month's video relay allowance ($capGb GB) is used up: back to pictures", Toast.LENGTH_LONG).show()
                 },
                 firstFrame = { w, h -> videoStarted(w, h) }) { why ->
+                // it was playing and dropped: reconnect (the last frame stays) a few times before falling back
+                if ((rtcOn || reconnecting) && rtcReconnects < 3) {
+                    rtcReconnects++
+                    com.motioncam.Health.log(this, "Live video from ${r.name()} dropped ($why): reconnecting")
+                    rtc = null; rtcOn = false; reconnecting = true
+                    updateLiveLabel()
+                    ui.postDelayed({ if (resumedNow && rtc == null) maybeStartRtc() }, 1500)
+                    return@RtcViewer
+                }
                 // no connection: keep (or go back to) the pictures, and say why
                 rtcFailed = true; backToPictures()
                 videoIssue = why
@@ -88,9 +97,11 @@ class RemoteLiveActivity : Activity() {
                 Toast.makeText(this, "Video didn't connect ($why): showing pictures", Toast.LENGTH_LONG).show()
                 updateLiveLabel()
             }.also { it.start() }
+            val mine = rtc
             // connected, but no picture: the camera isn't sending frames
             ui.postDelayed({
                 val v = rtc ?: return@postDelayed
+                if (v !== mine) return@postDelayed   // a newer connection has its own check
                 if (!rtcOn && v.connected && rtcRetries < 1) {
                     // once: a fresh connection usually brings the picture
                     rtcRetries++
@@ -109,6 +120,9 @@ class RemoteLiveActivity : Activity() {
     }
     private var rtcChecking = false
     private var rtcRetries = 0
+    private var rtcReconnects = 0
+    /** Video dropped after playing and is reconnecting (the last frame stays on screen). */
+    private var reconnecting = false
     private var relayNote: String? = null
     /** Why video didn't work (shown with the pictures). */
     private var videoIssue: String? = null
@@ -117,7 +131,7 @@ class RemoteLiveActivity : Activity() {
     /** This connection's first video frame arrived: video replaces the pictures. */
     private fun videoStarted(w: Int, h: Int) {
         if (rtc == null) return
-        rtcOn = true
+        rtcOn = true; reconnecting = false; rtcReconnects = 0
         if (w > 0 && h > 0) { rtcW = w; rtcH = h }
         com.motioncam.Health.log(this, "Live video from ${r.name()}: playing")
         image.visibility = View.INVISIBLE
@@ -617,6 +631,7 @@ class RemoteLiveActivity : Activity() {
         if (!::feed.isInitialized || !::liveTv.isInitialized) return
         val text = when {
             rtcOn && r.online() -> "● LIVE · video" + (relayNote?.let { " (direct only: $it)" } ?: "")
+            reconnecting && r.online() -> "● LIVE · video reconnecting…"
             videoIssue != null && feed.watching && lastFrameAt > 0 && r.online() -> "● LIVE · pictures (video: ${videoIssue})"
             !r.online() -> "offline"
             !feed.watching -> "paused"

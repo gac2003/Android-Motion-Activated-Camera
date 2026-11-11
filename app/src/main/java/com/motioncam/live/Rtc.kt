@@ -40,7 +40,8 @@ import java.net.URL
  *   cams/<camera>/rtc/<session>/offer  {d: sealed {sdp, by, byName, at}, sig (PIN, when the live view needs it)}
  *   cams/<camera>/rtc/<session>/answer {d: sealed sdp}
  *   cams/<camera>/rtc/<session>/v/<id>, c/<id>   ICE candidates from the viewer / the camera (sealed)
- * The viewer removes the session when it leaves (also if it drops: onDisconnect); the camera then closes it.
+ * The viewer removes the session when it leaves; the camera then closes it (and closes it by itself if the video
+ * connection fails). Not removed when the viewer's live connection merely blips: that used to end working video.
  */
 object Rtc {
     val enabled: Boolean get() = com.motioncam.BuildConfig.CF_TURN_KEY_ID.isNotEmpty() && com.motioncam.BuildConfig.CF_TURN_API_TOKEN.isNotEmpty()
@@ -409,7 +410,6 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
 
     private fun connect(f: PeerConnectionFactory, servers: List<PeerConnection.IceServer>) {
         val r = ref ?: run { failed("not connected to your phones"); return }
-        r.onDisconnect().removeValue()
         val p = f.createPeerConnection(Rtc.config(servers), object : Rtc.PcObserver() {
             override fun onIceCandidate(c: IceCandidate) { ref?.child("v")?.push()?.setValue(LiveNet.seal(ctx, Rtc.candJson(c))) }
             override fun onTrack(t: RtpTransceiver?) { (t?.receiver?.track() as? VideoTrack)?.let { v -> main.post { if (!stopped) { track = v; v.addSink(sink) } } } }
@@ -547,6 +547,7 @@ class LiveVideo(private val a: android.app.Activity, private val cam: String, pr
                 firstFrame = { _, _ ->
                     if (viewer != null) {
                         on = true
+                        reconnects = 0
                         under.visibility = android.view.View.INVISIBLE
                         com.motioncam.Health.log(a, "Live video from ${r.name()}: playing")
                         playing()
@@ -556,7 +557,17 @@ class LiveVideo(private val a: android.app.Activity, private val cam: String, pr
         return true
     }
 
+    private var reconnects = 0
+
     private fun done(why: String) {
+        // it was playing and dropped: reconnect (keeping the last frame) a few times before falling back
+        if (on && reconnects < 3) {
+            reconnects++
+            com.motioncam.Health.log(a, "Live video from ${r.name()} dropped ($why): reconnecting")
+            viewer?.stop(); viewer = null; on = false
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ if (!a.isFinishing && viewer == null && !starting) start() }, 1500)
+            return
+        }
         stop()
         com.motioncam.Health.log(a, "Live video from ${r.name()} didn't work: $why")
         fallback(why)

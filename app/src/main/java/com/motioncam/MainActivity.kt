@@ -30,6 +30,10 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 class MainActivity : Activity() {
+    companion object {
+        /** From the "monitoring stopped unexpectedly" notification: start monitoring again. */
+        const val EXTRA_RESUME = "resume"
+    }
     private lateinit var prefs: Prefs
     private lateinit var frame: AspectFrame
     private lateinit var texture: TextureView
@@ -138,6 +142,14 @@ class MainActivity : Activity() {
         resumed = true
         StatusBus.add(statusListener)
         com.motioncam.cloud.CloudSync.kick(this)
+        // monitoring should be on but isn't (Android stopped MotionCam): resume it now that we're on screen
+        if ((Health.wanted(this) || intent?.getBooleanExtra(EXTRA_RESUME, false) == true) && !CameraService.monitoring && hasCamera()) {
+            intent?.removeExtra(EXTRA_RESUME)
+            if (Health.wanted(this)) Health.reportInterrupted(this, "found when camera mode was opened")
+            Health.log(this, "Monitoring resumed from camera mode")
+            CameraService.start(this)
+            Toast.makeText(this, "Monitoring had stopped (Android closed MotionCam) — resumed", Toast.LENGTH_LONG).show()
+        }
         CameraService.ensureStandby(this)   // camera phone on the live connection: reachable while not monitoring
         updateFlags()
         (getSystemService(DISPLAY_SERVICE) as DisplayManager).registerDisplayListener(displayListener, ui)

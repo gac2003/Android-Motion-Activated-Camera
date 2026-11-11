@@ -61,6 +61,8 @@
         <activity android:name=".live.LiveActivity" android:exported="false" />
         <activity android:name=".live.RemoteCameraActivity" android:exported="false" />
         <activity android:name=".live.OpenClipActivity" android:exported="false" />
+        <service android:name=".CameraWatchdog" android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
         <service android:name=".live.AlertCheckJob" android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
         <activity android:name=".live.RemoteLiveActivity" android:exported="false"

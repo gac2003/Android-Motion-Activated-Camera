@@ -128,10 +128,10 @@ object Push {
     }
 
     /** A camera event was written ([key], at server time [t]): pushed to the other phones when worth it. */
-    fun onEvent(ctx: Context, type: String, d: JSONObject, key: String?, t: Long) {
+    fun onEvent(ctx: Context, type: String, d: JSONObject, key: String?, t: Long, to: List<String>? = null) {
         if (!canSend || type !in PUSHED) return
         val me = Device.id(ctx)
-        val tokens = Live.phones.values.filter { it.id != me && !it.push.isNullOrEmpty() }.mapNotNull { it.push }.distinct()
+        val tokens = to ?: Live.phones.values.filter { it.id != me && !it.push.isNullOrEmpty() }.mapNotNull { it.push }.distinct()
         if (tokens.isEmpty() || !allow(type, System.currentTimeMillis())) return
         val app = ctx.applicationContext
         val sealed = LiveNet.seal(app, d.toString())

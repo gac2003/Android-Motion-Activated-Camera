@@ -129,6 +129,7 @@ object Live {
     /** Connected again after a drop: online again, and a camera republishes its status (it may have changed meanwhile). */
     private fun onConnection(ctx: Context, connected: Boolean) {
         val again = connected && !wasConnected
+        if (connected != wasConnected && cameraActive) com.motioncam.Health.log(ctx, if (connected) "Live connection back" else "Live connection lost")
         wasConnected = connected
         if (!again) return
         synchronized(this) {

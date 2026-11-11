@@ -16,6 +16,16 @@ class MotionCamApp : Application() {
     }
     private var started = 0
     private val ui = Handler(Looper.getMainLooper())
+    private var lastTrimLog = 0L
+
+    /** Android is short of memory: worth knowing if MotionCam is then stopped. */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_RUNNING_LOW && level != TRIM_MEMORY_UI_HIDDEN && System.currentTimeMillis() - lastTrimLog > 10 * 60_000L) {
+            lastTrimLog = System.currentTimeMillis()
+            Health.log(this, "Android is low on memory (level $level)")
+        }
+    }
     private val idle = Runnable {
         if (started == 0 && !LiveService.running) { Live.viewerActive = false; Live.refresh(this) }
         // in the background while monitoring: camera duty (Stay connected stops following the other cameras)
@@ -24,6 +34,8 @@ class MotionCamApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        Health.install(this)
+        Health.log(this, "MotionCam started" + if (Health.wanted(this)) " (monitoring was on)" else "")
         try { com.motioncam.live.Push.init(this) } catch (_: Exception) {}   // push alerts (own build with a push key)
         try { com.motioncam.live.AlertCheckJob.schedule(this) } catch (_: Exception) {}   // 15-minute alert check
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {

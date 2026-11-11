@@ -269,6 +269,26 @@ object CameraLink {
         kindLetter(type)?.let { dayCount(ctx, it) }
     }
 
+    /**
+     * An event written without the camera's live connection running (e.g. from the watchdog in a fresh process,
+     * after Android stopped MotionCam): reads the phones' push addresses itself and pushes it too.
+     */
+    fun eventDirect(ctx: Context, type: String, text: String) {
+        val app = ctx.applicationContext
+        val d = JSONObject().put("type", type).put("text", text)
+        val ref = path(app, "events")?.push() ?: return
+        ref.setValue(mapOf("t" to ServerValue.TIMESTAMP, "d" to LiveNet.seal(app, d.toString())))
+        kindLetter(type)?.let { dayCount(app, it) }
+        val me = me(app)
+        Live.ref(app, "devices")?.addListenerForSingleValueEvent(object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(s: com.google.firebase.database.DataSnapshot) {
+                val tokens = s.children.filter { it.key != me }.mapNotNull { LiveNet.open(app, it.child("push").value as? String) }.distinct()
+                if (tokens.isNotEmpty()) try { Push.onEvent(app, type, d, ref.key, System.currentTimeMillis() + Live.serverOffset, tokens) } catch (_: Exception) {}
+            }
+            override fun onCancelled(e: com.google.firebase.database.DatabaseError) {}
+        })
+    }
+
     /** One more motion (or, with [clip], its clip) in this hour's "Motion detected ×N" entry. */
     private fun addToBurst(ctx: Context, clip: JSONObject?) {
         val b = burst ?: JSONObject().put("type", "motion_burst").put("n", BURST_AFTER).put("from", hourOf * 3_600_000L)

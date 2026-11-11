@@ -172,6 +172,7 @@ open class SettingsActivity : Activity() {
                 startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
             }
         }
+        button("Camera log (why monitoring stopped)") { showCameraLog() }
 
         }
         if (sec == "camera") {
@@ -713,6 +714,25 @@ open class SettingsActivity : Activity() {
     }
 
     @Deprecated("Deprecated in Java")
+    /** What happened to monitoring on this phone: crashes, restarts by Android, camera errors, connection drops. */
+    private fun showCameraLog() {
+        val tv = android.widget.TextView(this).apply {
+            text = Health.text(this@SettingsActivity).lines().reversed().joinToString("\n").trim()
+            textSize = 11f; setTextColor(0xFFDDDDDD.toInt()); typeface = android.graphics.Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            val p = Ui.dp(this@SettingsActivity, 16); setPadding(p, p / 2, p, p)
+        }
+        android.app.AlertDialog.Builder(this).setTitle("Camera log (newest first)")
+            .setView(android.widget.ScrollView(this).apply { addView(tv) })
+            .setPositiveButton("Close", null)
+            .setNeutralButton("Share") { _, _ ->
+                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(Intent.EXTRA_SUBJECT, "MotionCam camera log").putExtra(Intent.EXTRA_TEXT, Health.text(this)), "Share the camera log"))
+            }
+            .setNegativeButton("Clear") { _, _ -> Health.clear(this) }
+            .show()
+    }
+
     override fun onBackPressed() {
         // Back first clears a search, then leaves
         val f = searchField

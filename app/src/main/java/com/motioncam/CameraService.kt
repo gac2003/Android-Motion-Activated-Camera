@@ -82,7 +82,9 @@ class CameraService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         prefs = Prefs(this)
-        when (intent?.action) {
+        // no intent: Android restarted this service after it stopped MotionCam (memory, battery manager, a crash)
+        if (intent == null) return restartedByAndroid()
+        when (intent.action) {
             ACTION_EXIT -> { exit(manual = engine != null); return START_NOT_STICKY }
             ACTION_STOP -> {
                 if (!foreground) { stopSelf(); return START_NOT_STICKY }
@@ -91,8 +93,32 @@ class CameraService : Service() {
             }
         }
         if (!goForeground()) return START_NOT_STICKY
-        if (intent?.action == ACTION_STANDBY) { if (engine == null) showStandby() } else startMonitoring()
-        return START_NOT_STICKY
+        if (intent.action == ACTION_STANDBY) { if (engine == null) showStandby() } else startMonitoring()
+        // if Android stops MotionCam, it restarts this service (see restartedByAndroid)
+        return START_STICKY
+    }
+
+    /** Back after Android stopped MotionCam: resume monitoring if it was on (or standby), else end quietly. */
+    private fun restartedByAndroid(): Int {
+        Health.log(this, "Android restarted the camera service after stopping MotionCam")
+        if (!Health.wanted(this)) {
+            if (standbyAllowed(this) && goForeground()) { showStandby(); return START_STICKY }
+            stopSelf(); return START_NOT_STICKY
+        }
+        // Android may not let a camera start from the background: then say so (here and on your other phones)
+        if (!goForeground()) { Health.reportInterrupted(this, "Android didn't allow restarting the camera"); return START_NOT_STICKY }
+        startMonitoring()
+        main.postDelayed({ if (engine != null) Health.reportResumed(this) }, 3000)
+        return START_STICKY
+    }
+
+    /** A heartbeat while monitoring (the camera log says when it last worked if Android stops it). */
+    private val heartbeat: Runnable = object : Runnable {
+        override fun run() {
+            if (engine == null) return
+            Health.alive(this@CameraService)
+            main.postDelayed(this, 60_000L)
+        }
     }
 
     private fun goForeground(): Boolean {
@@ -116,6 +142,8 @@ class CameraService : Service() {
     fun startMonitoring() {
         if (engine != null || !foreground) return
         prefs.lastMonitoredAt = System.currentTimeMillis()
+        Health.setWanted(this, true)
+        main.removeCallbacks(heartbeat); main.postDelayed(heartbeat, 1000)
         main.removeCallbacks(standbyCheck); standbyChecking = false
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "motioncam:monitor").also { it.acquire() }
@@ -204,6 +232,7 @@ class CameraService : Service() {
      * [manual] = the user stopped monitoring (button, notification or another phone), not a safety stop.
      */
     fun stopMonitoring(manual: Boolean) {
+        Health.setWanted(this, false)
         if (!standbyAllowed(this)) { exit(manual); return }
         if (manual && engine != null) com.motioncam.live.CameraLink.event(this, "monitor_off", "Stopped on the camera phone · standby (Start monitoring from your other phones turns it back on)")
         releaseEngine(manual)
@@ -229,6 +258,7 @@ class CameraService : Service() {
     private fun exit(manual: Boolean = false) {
         if (exiting) return
         exiting = true
+        Health.setWanted(this, false)
         if (manual && engine != null) com.motioncam.live.CameraLink.event(this, "monitor_off", "Stopped on the camera phone · offline until started there")
         releaseEngine(manual)
         com.motioncam.live.CameraLink.stop(this)

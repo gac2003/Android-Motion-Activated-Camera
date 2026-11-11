@@ -373,6 +373,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
 
     private fun scheduleRetry(why: String) {
         if (!active) return
+        Health.log(ctx, "Camera: $why")
         if (mode == Mode.RECORDING) stopRecording(rearm = false)
         closeCamera()
         retryCount++
@@ -385,6 +386,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     }
 
     private fun restartCamera(why: String) {
+        Health.log(ctx, "Camera: $why")
         if (mode == Mode.RECORDING) stopRecording(rearm = false)
         message = why
         openCamera()
@@ -954,6 +956,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
                     if (mode == Mode.RECORDING) stopRecording(rearm = false)
                     closeCamera()
                     mode = Mode.PAUSED_HOT
+                    Health.log(ctx, "Camera paused: too hot (%.0f°C)".format(bat.tempC))
                     hotSince = now
                     message = "Phone is hot (${"%.0f".format(bat.tempC)}°C) — camera paused to cool down"
                     publish()
@@ -1014,6 +1017,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     }
 
     private fun enterStoragePause() {
+        Health.log(ctx, "Recording paused: storage full")
         disarm()
         mode = Mode.PAUSED_STORAGE
         message = if (prefs.autoDeleteLow) "Phone storage full (no deletable clips) — not recording"

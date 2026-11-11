@@ -39,6 +39,20 @@ class CameraService : Service() {
 
         /** Monitoring right now (not just in standby). */
         val monitoring: Boolean get() = instance?.engine != null
+        /** Really watching for motion (not stopped from another phone with the camera still on). */
+        val watching: Boolean get() = instance?.engine?.monitoring == true
+
+        /** Stopped from another phone with the camera still on: start watching again (as from that phone). */
+        fun resumeHere(ctx: Context): Boolean {
+            val s = instance ?: return false
+            val e = s.engine ?: return false
+            if (e.monitoring) return false
+            e.setMonitoring(true)
+            s.startedAgain()
+            main2.postDelayed({ com.motioncam.live.CameraLink.publishStatus(ctx) }, 300)
+            return true
+        }
+        private val main2 = Handler(Looper.getMainLooper())
         /** In standby: reachable by other phones, camera closed. */
         val inStandby: Boolean get() = instance.let { it != null && it.engine == null }
 

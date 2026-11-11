@@ -114,7 +114,7 @@ class MainActivity : Activity() {
 
     /** Camera mode left alone for a minute while monitoring: camera duty (see [com.motioncam.live.Live.cameraDuty]). */
     private val dutyStart = Runnable {
-        if (CameraService.monitoring && !com.motioncam.live.Live.cameraDuty) {
+        if (CameraService.watching && !com.motioncam.live.Live.cameraDuty) {
             com.motioncam.live.Live.cameraDuty = true
             try { com.motioncam.live.Live.refresh(this) } catch (_: Exception) {}
         }
@@ -1017,11 +1017,13 @@ class MainActivity : Activity() {
     // ------------------------------------------------------------------ start / stop / permissions
 
     private fun onStartStop() {
-        if (CameraService.monitoring) {
+        if (CameraService.watching) {
             CameraService.stop(this)
             startBtn.postDelayed({ render(StatusBus.status) }, 300)
             return
         }
+        // stopped from another phone, camera still on: just start watching again
+        if (CameraService.resumeHere(this)) { startBtn.postDelayed({ render(StatusBus.status) }, 300); return }
         val need = ArrayList<String>()
         if (!hasCamera()) need += Manifest.permission.CAMERA
         if (prefs.audio && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) need += Manifest.permission.RECORD_AUDIO
@@ -1055,7 +1057,7 @@ class MainActivity : Activity() {
         // motion just started: a short, non-blocking pop-up in the corner (the time also stays in the info line)
         if (lastMode != null && lastMode != Mode.RECORDING && s.mode == Mode.RECORDING) showPill("● Motion detected — recording", 3000)
         lastMode = s.mode
-        val running = CameraService.monitoring
+        val running = CameraService.watching
         startBtn.text = if (compact == true) (if (running) "STOP" else "START") else if (running) "STOP MONITORING" else "START MONITORING"
         Ui.pill(startBtn, if (running) Ui.RED else 0xFF2E7D32.toInt())
         if (::shutter.isInitialized) paintShutter(running)

@@ -104,7 +104,9 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     private val mgr = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private val h = Handler(HandlerThread("cam-engine").also { it.start() }.looper)
     private val executor = Executor { h.post(it) }
-    private val ah = Handler(HandlerThread("cam-analysis").also { it.start() }.looper)
+    private var ah = Handler(HandlerThread("cam-analysis").also { it.start() }.looper)
+    /** When the analysis thread started on the current frame (0 = idle): a stuck thread is replaced (see the watchdog). */
+    @Volatile private var analysisSince = 0L
     private val display: Display? = (ctx.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).getDisplay(Display.DEFAULT_DISPLAY)
 
     /** Called (engine thread) when monitoring had to stop, e.g. low battery. */
@@ -846,10 +848,11 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
 
     private fun onImage(r: ImageReader) {
         val img: Image = try { r.acquireLatestImage() } catch (e: Exception) { null } ?: return
+        analysisSince = SystemClock.elapsedRealtime()
         try {
             FrameHub.rtcSink?.let { sink -> try { sink(img.width, img.height, { buf -> toI420(img, buf) }, recordRotation(), img.timestamp) } catch (_: Exception) {} }
             processFrame(img)
-        } catch (_: Exception) {} finally { img.close() }
+        } catch (_: Exception) {} finally { img.close(); analysisSince = 0L }
     }
 
     private var rowBuf = ByteArray(0)
@@ -1018,6 +1021,13 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
 
         // stall watchdog
         if ((mode == Mode.WATCHING || mode == Mode.RECORDING || mode == Mode.PREVIEW) && now - lastFrameAt > 10_000) {
+            // the analysis thread itself is stuck (on one frame for over 5 s): a new one, or the camera never recovers
+            val since = analysisSince
+            if (since != 0L && now - since > 5_000) {
+                Health.log(ctx, "Camera: picture analysis was stuck — started a new analysis thread")
+                ah = Handler(HandlerThread("cam-analysis").also { it.start() }.looper)
+                analysisSince = 0L
+            }
             restartCamera("Camera stalled — restarting")
             return
         }

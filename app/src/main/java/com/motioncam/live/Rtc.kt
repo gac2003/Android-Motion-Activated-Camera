@@ -192,8 +192,8 @@ object RtcCamera {
     private class Session(val id: String, val pc: PeerConnection, val vListener: ChildEventListener, val by: String)
     private val sessions = HashMap<String, Session>()
     private var listener: ChildEventListener? = null
-    private var source: VideoSource? = null
-    private var track: VideoTrack? = null
+    @Volatile private var source: VideoSource? = null
+    @Volatile private var track: VideoTrack? = null
     private var app: Context? = null
     @Volatile private var lastFrameAt = 0L
     @Volatile private var framesSent = 0L
@@ -219,20 +219,36 @@ object RtcCamera {
     }
 
     /** A frame from the camera (analysis thread): sent to the viewers, at most 15 a second. */
-    private val sink: (Int, Int, (org.webrtc.JavaI420Buffer) -> Unit, Int, Long) -> Unit = { w, h, fill, rot, ts ->
+    /**
+     * Frames go to WebRTC on a thread of their own, never on the camera's analysis thread (which also runs motion
+     * detection): if WebRTC is slow or stuck, frames are dropped and the camera carries on. All of WebRTC's video
+     * source handling (frames, creating and freeing it) happens on that one thread, so a frame can never meet a
+     * source that's being freed.
+     */
+    private val rtcThread = Handler(android.os.HandlerThread("rtc-frames").also { it.start() }.looper)
+    @Volatile private var frameBusy = false
+
+    private val sink: (Int, Int, (org.webrtc.JavaI420Buffer) -> Unit, Int, Long) -> Unit = { w, h, fill, rot, _ ->
         val now = System.currentTimeMillis()
         val src = source
-        if (src != null && now - lastFrameAt >= 66) {
+        if (src != null && !frameBusy && now - lastFrameAt >= 66) {
             lastFrameAt = now
             val buf = org.webrtc.JavaI420Buffer.allocate(w, h)
+            var handed = false
             try {
-                fill(buf)
-                // WebRTC's own clock (the camera's timestamps can be on a different one, which makes frames look stale)
-                val f = VideoFrame(buf, rot, System.nanoTime())
-                src.capturerObserver.onFrameCaptured(f)
-                framesSent++
-                f.release()
-            } catch (_: Exception) { buf.release() }
+                fill(buf)   // the copy needs the camera image: here, quickly; the rest on the frames thread
+                frameBusy = true
+                rtcThread.post {
+                    try {
+                        val cur = source
+                        // WebRTC's own clock (the camera's timestamps can be on a different one, which makes frames look stale)
+                        val f = VideoFrame(buf, rot, System.nanoTime())
+                        if (cur === src) { cur.capturerObserver.onFrameCaptured(f); framesSent++ }
+                        f.release()
+                    } catch (_: Throwable) {} finally { frameBusy = false }
+                }
+                handed = true
+            } catch (_: Throwable) { frameBusy = false } finally { if (!handed) buf.release() }
         }
     }
 
@@ -322,7 +338,17 @@ object RtcCamera {
     }
 
     /** No viewer for 5 minutes: WebRTC's threads and buffers are freed too (made again for the next viewer). */
-    private val idleFree = Runnable { if (sessions.isEmpty() && !holding) Rtc.freeFactory() }
+    /** No viewer for 5 minutes: the video source and WebRTC's threads are freed (made again for the next viewer). */
+    private val idleFree = Runnable {
+        if (sessions.isEmpty() && !holding) rtcThread.post {
+            if (holding) return@post
+            val t = track; val s = source
+            track = null; source = null
+            try { t?.dispose() } catch (_: Throwable) {}
+            try { s?.dispose() } catch (_: Throwable) {}
+            Rtc.freeFactory()
+        }
+    }
 
     private fun releaseCamera() {
         if (!holding) return
@@ -330,9 +356,7 @@ object RtcCamera {
         main.removeCallbacks(idleFree); main.postDelayed(idleFree, 5 * 60_000L)
         com.motioncam.FrameHub.rtcSink = null
         try { com.motioncam.EngineHost.release("rtc") } catch (_: Exception) {}
-        try { track?.dispose() } catch (_: Exception) {}
-        try { source?.dispose() } catch (_: Exception) {}
-        track = null; source = null
+        // the video source stays until idleFree (quick on/off reuses it instead of freeing it under a frame)
     }
 }
 

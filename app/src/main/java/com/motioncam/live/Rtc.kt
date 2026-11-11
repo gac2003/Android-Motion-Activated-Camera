@@ -200,14 +200,39 @@ object RtcCamera {
     @Volatile private var framesSent = 0L
     private var holding = false
 
+    /** When each session last showed its viewer is still there (its heartbeat, or any signalling). */
+    private val seen = HashMap<String, Long>()
+    /** When a session's connection got interrupted (0 = it isn't). */
+    private val downSince = HashMap<String, Long>()
+
+    /**
+     * Every 15 s: a session whose viewer stopped saying it's there (90 s without its heartbeat: the app was closed,
+     * the phone went off or out of signal) or whose connection stayed interrupted for 20 s is closed, so the camera
+     * never keeps encoding video for nobody (that keeps it at full frame rate and warm).
+     */
+    private val sweep: Runnable = object : Runnable {
+        override fun run() {
+            val c = app ?: return
+            val now = System.currentTimeMillis()
+            for (id in sessions.keys.toList()) {
+                val gone = now - (seen[id] ?: now) > 90_000L
+                val down = (downSince[id] ?: 0L).let { it > 0 && now - it > 20_000L }
+                if (gone || down) close(c, id, if (gone) "the viewer stopped answering" else "the connection was interrupted")
+            }
+            if (sessions.isNotEmpty()) main.postDelayed(this, 15_000L)
+        }
+    }
+
     fun start(ctx: Context) {
         if (!Rtc.enabled || listener != null) return
         val c = ctx.applicationContext
         app = c
+        // sessions left from before (the camera restarted): nobody is watching them any more
+        CameraLink.path(c, "rtc")?.removeValue()
         listener = object : ChildEventListener {
             override fun onChildAdded(s: DataSnapshot, prev: String?) { s.key?.let { k -> Thread { try { offer(c, k, s) } catch (_: Exception) {} }.start() } }
-            override fun onChildRemoved(s: DataSnapshot) { s.key?.let { k -> main.post { close(c, k) } } }
-            override fun onChildChanged(s: DataSnapshot, prev: String?) {}
+            override fun onChildRemoved(s: DataSnapshot) { s.key?.let { k -> main.post { close(c, k, "the viewer left") } } }
+            override fun onChildChanged(s: DataSnapshot, prev: String?) { s.key?.let { k -> main.post { if (sessions.containsKey(k)) seen[k] = System.currentTimeMillis() } } }
             override fun onChildMoved(s: DataSnapshot, prev: String?) {}
             override fun onCancelled(e: DatabaseError) {}
         }.also { CameraLink.path(c, "rtc")?.addChildEventListener(it) }
@@ -216,7 +241,7 @@ object RtcCamera {
     fun stop(ctx: Context) {
         listener?.let { CameraLink.path(ctx, "rtc")?.removeEventListener(it) }
         listener = null
-        main.post { for (k in sessions.keys.toList()) close(ctx, k) }
+        main.post { for (k in sessions.keys.toList()) close(ctx, k, "the camera stopped") }
     }
 
     /** A frame from the camera (analysis thread): sent to the viewers, at most 15 a second. */
@@ -277,7 +302,14 @@ object RtcCamera {
                         val before = framesSent
                         main.postDelayed({ com.motioncam.Health.log(ctx, "Live video: ${framesSent - before} frames in the first 10 s") }, 10_000)
                     }
-                    if (st == PeerConnection.IceConnectionState.FAILED || st == PeerConnection.IceConnectionState.CLOSED) main.post { close(ctx, id) }
+                    main.post {
+                        when (st) {
+                            PeerConnection.IceConnectionState.DISCONNECTED -> if ((downSince[id] ?: 0L) == 0L) downSince[id] = System.currentTimeMillis()
+                            PeerConnection.IceConnectionState.CONNECTED, PeerConnection.IceConnectionState.COMPLETED -> downSince.remove(id)
+                            PeerConnection.IceConnectionState.FAILED, PeerConnection.IceConnectionState.CLOSED -> close(ctx, id, "the connection failed")
+                            else -> {}
+                        }
+                    }
                 }
             }) ?: return@post
             val vl = object : ChildEventListener {
@@ -290,6 +322,8 @@ object RtcCamera {
                 override fun onCancelled(e: DatabaseError) {}
             }
             sessions[id] = Session(id, pc, vl, o.optString("byName"))
+            seen[id] = System.currentTimeMillis()
+            main.removeCallbacks(sweep); main.postDelayed(sweep, 15_000L)
             holdCamera(ctx)
             com.motioncam.Health.log(ctx, "Live video: request from ${o.optString("byName").ifEmpty { "a phone" }} (relay " +
                 (if (!o.optBoolean("relay", true)) "off: monthly limit" else if (Rtc.relayReady) "ready" else "unavailable: " + (Rtc.issue ?: "?")) + ")")
@@ -321,8 +355,11 @@ object RtcCamera {
         track = f.createVideoTrack("camera", src)
     }
 
-    private fun close(ctx: Context, id: String) {
+    private fun close(ctx: Context, id: String, why: String) {
         val s = sessions.remove(id) ?: return
+        seen.remove(id); downSince.remove(id)
+        com.motioncam.Health.log(ctx, "Live video to ${s.by.ifEmpty { "a phone" }} ended: $why" +
+            if (sessions.isEmpty()) " (camera back to normal)" else " (${sessions.size} still watching)")
         CameraLink.path(ctx, "rtc/$id/v")?.removeEventListener(s.vListener)
         try { s.pc.dispose() } catch (_: Exception) {}
         CameraLink.path(ctx, "rtc/$id")?.removeValue()
@@ -450,6 +487,7 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
                     override fun onCancelled(e: DatabaseError) {}
                 }.also { r.child("c").addChildEventListener(it) }
                 main.postDelayed(meter, 10_000)
+                main.postDelayed(heartbeat, 30_000)
             }
         }, MediaConstraints())
     }
@@ -485,10 +523,20 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
 
     private var track: VideoTrack? = null
 
+    /** "Still watching": the camera closes a session that goes quiet (see RtcCamera.sweep). */
+    private val heartbeat: Runnable = object : Runnable {
+        override fun run() {
+            if (stopped) return
+            ref?.child("alive")?.setValue(ServerValue.TIMESTAMP)
+            main.postDelayed(this, 30_000)
+        }
+    }
+
     fun stop() {
         if (stopped) return
         stopped = true
         main.removeCallbacks(meter)
+        main.removeCallbacks(heartbeat)
         try { track?.removeSink(sink) } catch (_: Throwable) {}
         track = null
         val r = ref

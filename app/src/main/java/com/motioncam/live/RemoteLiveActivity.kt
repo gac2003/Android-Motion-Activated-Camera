@@ -79,7 +79,8 @@ class RemoteLiveActivity : Activity() {
                 overCap = {
                     rtcFailed = true; backToPictures()
                     Toast.makeText(this, "This month's video relay allowance ($capGb GB) is used up: back to pictures", Toast.LENGTH_LONG).show()
-                }) { why ->
+                },
+                firstFrame = { w, h -> videoStarted(w, h) }) { why ->
                 // no connection: keep (or go back to) the pictures, and say why
                 rtcFailed = true; backToPictures()
                 videoIssue = why
@@ -90,6 +91,13 @@ class RemoteLiveActivity : Activity() {
             // connected, but no picture: the camera isn't sending frames
             ui.postDelayed({
                 val v = rtc ?: return@postDelayed
+                if (!rtcOn && v.connected && rtcRetries < 1) {
+                    // once: a fresh connection usually brings the picture
+                    rtcRetries++
+                    com.motioncam.Health.log(this, "Live video from ${r.name()}: connected but no picture, trying again")
+                    v.stop(); rtc = null; maybeStartRtc()
+                    return@postDelayed
+                }
                 if (!rtcOn && v.connected) {
                     v.stop(); rtcFailed = true; backToPictures()
                     videoIssue = "connected, but the camera sent no picture"
@@ -100,10 +108,24 @@ class RemoteLiveActivity : Activity() {
         }
     }
     private var rtcChecking = false
+    private var rtcRetries = 0
     private var relayNote: String? = null
     /** Why video didn't work (shown with the pictures). */
     private var videoIssue: String? = null
     private var resumedNow = false
+
+    /** This connection's first video frame arrived: video replaces the pictures. */
+    private fun videoStarted(w: Int, h: Int) {
+        if (rtc == null) return
+        rtcOn = true
+        if (w > 0 && h > 0) { rtcW = w; rtcH = h }
+        com.motioncam.Health.log(this, "Live video from ${r.name()}: playing")
+        image.visibility = View.INVISIBLE
+        if (feed.watching) feed.stop()   // the pictures aren't needed while video plays
+        msgTv.visibility = View.GONE
+        updateLiveLabel()
+        cropView.invalidate()
+    }
 
     private fun stopRtc() {
         rtc?.stop(); rtc = null; rtcOn = false
@@ -275,6 +297,7 @@ class RemoteLiveActivity : Activity() {
         refreshAll()
         feed.start()
         rtcFailed = false
+        rtcRetries = 0
         resumedNow = true
         maybeStartRtc()
         ui.post(tick)
@@ -348,17 +371,7 @@ class RemoteLiveActivity : Activity() {
             // hidden one never draws a frame (and video never started). The pictures step aside once video plays.
             renderer = org.webrtc.SurfaceViewRenderer(this).apply {
                 init(Rtc.egl.eglBaseContext, object : org.webrtc.RendererCommon.RendererEvents {
-                    override fun onFirstFrameRendered() {
-                        runOnUiThread {
-                            if (rtc == null) return@runOnUiThread
-                            rtcOn = true
-                            com.motioncam.Health.log(this@RemoteLiveActivity, "Live video from ${r.name()}: playing")
-                            image.visibility = View.INVISIBLE
-                            if (feed.watching) feed.stop()   // the pictures aren't needed while video plays
-                            msgTv.visibility = View.GONE
-                            updateLiveLabel()
-                        }
-                    }
+                    override fun onFirstFrameRendered() {}   // once per screen only: see videoStarted
                     override fun onFrameResolutionChanged(w: Int, h: Int, rot: Int) {
                         runOnUiThread { if (rot % 180 != 0) { rtcW = h; rtcH = w } else { rtcW = w; rtcH = h }; cropView.invalidate() }
                     }

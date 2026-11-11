@@ -366,7 +366,19 @@ object RtcCamera {
  */
 class RtcViewer(private val ctx: Context, private val cam: String, private val pin: String?, private val renderTo: VideoSink,
                 private val allowRelay: Boolean, private val usedBefore: Long, private val capGb: Int,
-                private val overCap: () -> Unit, private val failed: (why: String) -> Unit) {
+                private val overCap: () -> Unit, private val firstFrame: (w: Int, h: Int) -> Unit = { _, _ -> },
+                private val failed: (why: String) -> Unit) {
+    /** Passes the video to [renderTo] and tells [firstFrame] when this connection's first frame arrives (the renderer's own
+     *  "first frame" signal only comes once per screen, so a restarted video was never noticed). */
+    private var gotFrame = false
+    private val sink = VideoSink { f ->
+        if (!gotFrame) {
+            gotFrame = true
+            val w = f.rotatedWidth; val h = f.rotatedHeight
+            main.post { if (!stopped) firstFrame(w, h) }
+        }
+        renderTo.onFrame(f)
+    }
     @Volatile private var answered = false
     /** The video connection is up (frames should follow). */
     @Volatile var connected = false; private set
@@ -400,7 +412,7 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
         r.onDisconnect().removeValue()
         val p = f.createPeerConnection(Rtc.config(servers), object : Rtc.PcObserver() {
             override fun onIceCandidate(c: IceCandidate) { ref?.child("v")?.push()?.setValue(LiveNet.seal(ctx, Rtc.candJson(c))) }
-            override fun onTrack(t: RtpTransceiver?) { (t?.receiver?.track() as? VideoTrack)?.let { v -> main.post { if (!stopped) v.addSink(renderTo) } } }
+            override fun onTrack(t: RtpTransceiver?) { (t?.receiver?.track() as? VideoTrack)?.let { v -> main.post { if (!stopped) { track = v; v.addSink(sink) } } } }
             override fun onIceConnectionChange(st: PeerConnection.IceConnectionState?) {
                 if (st == PeerConnection.IceConnectionState.CONNECTED || st == PeerConnection.IceConnectionState.COMPLETED) connected = true
                 if (st == PeerConnection.IceConnectionState.FAILED) main.post {
@@ -471,10 +483,14 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
         }
     }
 
+    private var track: VideoTrack? = null
+
     fun stop() {
         if (stopped) return
         stopped = true
         main.removeCallbacks(meter)
+        try { track?.removeSink(sink) } catch (_: Throwable) {}
+        track = null
         val r = ref
         answerL?.let { r?.child("answer")?.removeEventListener(it) }
         candL?.let { r?.child("c")?.removeEventListener(it) }
@@ -494,15 +510,7 @@ class LiveVideo(private val a: android.app.Activity, private val cam: String, pr
     private val renderer: org.webrtc.SurfaceViewRenderer? = if (!Rtc.enabled || !com.motioncam.Prefs(a).liveSmooth) null else try {
         org.webrtc.SurfaceViewRenderer(a).apply {
             init(Rtc.egl.eglBaseContext, object : org.webrtc.RendererCommon.RendererEvents {
-                override fun onFirstFrameRendered() {
-                    a.runOnUiThread {
-                        if (viewer == null) return@runOnUiThread
-                        on = true
-                        under.visibility = android.view.View.INVISIBLE
-                        com.motioncam.Health.log(a, "Live video from ${r.name()}: playing")
-                        playing()
-                    }
-                }
+                override fun onFirstFrameRendered() {}   // once per screen only: see RtcViewer's firstFrame
                 override fun onFrameResolutionChanged(w: Int, h: Int, rot: Int) {}
             })
             setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FIT)
@@ -535,7 +543,15 @@ class LiveVideo(private val a: android.app.Activity, private val cam: String, pr
             if (!starting || a.isFinishing || viewer != null) return@usage   // stopped meanwhile
             starting = false
             viewer = RtcViewer(a, cam, pin, rd, used < capGb * 1_000_000_000L, used, capGb,
-                overCap = { done("this month's relay allowance is used up") }) { why -> done(why) }.also { it.start() }
+                overCap = { done("this month's relay allowance is used up") },
+                firstFrame = { _, _ ->
+                    if (viewer != null) {
+                        on = true
+                        under.visibility = android.view.View.INVISIBLE
+                        com.motioncam.Health.log(a, "Live video from ${r.name()}: playing")
+                        playing()
+                    }
+                }) { why -> done(why) }.also { it.start() }
         }
         return true
     }

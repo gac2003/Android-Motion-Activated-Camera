@@ -28,7 +28,7 @@ clips on **your** phone and **your** cloud.
 |---|---|
 | 🎥 **Records on motion** | Starts within a fraction of a second, keeps going until things are still. Detection zones and a light filter ignore glare, reflections and lights switching on. |
 | 🎛️ **Pro controls** | Pick the exact lens; set exposure, ISO, shutter, focus (with focus peaking), white balance, zoom, resolution and frame rate. |
-| 📱 **Your phones, connected** | Other phones see each camera's status and latest picture, get alerts, watch live and change its settings, over any network. |
+| 📱 **Your phones, connected** | Other phones see each camera's status and latest clip, get instant alerts with a picture, watch live (smooth video with your own Cloudflare key) and change its settings, over any network. |
 | ☁️ **Backup you own** | Google Drive, Dropbox or your own FTP/SFTP server. Protect clips from clean-up, organise them in shared collections, tag and search them. |
 | 🔒 **Private** | No accounts of ours, no ads, no analytics. Live features run on a Firebase project, and with your own build it's yours. |
 
@@ -43,6 +43,8 @@ Tested running 24/7 on a Galaxy S23 Ultra and S20 FE.
 | **Backup to your own FTP / SFTP server** | ✅ | ✅ |
 | **Google Drive and Dropbox backup** | ❌ | ✅ with **your own** free accounts |
 | **Your phones: alerts, live view and remote control between phones** | ❌ | ✅ with **your own** free Firebase project |
+| **Push alerts with MotionCam closed** | ❌ | ✅ optional, a send-only key from the same project |
+| **Smooth live video on any network** | ❌ | ✅ optional, with **your own** Cloudflare account (free tier) |
 | **How** | [Download the APK](https://github.com/gac2003/Android-Motion-Activated-Camera/releases/latest/download/MotionCam.apk) on the phone, open it, allow installing (*Install anyway* if Play Protect asks) | Fork this repo and follow **[SETUP.md](SETUP.md)**: GitHub builds the APK for you, no Android Studio needed |
 
 > [!IMPORTANT]
@@ -68,13 +70,14 @@ Everything else (backup, alerts, the player, search, landscape) is in the **[Use
 ## Documentation
 
 * **[User guide](docs/USER_GUIDE.md)**: every screen and feature.
-* **[Set up your own build](SETUP.md)**: fork, add your free Firebase, Google and Dropbox credentials, get your APK.
+* **[Set up your own build](SETUP.md)**: fork, add your free Firebase, Google, Dropbox (and optionally push and
+  Cloudflare) credentials, get your APK.
 * **[Privacy](PRIVACY.md)**: what the app accesses and where data goes.
 
-## Contributing
+## Forks
 
-Issues and pull requests are welcome. The app is plain Kotlin with a programmatic UI (no XML layouts) in
-`app/src/main/java/com/motioncam`; every push builds an APK in GitHub Actions.
+This is a personal project: issues and feature requests aren't taken. You're welcome to fork it and make it your own
+([SETUP.md](SETUP.md) walks you through building your copy).
 
 ## License
 

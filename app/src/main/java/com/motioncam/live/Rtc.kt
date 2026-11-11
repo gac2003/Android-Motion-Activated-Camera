@@ -507,7 +507,11 @@ class LiveVideo(private val a: android.app.Activity, private val cam: String, pr
             })
             setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FIT)
             setOnClickListener { under.performClick() }   // same as tapping the picture (full screen)
-        }.also { frame.addView(it, 0, android.widget.FrameLayout.LayoutParams(-1, -1)) }   // under the pictures (see RemoteLiveActivity)
+        }.also {
+            // under the pictures (see RemoteLiveActivity), sized to the video and centred (filling the box would crop it)
+            frame.addView(android.widget.FrameLayout(a).apply { addView(it, android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.CENTER)) },
+                0, android.widget.FrameLayout.LayoutParams(-1, -1))
+        }
     } catch (_: Throwable) { null }
 
     private var viewer: RtcViewer? = null

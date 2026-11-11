@@ -183,6 +183,8 @@ class RemoteCameraActivity : Activity() {
             if (!feed.watching) feed.start()
         }
         feed = r.Feed(3 * 60_000L, { bmp, at ->
+            // video is on (or connecting): pictures don't belong here (a late one arriving after the switch)
+            if (video?.active == true) { feed.stop(); return@Feed }
             image.setImageBitmap(bmp)
             imageLabel.text = "● LIVE · frame sent " + Fmt.t(prefs, at)
             liveNote.visibility = android.view.View.GONE
@@ -385,10 +387,10 @@ class RemoteCameraActivity : Activity() {
     // ------------------------------------------------------------------ live view / frames
 
     private fun startWatching() {
-        // pictures right away; video takes over once its first frame shows
-        feed.start()
-        video?.start()
+        // video when it can be used here; pictures only if not (or as the fallback when video doesn't connect)
+        if (video?.start() != true) feed.start()
         if (feed.watching || video?.active == true) liveBtn.text = "■ Stop live"
+        if (video?.active == true) imageLabel.text = "Connecting live video…"
     }
 
     private fun stopWatching() {

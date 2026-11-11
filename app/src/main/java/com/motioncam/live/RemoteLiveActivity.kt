@@ -48,6 +48,7 @@ class RemoteLiveActivity : Activity() {
     private lateinit var image: ImageView
     // smooth live video (WebRTC), when this build has it: shown over the pictures once its first frame arrives
     private var renderer: org.webrtc.SurfaceViewRenderer? = null
+    private var rendererBox: FrameLayout? = null
     private var rtc: RtcViewer? = null
     private var rtcOn = false
     private var rtcFailed = false
@@ -125,9 +126,10 @@ class RemoteLiveActivity : Activity() {
     private fun imageRect(): android.graphics.RectF? {
         // the video: fitted inside its view
         renderer?.takeIf { rtcOn && rtcW > 0 && rtcH > 0 }?.let { v ->
-            val sc = minOf(v.width.toFloat() / rtcW, v.height.toFloat() / rtcH)
+            val box = rendererBox ?: return@let null
+            val sc = minOf(box.width.toFloat() / rtcW, box.height.toFloat() / rtcH)
             val w = rtcW * sc; val h = rtcH * sc
-            val l = v.left + (v.width - w) / 2; val t = v.top + (v.height - h) / 2
+            val l = box.left + (box.width - w) / 2; val t = box.top + (box.height - h) / 2
             return android.graphics.RectF(l, t, l + w, t + h)
         }
         val dr = image.drawable ?: return null
@@ -252,6 +254,7 @@ class RemoteLiveActivity : Activity() {
         // the last picture seen of this camera stays on screen (dimmed) until a new one arrives
         CamRemote.lastFrames[cam]?.let { (bmp, at) -> image.setImageBitmap(bmp); lastFrameAt = at }
         feed = r.Feed(10 * 60_000L, { bmp, at ->
+            if (rtcOn) { feed.stop(); return@Feed }   // video is playing: a late picture doesn't belong on screen
             image.setImageBitmap(bmp)
             lastFrameAt = at
             msgTv.visibility = View.GONE
@@ -363,7 +366,10 @@ class RemoteLiveActivity : Activity() {
                 setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FIT)
                 setOnClickListener { toggleControls() }
             }
-            root.addView(renderer, 0, FrameLayout.LayoutParams(-1, -1))
+            // the renderer sized to the video and centred in a box filling the screen: given the whole box it would
+            // fill it, cropping the video
+            rendererBox = FrameLayout(this).apply { addView(renderer, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER)) }
+            root.addView(rendererBox, 0, FrameLayout.LayoutParams(-1, -1))
         } catch (_: Throwable) { renderer = null }
         cropView = com.motioncam.CropView(this).apply {
             picture = { imageRect() }
@@ -547,7 +553,7 @@ class RemoteLiveActivity : Activity() {
             landCol.visibility = View.VISIBLE
             // the picture beside the column; the panel floats at its bottom
             image.layoutParams = FrameLayout.LayoutParams(-1, -1).apply { rightMargin = colPx }
-            renderer?.layoutParams = FrameLayout.LayoutParams(-1, -1).apply { rightMargin = colPx }
+            rendererBox?.layoutParams = FrameLayout.LayoutParams(-1, -1).apply { rightMargin = colPx }
             bottomBox.background = android.graphics.drawable.GradientDrawable().apply { setColor(0x99202328.toInt()); cornerRadius = d(16).toFloat() }
             // no padding of its own: with nothing to show (no panel, note or unsent changes) it takes no room
             bottomBox.setPadding(d(4), 0, d(4), 0)
@@ -568,7 +574,7 @@ class RemoteLiveActivity : Activity() {
             for (i in 0 until chipRow.childCount) chipRow.getChildAt(i).layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(d(3), 0, d(3), 0) }
             strip.addView(chipRow)
             image.layoutParams = FrameLayout.LayoutParams(-1, -1)
-            renderer?.layoutParams = FrameLayout.LayoutParams(-1, -1)
+            rendererBox?.layoutParams = FrameLayout.LayoutParams(-1, -1)
             bottomBox.background = null
             bottomBox.setBackgroundColor(0xCC000000.toInt() or (Ui.PANEL and 0x00FFFFFF))
             bottomBox.setPadding(0, d(6), 0, d(8))

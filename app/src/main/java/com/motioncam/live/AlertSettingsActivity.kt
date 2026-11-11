@@ -98,8 +98,11 @@ class AlertSettingsActivity : Activity() {
         }
         f.choice("Where alerts appear", listOf("Phone notifications when MotionCam isn't on screen (while it is: a card in the app)",
             "Inside MotionCam only (a card on the open screen; nothing in the notification shade)",
-            "Phone notifications always, also while MotionCam is on screen"),
-            if (p.alertsInApp) 1 else if (p.alertsAlways) 2 else 0) { p.alertsInApp = it == 1; p.alertsAlways = it == 2 }
+            "Phone notifications always, plus a card while MotionCam is on screen",
+            "Phone notifications only (never a card in the app)"),
+            when { p.alertsInApp -> 1; p.alertsAlways && p.alertsNoCard -> 3; p.alertsAlways -> 2; else -> 0 }) {
+            p.alertsInApp = it == 1; p.alertsAlways = it >= 2; p.alertsNoCard = it == 3
+        }
         f.note("These settings decide what notifies this phone. Everything the cameras report is in Activity either way " +
             "(new entries are marked, and the Activity tab shows how many). Each camera's alerts are grouped, and every alert has " +
             "Mute 1 h / 8 h buttons. Mute a camera for longer in Settings › Your phones → ⋮.")
@@ -109,12 +112,13 @@ class AlertSettingsActivity : Activity() {
         f.toggle("Motion detected", p.alertMotion) { p.alertMotion = it; render() }
         if (p.alertMotion) {
             // 15 s up to an hour, in steps that make sense
-            val steps = listOf(15, 30, 45, 60, 120, 180, 300, 600, 900, 1200, 1800, 2700, 3600)
+            val steps = listOf(1, 5, 10, 15, 30, 45, 60, 120, 180, 300, 600, 900, 1200, 1800, 2700, 3600)
             fun label(sec: Int) = if (sec < 60) "$sec s" else "${sec / 60} min"
             val cur = steps.indices.minByOrNull { Math.abs(steps[it] - p.alertMotionGapSec) } ?: 0
             f.slider("At most one alert per camera every", 0, steps.size - 1, cur, { label(steps[it]) }) { p.alertMotionGapSec = steps[it] }
         }
-        if (p.alertMotion) f.note("More motion within that time updates the same alert silently (\"3 times since 1:32\").")
+        if (p.alertMotion) f.note("More motion within that time updates the same alert silently (\"3 times since 1:32\"). " +
+            "The camera counts motion with gaps under 5 s as one motion, so 1 s means an alert for every separate motion.")
         f.toggle("New clip saved (silent)", p.alertClip) { p.alertClip = it }
         f.toggle("Show a picture of the clip", p.alertPicture) { p.alertPicture = it }
         f.note("Once the clip is saved, its alert shows a small picture from it. Turn off to keep alerts to text, e.g. if " +

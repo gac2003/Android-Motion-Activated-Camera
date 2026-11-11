@@ -28,7 +28,7 @@ import java.net.URL
  *   hours and mutes apply), once: an event that also arrives over the live connection isn't alerted twice.
  *
  * Rate limits (per camera), so a busy scene can't flood your phones or the free quota: motion and clips at most every
- * 15 s each (a clip right after its motion alert always goes, to attach it), other kinds at most every 10 min each,
+ * 5 s each (the camera counts motion with gaps under 5 s as one) (a clip right after its motion alert always goes, to attach it), other kinds at most every 10 min each,
  * and never more than 240 pushes an hour. Newer pushes of a kind replace older undelivered ones (collapse key), and
  * motion pushes expire after an hour.
  */
@@ -180,8 +180,8 @@ object Push {
         if (sent.size >= 240) return false
         val last = lastOf[type] ?: 0L
         val ok = when (type) {
-            "motion" -> now - last >= 15_000L
-            "clip" -> motionSince || now - last >= 15_000L
+            "motion" -> now - last >= 5_000L
+            "clip" -> motionSince || now - last >= 5_000L
             else -> now - last >= 10 * 60_000L
         }
         if (!ok) return false

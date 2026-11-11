@@ -83,13 +83,15 @@ object Alerts {
 
     private fun post(ctx: Context, cam: String, kind: String, channel: String, title: String, text: String, silent: Boolean, update: Boolean = false,
                      clip: JSONObject? = null, at: Long = System.currentTimeMillis(), picture: android.graphics.Bitmap? = null) {
-        // "inside MotionCam only", or MotionCam is open on screen right now: the in-app card (not for silent updates),
-        // never a phone notification on top of the app you are looking at (everything is in Activity anyway)
+        // where it shows (Settings › Alerts): "inside MotionCam only" or, by default, a card while MotionCam is on screen
+        // instead of a notification; "always" also notifies while it's open, with or without the card
         val p0 = Prefs(ctx)
-        if (p0.alertsInApp || (AlertInbox.front?.get() != null && !p0.alertsAlways)) {
+        val open = AlertInbox.front?.get() != null
+        if (p0.alertsInApp || (open && !p0.alertsAlways)) {
             if (!update) AlertInbox.banner(cam, title, text)
             return
         }
+        if (open && !p0.alertsNoCard && !update) AlertInbox.banner(cam, title, text)
         try {
             channels(ctx)
             // tapping opens the clip when the alert is about one (motion once its clip is saved, new clip), else the camera

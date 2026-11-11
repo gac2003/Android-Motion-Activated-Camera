@@ -387,7 +387,11 @@ class RemoteCameraActivity : Activity() {
 
     // ------------------------------------------------------------------ live view / frames
 
+    /** After 10 minutes of live view, a "Still watching?" countdown; it stops unless you keep watching. */
+    private val timeout by lazy { LiveTimeout(this) { stopWatching() } }
+
     private fun startWatching() {
+        timeout.restart()
         // video when it can be used here; pictures only if not (or as the fallback when video doesn't connect)
         if (video?.start() != true) feed.start()
         if (feed.watching || video?.active == true) liveBtn.text = "■ Stop live"
@@ -395,6 +399,7 @@ class RemoteCameraActivity : Activity() {
     }
 
     private fun stopWatching() {
+        timeout.cancel()
         feed.stop()
         video?.stop()
         liveBtn.text = "▶ Live view"

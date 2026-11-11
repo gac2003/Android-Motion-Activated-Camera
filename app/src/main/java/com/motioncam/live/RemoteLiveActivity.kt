@@ -141,6 +141,33 @@ class RemoteLiveActivity : Activity() {
         cropView.invalidate()
     }
 
+    /** After 10 minutes, a "Still watching?" countdown; it pauses the live view unless you keep watching. */
+    private val timeout by lazy { LiveTimeout(this) { pauseLive() } }
+    private var livePaused = false
+
+    private fun pauseLive() {
+        livePaused = true
+        feed.stop()
+        stopRtc()
+        rtcFailed = true   // no automatic restart while paused
+        showPaused()
+        updateLiveLabel()
+    }
+
+    private fun showPaused() {
+        msgTv.text = "Live view paused · tap to watch again"
+        msgTv.visibility = View.VISIBLE
+    }
+
+    private fun resumeLive() {
+        livePaused = false
+        msgTv.visibility = View.GONE
+        rtcFailed = false; rtcRetries = 0; rtcReconnects = 0
+        feed.start()
+        maybeStartRtc()
+        timeout.restart()
+    }
+
     private fun stopRtc() {
         rtc?.stop(); rtc = null; rtcOn = false
         renderer?.clearImage()
@@ -309,11 +336,14 @@ class RemoteLiveActivity : Activity() {
         Live.viewerActive = true
         Live.refresh(this)
         refreshAll()
-        feed.start()
-        rtcFailed = false
-        rtcRetries = 0
         resumedNow = true
-        maybeStartRtc()
+        if (livePaused) showPaused() else {
+            feed.start()
+            rtcFailed = false
+            rtcRetries = 0
+            maybeStartRtc()
+            timeout.restart()
+        }
         ui.post(tick)
     }
 
@@ -324,6 +354,7 @@ class RemoteLiveActivity : Activity() {
         if (::feed.isInitialized) feed.stop()
         resumedNow = false
         stopRtc()
+        timeout.cancel()
         ui.removeCallbacks(tick)
         super.onPause()
     }
@@ -377,7 +408,7 @@ class RemoteLiveActivity : Activity() {
         image = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "Live view (tap to show or hide the controls)"
-            setOnClickListener { if (!feed.watching) feed.start() else toggleControls() }
+            setOnClickListener { if (livePaused) resumeLive() else if (!feed.watching && !rtcOn) feed.start() else toggleControls() }
         }
         root.addView(image, FrameLayout.LayoutParams(-1, -1))
         if (Rtc.enabled && prefs.liveSmooth) try {
@@ -409,7 +440,7 @@ class RemoteLiveActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(d(16), d(10), d(16), d(10))
             background = android.graphics.drawable.GradientDrawable().apply { setColor(0x99000000.toInt()); cornerRadius = d(10).toFloat() }
-            setOnClickListener { feed.start() }
+            setOnClickListener { if (livePaused) resumeLive() else feed.start() }
         }
         root.addView(msgTv, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
 

@@ -142,7 +142,9 @@ open class ActivityLogActivity : Activity() {
                 lp.width = w; lp.leftMargin = l + box.paddingLeft; lp.gravity = Gravity.TOP or Gravity.START
                 sticky.post { sticky.layoutParams = lp; updateSticky() }
             }
-            sticky.post { updateSticky() }   // the list was rebuilt or grew: same pinned row, new positions
+            // the list was rebuilt or grew: same pinned row, new positions (only when its size changed, so the pinned
+            // row's own changes can't keep re-running this)
+            if (box.height != lastBoxH) { lastBoxH = box.height; sticky.post { updateSticky() } }
         }
         root.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
         // one column in every orientation (a timeline reads top to bottom), centred at a readable width when wide
@@ -396,6 +398,7 @@ open class ActivityLogActivity : Activity() {
             setPadding(d(8), d(20), d(8), d(8))
             if (more && !loading) { isClickable = true; setOnClickListener { loadMore() } }
         }, LinearLayout.LayoutParams(-1, -2))
+        scroll.post { updateSticky() }   // rebuilt: the pinned row for the new positions
         // the list doesn't fill the screen yet: load further back right away
         if (more && !loading) scroll.post { val ch = scroll.getChildAt(0); if (ch != null && ch.height <= scroll.height + d(200)) loadMore() }
     }
@@ -403,6 +406,7 @@ open class ActivityLogActivity : Activity() {
     /** The phone's name heads its card: tap for that phone's own Activity (Back returns here). */
     // ------------------------------------------------------------------ pinned day / phone
 
+    private var lastBoxH = -1
     private lateinit var sticky: LinearLayout
     private lateinit var stickyDay: TextView
     private lateinit var stickyCam: LinearLayout
@@ -422,9 +426,12 @@ open class ActivityLogActivity : Activity() {
         sticky.visibility = View.VISIBLE
         if (stickyDay.text != day.second) stickyDay.text = day.second
         val h = sticky.height.takeIf { it > 0 } ?: d(30)
-        // the phone: only once its own header has scrolled under the pinned row
-        val block = blockMarks.lastOrNull { it.first.top <= y + h }?.takeIf { (b, _) -> b.top + b.height > y + h && b.top >= day.first.top }
-        val cam = block?.takeIf { (b, _) -> b.top + d(30) < y + h }?.second
+        // the phone: only once its own header has scrolled under the pinned day. Decided with the day row's height
+        // only, never the whole pinned row's: showing the phone makes that taller, which could hide it again, show it
+        // again… (the list jittered when a group ended right under it)
+        val hd = stickyDay.height.takeIf { it > 0 } ?: d(30)
+        val block = blockMarks.lastOrNull { it.first.top <= y + hd }?.takeIf { (b, _) -> b.top + b.height > y + hd && b.top >= day.first.top }
+        val cam = block?.takeIf { (b, _) -> b.top + d(30) < y + hd }?.second
         if (cam != stickyCamId) {
             stickyCamId = cam
             stickyCam.removeAllViews()

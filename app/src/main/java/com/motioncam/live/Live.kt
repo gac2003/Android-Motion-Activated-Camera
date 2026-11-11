@@ -87,10 +87,8 @@ object Live {
             return
         }
         try { db?.goOnline() } catch (_: Exception) {}
-        val me = ref(app, "devices/${Device.id(app)}") ?: return
         val root = LiveNet.root(app)
-        me.onDisconnect().updateChildren(mapOf("online" to false, "seen" to ServerValue.TIMESTAMP))
-        me.updateChildren(mapOf("online" to true, "seen" to ServerValue.TIMESTAMP, "d" to LiveNet.seal(app, deviceInfo(app).toString())))
+        if (!announce(app)) return
         presenceFor = root
         Push.publish(app)
         startListening(app)
@@ -110,6 +108,34 @@ object Live {
             ref(ctx, "cams/$id/events")?.removeEventListener(l.second)
         }
         camListeners.clear()
+    }
+
+    /**
+     * Marks this phone online, and asks the server to mark it offline if the connection drops. Done on every
+     * (re)connection: after a dropped connection (Wi-Fi hiccup, network switch, the server recycling it) the server has
+     * marked the phone offline, and the phone must say it's back, or it looks offline to the others until something
+     * else (like opening MotionCam) announces it again.
+     */
+    private fun announce(app: Context): Boolean {
+        val me = ref(app, "devices/${Device.id(app)}") ?: return false
+        me.onDisconnect().updateChildren(mapOf("online" to false, "seen" to ServerValue.TIMESTAMP))
+        me.updateChildren(mapOf("online" to true, "seen" to ServerValue.TIMESTAMP, "d" to LiveNet.seal(app, deviceInfo(app).toString())))
+        return true
+    }
+
+    private var connListener: ValueEventListener? = null
+    @Volatile private var wasConnected = false
+
+    /** Connected again after a drop: online again, and a camera republishes its status (it may have changed meanwhile). */
+    private fun onConnection(ctx: Context, connected: Boolean) {
+        val again = connected && !wasConnected
+        wasConnected = connected
+        if (!again) return
+        synchronized(this) {
+            if (presenceFor == null) return
+            try { announce(ctx); Push.publish(ctx) } catch (_: Exception) {}
+        }
+        if (cameraActive) try { CameraLink.publishStatus(ctx) } catch (_: Exception) {}
     }
 
     private fun deviceInfo(ctx: Context): JSONObject = JSONObject()
@@ -173,6 +199,11 @@ object Live {
             override fun onDataChange(s: DataSnapshot) { serverOffset = (s.value as? Number)?.toLong() ?: 0L }
             override fun onCancelled(e: DatabaseError) {}
         }.also { LiveNet.db(ctx)?.getReference(".info/serverTimeOffset")?.addValueEventListener(it) }
+        wasConnected = true   // just announced
+        connListener = object : ValueEventListener {
+            override fun onDataChange(s: DataSnapshot) { val c = s.value == true; main.post { onConnection(ctx, c) } }
+            override fun onCancelled(e: DatabaseError) {}
+        }.also { LiveNet.db(ctx)?.getReference(".info/connected")?.addValueEventListener(it) }
         devListener = object : ValueEventListener {
             override fun onDataChange(s: DataSnapshot) {
                 val seenIds = HashSet<String>()
@@ -222,6 +253,8 @@ object Live {
         devListener?.let { ref(ctx, "devices")?.removeEventListener(it) }
         syncListener?.let { ref(ctx, "sync")?.removeEventListener(it) }
         offsetListener?.let { LiveNet.db(ctx)?.getReference(".info/serverTimeOffset")?.removeEventListener(it) }
+        connListener?.let { LiveNet.db(ctx)?.getReference(".info/connected")?.removeEventListener(it) }
+        connListener = null
         for ((id, l) in camListeners) {
             ref(ctx, "cams/$id/status")?.removeEventListener(l.first)
             ref(ctx, "cams/$id/events")?.removeEventListener(l.second)

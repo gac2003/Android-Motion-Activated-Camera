@@ -342,7 +342,7 @@ object CameraLink {
             if (prev.mode == Mode.RECORDING && s.mode != Mode.RECORDING && prev.recordingSinceWall > 0)
                 lastClipMs = System.currentTimeMillis() - prev.recordingSinceWall
             if (!prev.monitoring && s.monitoring) event(ctx, "monitor_on", "Monitoring started")
-            if (prev.mode != Mode.PAUSED_HOT && s.mode == Mode.PAUSED_HOT) event(ctx, "hot", "Paused because the phone is too hot (${"%.0f".format(s.tempC)} °C)")
+            if (prev.mode != Mode.PAUSED_HOT && s.mode == Mode.PAUSED_HOT) event(ctx, "hot", "Paused: " + s.message.substringBefore(" — ").ifEmpty { "the phone is too hot (${"%.0f".format(s.tempC)} °C)" })
             if (prev.charging && !s.charging && s.monitoring) event(ctx, "unplugged", "The camera phone is no longer charging (${s.batteryPct}%)")
             val band = when { s.batteryPct in 0..10 -> 1; s.batteryPct in 11..20 -> 2; else -> 3 }
             if (band < batteryBand && !s.charging) event(ctx, "battery", "Battery at ${s.batteryPct}%")

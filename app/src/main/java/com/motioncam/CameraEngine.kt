@@ -980,19 +980,25 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             // heat
             if (prefs.maxTempC > 0) {
                 val thermal = thermalStatus()
-                val tooHot = bat.tempC >= prefs.maxTempC || thermal >= PowerManager.THERMAL_STATUS_SEVERE
-                if (tooHot && mode != Mode.PAUSED_HOT) {
+                // your limit (battery temperature), or Android's own overheating signal at its critical level (the step
+                // before it shuts things down itself; its milder "severe" level only meant warm, and paused cameras
+                // well under your limit)
+                val overLimit = bat.tempC >= prefs.maxTempC
+                val androidCritical = thermal >= PowerManager.THERMAL_STATUS_CRITICAL
+                if ((overLimit || androidCritical) && mode != Mode.PAUSED_HOT) {
                     if (mode == Mode.RECORDING) stopRecording(rearm = false)
                     closeCamera()
                     mode = Mode.PAUSED_HOT
-                    Health.log(ctx, "Camera paused: too hot (%.0f°C)".format(bat.tempC))
+                    val why = if (overLimit) "battery %.0f°C, your limit is %d°C".format(bat.tempC, prefs.maxTempC)
+                        else "Android reports the phone as critically hot (battery %.0f°C)".format(bat.tempC)
+                    Health.log(ctx, "Camera paused: too hot ($why)")
                     hotSince = now
-                    message = "Phone is hot (${"%.0f".format(bat.tempC)}°C) — camera paused to cool down"
+                    message = "Phone is hot ($why) — camera paused to cool down"
                     publish()
                     return
                 }
                 if (mode == Mode.PAUSED_HOT) {
-                    val cooled = bat.tempC <= prefs.maxTempC - 3 && thermal < PowerManager.THERMAL_STATUS_MODERATE
+                    val cooled = bat.tempC <= prefs.maxTempC - 3 && thermal < PowerManager.THERMAL_STATUS_SEVERE
                     if (cooled && now - hotSince > 60_000) openCamera() else publish()
                     return
                 }

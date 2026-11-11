@@ -70,7 +70,7 @@ class RemoteLiveActivity : Activity() {
             relayNote = if (allowRelay) null else "relay limit reached this month"
             fun backToPictures() {
                 rtc = null; rtcOn = false
-                rd.visibility = View.GONE; image.visibility = View.VISIBLE
+                rd.clearImage(); image.visibility = View.VISIBLE
                 if (!feed.watching) feed.start()
                 updateLiveLabel()
             }
@@ -106,7 +106,7 @@ class RemoteLiveActivity : Activity() {
 
     private fun stopRtc() {
         rtc?.stop(); rtc = null; rtcOn = false
-        renderer?.visibility = View.GONE
+        renderer?.clearImage()
         if (::image.isInitialized) image.visibility = View.VISIBLE
     }
     private lateinit var cropView: com.motioncam.CropView
@@ -341,8 +341,9 @@ class RemoteLiveActivity : Activity() {
         }
         root.addView(image, FrameLayout.LayoutParams(-1, -1))
         if (Rtc.enabled) try {
+            // always present, under the pictures: Android only creates a video surface for a view that's shown, so a
+            // hidden one never draws a frame (and video never started). The pictures step aside once video plays.
             renderer = org.webrtc.SurfaceViewRenderer(this).apply {
-                visibility = View.GONE
                 init(Rtc.egl.eglBaseContext, object : org.webrtc.RendererCommon.RendererEvents {
                     override fun onFirstFrameRendered() {
                         runOnUiThread {
@@ -362,7 +363,7 @@ class RemoteLiveActivity : Activity() {
                 setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FIT)
                 setOnClickListener { toggleControls() }
             }
-            root.addView(renderer, FrameLayout.LayoutParams(-1, -1))
+            root.addView(renderer, 0, FrameLayout.LayoutParams(-1, -1))
         } catch (_: Throwable) { renderer = null }
         cropView = com.motioncam.CropView(this).apply {
             picture = { imageRect() }

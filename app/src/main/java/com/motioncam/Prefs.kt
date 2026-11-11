@@ -145,8 +145,8 @@ class Prefs(ctx: Context) {
     var livePinForView: Boolean get() = b("livePinForView", true); set(v) = put("livePinForView", v)
     /** This phone may act as a camera on the network (seen and controlled while monitoring). Needs a PIN. Off = viewer only. */
     var liveCamera: Boolean get() = b("liveCamera", false); set(v) = put("liveCamera", v)
-    /** Your other phones may start MotionCam here by push (even locked, even if MotionCam was closed). Off by default. */
-    var liveRemoteStart: Boolean get() = b("liveRemoteStart", false); set(v) = put("liveRemoteStart", v)
+    /** Your other phones may start MotionCam here by push (even locked, even if MotionCam was closed). On by default (it still needs the PIN and "Display over other apps"). */
+    var liveRemoteStart: Boolean get() = b("liveRemoteStart", true); set(v) = put("liveRemoteStart", v)
     /** When this phone last started monitoring (standby is only for phones actually used as cameras). */
     var lastMonitoredAt: Long
         get() {

@@ -1041,7 +1041,11 @@ class MainActivity : Activity() {
     private fun launchService() {
         CameraService.start(this)
         startBtn.postDelayed({ render(StatusBus.status) }, 500)
+        askRemoteStartOnce()
     }
+
+    /** Phones set up as cameras before Remote start existed: asked once, the first time they monitor. */
+    private fun askRemoteStartOnce() = com.motioncam.live.NetJoin.askRemoteStart(this)
 
     // ------------------------------------------------------------------ status
 

@@ -113,7 +113,7 @@ class LiveActivity : Activity() {
 
         f.title("This phone as a camera")
         f.toggle("Let other phones see and control this phone while it is monitoring", prefs.liveCamera) { on ->
-            if (on) NetJoin.withCameraPin(this) { prefs.liveCamera = true; com.motioncam.CameraService.settingsChanged(this); render() }   // the PIN is always asked to turn this on
+            if (on) NetJoin.withCameraPin(this) { prefs.liveCamera = true; com.motioncam.CameraService.settingsChanged(this); render(); NetJoin.askRemoteStart(this) }   // the PIN is always asked to turn this on
             else {
                 prefs.liveCamera = false
                 CameraLink.stop(this)

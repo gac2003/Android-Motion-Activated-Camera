@@ -165,7 +165,7 @@ be a camera needs a **PIN**.
   other phones instantly with MotionCam closed, no *Stay connected* or 15-minute check needed.
 * **Clip pictures**: once a clip is saved, its alert and its row in Activity show a small picture of it (the camera
   keeps a week of them); Alerts → *Show a picture of the clip* turns them off in notifications. A camera's Home card shows its latest clip, not the last live view or screenshot.
-* **Remote start** (optional, on the camera phone: Settings → Your phones; needs its PIN, *Display over other apps*
+* **Remote start** (on by default on camera phones, Settings → Your phones; needs its PIN, *Display over other apps*
   and push alerts): if MotionCam isn't running there (Android closed it, or it was shut off), the camera's screen on
   your other phones offers **Start MotionCam remotely**. The phone lights up for a few seconds over its lock screen
   (it stays locked) and starts monitoring.

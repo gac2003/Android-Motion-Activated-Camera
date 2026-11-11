@@ -72,7 +72,7 @@ object NetJoin {
             com.motioncam.Opt("Viewer only", "See your cameras and get their alerts. This phone is never watched or controlled.",
                 com.motioncam.IconDrawable.Kind.SCREEN) { prefs.liveCamera = false },
             com.motioncam.Opt("Camera and viewer", "While it is monitoring, your other phones can see and control it — protected by a PIN.",
-                com.motioncam.IconDrawable.Kind.VIDEOCAM) { withCameraPin(a) { prefs.liveCamera = true; com.motioncam.CameraService.settingsChanged(a); done() } },
+                com.motioncam.IconDrawable.Kind.VIDEOCAM) { withCameraPin(a) { prefs.liveCamera = true; com.motioncam.CameraService.settingsChanged(a); askRemoteStart(a, done) } },
         ), subtitle = "You can change this later in Settings › Your phones.")
         d.setOnDismissListener { done() }
     }
@@ -126,6 +126,28 @@ object NetJoin {
      * Turning the camera role on always needs the PIN: set one (entered twice) if there is none, otherwise enter it
      * (with "Set a new PIN" for a forgotten one). Cancel / wrong PIN: the camera role stays off.
      */
+    /**
+     * Part of setting a phone up as a camera: Remote start (on by default) needs Android's "Display over other apps".
+     * Asked here once; Settings › Your phones can do it later.
+     */
+    fun askRemoteStart(a: Activity, then: () -> Unit = {}) {
+        val p = Prefs(a)
+        val sp = a.getSharedPreferences("asked", Activity.MODE_PRIVATE)
+        if (!p.liveCamera || !p.liveRemoteStart || android.provider.Settings.canDrawOverlays(a) || sp.getBoolean("overlay", false)) { then(); return }
+        sp.edit().putBoolean("overlay", true).apply()
+        AlertDialog.Builder(a).setTitle("Let your other phones start this camera?")
+            .setMessage("If MotionCam stops on this phone (Android closed it, or it was turned off), your other phones can start it " +
+                "again, even while it's locked. Android needs one permission for that: \"Display over other apps\". On the next " +
+                "screen, turn it on for MotionCam, then come back.")
+            .setPositiveButton("Allow") { _, _ ->
+                try { a.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:${a.packageName}"))) }
+                catch (_: Exception) { try { a.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION)) } catch (_: Exception) {} }
+                then()
+            }
+            .setNegativeButton("Not now") { _, _ -> then() }
+            .setCancelable(false).show()
+    }
+
     fun withCameraPin(a: Activity, then: () -> Unit) {
         if (!CameraLink.hasPin(a)) { setPin(a, then); return }
         val input = EditText(a).apply { hint = "PIN"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }

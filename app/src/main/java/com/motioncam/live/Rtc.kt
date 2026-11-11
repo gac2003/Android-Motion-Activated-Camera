@@ -247,10 +247,13 @@ object RtcCamera {
                 override fun onIceConnectionChange(st: PeerConnection.IceConnectionState?) {
                     if (st == PeerConnection.IceConnectionState.CONNECTED || st == PeerConnection.IceConnectionState.FAILED)
                         com.motioncam.Health.log(ctx, "Live video: connection ${st.name.lowercase()}" + if (st == PeerConnection.IceConnectionState.CONNECTED) " (sending ${framesSent} frames so far)" else "")
+                    if (st == PeerConnection.IceConnectionState.CONNECTED) {
+                        val before = framesSent
+                        main.postDelayed({ com.motioncam.Health.log(ctx, "Live video: ${framesSent - before} frames in the first 10 s") }, 10_000)
+                    }
                     if (st == PeerConnection.IceConnectionState.FAILED || st == PeerConnection.IceConnectionState.CLOSED) main.post { close(ctx, id) }
                 }
             }) ?: return@post
-            pc.addTransceiver(track!!, RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY))
             val vl = object : ChildEventListener {
                 override fun onChildAdded(c: DataSnapshot, prev: String?) {
                     LiveNet.open(ctx, c.value as? String)?.let { try { pc.addIceCandidate(Rtc.candOf(JSONObject(it))) } catch (_: Exception) {} }
@@ -266,6 +269,12 @@ object RtcCamera {
                 (if (!o.optBoolean("relay", true)) "off: monthly limit" else if (Rtc.relayReady) "ready" else "unavailable: " + (Rtc.issue ?: "?")) + ")")
             pc.setRemoteDescription(object : Rtc.Sdp() {
                 override fun onSetSuccess() {
+                    // the camera's video goes on the video channel the viewer asked for (a channel of its own would never
+                    // be agreed on: the connection came up, but no video flowed)
+                    val t = pc.transceivers.firstOrNull { it.mediaType == org.webrtc.MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
+                    if (t == null) { com.motioncam.Health.log(ctx, "Live video: the request had no video channel"); return }
+                    t.setDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
+                    t.sender.setTrack(track, false)
                     pc.createAnswer(Rtc.Sdp { d ->
                         d ?: return@Sdp
                         pc.setLocalDescription(Rtc.Sdp(), d)

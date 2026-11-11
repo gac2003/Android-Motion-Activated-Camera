@@ -349,7 +349,7 @@ class RemoteLiveActivity : Activity() {
                         runOnUiThread {
                             if (rtc == null) return@runOnUiThread
                             rtcOn = true
-                            visibility = View.VISIBLE
+                            com.motioncam.Health.log(this@RemoteLiveActivity, "Live video from ${r.name()}: playing")
                             image.visibility = View.INVISIBLE
                             if (feed.watching) feed.stop()   // the pictures aren't needed while video plays
                             msgTv.visibility = View.GONE

@@ -360,7 +360,8 @@ object CameraLink {
         val o = JSONObject()
             .put("name", Device.name(ctx)).put("mode", s.mode.name).put("monitoring", s.monitoring).put("message", s.message)
             .put("remote", holderJson())
-            .put("standby", CameraService.inStandby).put("standbyOn", CameraService.standbyAllowed(ctx)).put("canStart", CameraService.inStandby || (CameraService.monitoring && !s.monitoring))
+            .put("standby", CameraService.inStandby).put("standbyOn", CameraService.standbyAllowed(ctx))
+            .put("offAt", CameraService.instance?.autoOffAt ?: 0L).put("canStart", CameraService.inStandby || (CameraService.monitoring && !s.monitoring))
             .put("recSince", s.recordingSinceWall).put("lastMotion", s.lastMotionWall).put("battery", s.batteryPct)
             .put("charging", s.charging).put("tempC", s.tempC.toDouble()).put("lens", s.lens).put("format", s.format)
             .put("pin", pin(ctx) != null).put("pinForView", pin(ctx) != null && p.livePinForView)
@@ -688,13 +689,20 @@ object CameraLink {
                 if (holder() == by) { holderId = null; holderUntil = 0; main.post { publishStatus(ctx) } }
                 reply(true, "Remote given back")
             }
-            "pause" -> { EngineHost.peek()?.setMonitoring(false); event(ctx, "monitor_paused", "Monitoring stopped by $who · camera still on"); reply(true, "Monitoring stopped · the camera stays on") }
-            "resume" -> { EngineHost.peek()?.setMonitoring(true); reply(true, "Monitoring started") }
+            "pause" -> {
+                EngineHost.peek()?.setMonitoring(false)
+                CameraService.instance?.stoppedRemotely()
+                val off = (CameraService.instance?.autoOffAt ?: 0L) > 0
+                event(ctx, "monitor_paused", "Monitoring stopped by $who" + if (off) " · the camera turns off after ${CameraService.AUTO_OFF_MIN} min to save power" else " · camera still on")
+                reply(true, "Monitoring stopped" + if (off) " · the camera turns off after ${CameraService.AUTO_OFF_MIN} min unless you start it again" else "")
+                main.postDelayed({ publishStatus(ctx) }, 300)
+            }
+            "resume" -> { EngineHost.peek()?.setMonitoring(true); CameraService.instance?.startedAgain(); reply(true, "Monitoring started") }
             "start" -> when {
                 CameraService.inStandby -> {
                     reply(true, "Starting monitoring…"); main.post { CameraService.instance?.startMonitoring() }
                 }
-                CameraService.monitoring && EngineHost.peek()?.monitoring == false -> { EngineHost.peek()?.setMonitoring(true); reply(true, "Monitoring started") }
+                CameraService.monitoring && EngineHost.peek()?.monitoring == false -> { EngineHost.peek()?.setMonitoring(true); CameraService.instance?.startedAgain(); reply(true, "Monitoring started") }
                 CameraService.monitoring -> reply(true, "Already monitoring")
                 else -> reply(false, "The camera phone is not in standby")
             }

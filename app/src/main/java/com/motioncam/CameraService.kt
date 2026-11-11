@@ -27,6 +27,8 @@ class CameraService : Service() {
         const val ACTION_STOP = "com.motioncam.STOP"          // stop monitoring (to standby when allowed)
         const val ACTION_EXIT = "com.motioncam.EXIT"          // stop completely, standby included
         const val ACTION_STANDBY = "com.motioncam.STANDBY"    // start in standby (camera closed)
+        /** Stopped from another phone: the camera turns off by itself after this long (if it can be started again). */
+        const val AUTO_OFF_MIN = 10
         private const val CHANNEL = "monitor"
         private const val NOTIF_ID = 1
         @Volatile var instance: CameraService? = null
@@ -210,12 +212,45 @@ class CameraService : Service() {
             val start = PendingIntent.getService(this, 2, Intent(this, CameraService::class.java), PendingIntent.FLAG_IMMUTABLE)
             val exit = PendingIntent.getService(this, 3, Intent(this, CameraService::class.java).setAction(ACTION_EXIT), PendingIntent.FLAG_IMMUTABLE)
             b.addAction(Notification.Action.Builder(null, "Start monitoring", start).build())
-            b.addAction(Notification.Action.Builder(null, "Turn off", exit).build())
+            b.addAction(Notification.Action.Builder(null, "Exit MotionCam", exit).build())
         } else {
             val stop = PendingIntent.getService(this, 1, Intent(this, CameraService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
             b.addAction(Notification.Action.Builder(null, "Stop", stop).build())
         }
         return b.build()
+    }
+
+    // ---- Stop monitoring from another phone: the camera stays on for a while (instant restart, live view), then turns
+    // off by itself to save battery and heat — only when it can still be started from another phone
+
+    /** When the camera turns off by itself (0 = it won't). Shown on your other phones. */
+    @Volatile var autoOffAt = 0L; private set
+
+    private val autoOff = Runnable {
+        autoOffAt = 0L
+        val e = engine ?: return@Runnable
+        if (e.monitoring) return@Runnable
+        when {
+            standbyAllowed(this) -> { Health.log(this, "Stopped for $AUTO_OFF_MIN min: camera turned off to save power (standby)"); stopMonitoring(manual = false) }
+            com.motioncam.live.Push.remoteStartReady(this) -> { Health.log(this, "Stopped for $AUTO_OFF_MIN min: MotionCam closed to save power (remote start can open it)"); exit() }
+            else -> Health.log(this, "Stopped for $AUTO_OFF_MIN min: camera kept on (no standby or remote start to start it again)")
+        }
+        com.motioncam.live.CameraLink.publishStatus(this)
+    }
+
+    /** Monitoring was stopped remotely (the camera stays on): it turns off after [AUTO_OFF_MIN] min if it can be started again. */
+    fun stoppedRemotely() {
+        Health.setWanted(this, false)
+        main.removeCallbacks(autoOff)
+        autoOffAt = if (standbyAllowed(this) || com.motioncam.live.Push.remoteStartReady(this)) {
+            main.postDelayed(autoOff, AUTO_OFF_MIN * 60_000L); System.currentTimeMillis() + AUTO_OFF_MIN * 60_000L
+        } else 0L
+    }
+
+    /** Monitoring started again while the camera was still on. */
+    fun startedAgain() {
+        main.removeCallbacks(autoOff); autoOffAt = 0L
+        Health.setWanted(this, true)
     }
 
     private fun shutdownWithMessage(why: String) {
@@ -233,6 +268,7 @@ class CameraService : Service() {
      */
     fun stopMonitoring(manual: Boolean) {
         Health.setWanted(this, false)
+        main.removeCallbacks(autoOff); autoOffAt = 0L
         if (!standbyAllowed(this)) { exit(manual); return }
         if (manual && engine != null) com.motioncam.live.CameraLink.event(this, "monitor_off", "Stopped on the camera phone · standby (Start monitoring from your other phones turns it back on)")
         releaseEngine(manual)

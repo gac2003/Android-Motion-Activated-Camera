@@ -157,9 +157,10 @@ be a camera needs a **PIN**.
   closed; otherwise MotionCam checks about every 15 minutes. Nothing is lost: **Activity** keeps everything.
 * **Tap a camera** for its screen: live view (a frame every 2 s), a high-quality **Screenshot**, its controls and
   settings (sent when you tap **Save**), and:
-  * **Stop monitoring / Start monitoring**: no detection or recording; the camera stays on and reachable.
-  * **Shut off camera** (red): the camera closes. With **Standby** on (default) it stays reachable and can be started
-    again from any phone; otherwise only on the phone itself.
+  * **Stop monitoring / Start monitoring**: no detection or recording. The camera stays on for 10 minutes (start
+    again instantly, watch live), then turns off by itself to save battery and heat, but only if it can still be
+    started from your other phones (Standby or Remote start); starting it then takes a few seconds. To quit MotionCam
+    completely, use *Exit MotionCam* in the camera phone's notification.
 * **Push alerts** (own build with a push key, [SETUP.md](../SETUP.md#7-push-alerts-optional)): cameras alert your
   other phones instantly with MotionCam closed, no *Stay connected* or 15-minute check needed.
 * **Clip pictures**: once a clip is saved, its alert and its row in Activity show a small picture of it (the camera

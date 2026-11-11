@@ -506,27 +506,25 @@ class RemoteCameraActivity : Activity() {
         }
 
         f.title("Monitoring")
-        // Stop monitoring = no motion detection or recording, the camera stays on and reachable (what you want most of the
-        // time); Shut off camera = the camera closes (standby, or offline when standby is off), confirmed first
-        val shutChip = f.chip("Shut off camera") {
-            val standbyOn = s.optBoolean("standbyOn")
-            AlertDialog.Builder(this).setTitle("Shut off the camera?")
-                .setMessage(if (standbyOn) "The camera closes and the phone goes to standby: it stays connected, and Start monitoring here turns it back on."
-                    else "MotionCam closes on that phone and it goes offline. It can only be turned back on at the phone itself " +
-                        "(or turn on Standby in its Settings › Your phones).\n\nTo just stop recording for a while, use Stop monitoring: " +
-                        "the camera stays on and you can start it again from here.")
-                .setPositiveButton("Shut off") { _, _ -> send("stop") }.setNegativeButton("Cancel", null).show()
-        }.apply {
-            setTextColor(0xFFFF8A85.toInt())
-            background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = Ui.dp(this@RemoteCameraActivity, 10).toFloat(); setColor(0x22E53935); setStroke(Ui.dp(this@RemoteCameraActivity, 1), Ui.RED)
-            }
-        }
+        // one button: Stop monitoring keeps the camera on for a while (instant restart, live view), then it turns off by
+        // itself to save power — only when it can be started again from here (standby or remote start)
         when {
             s.optBoolean("standby") -> f.row(f.chip("▶ Start monitoring") { send("start") }.apply { Ui.setChipState(this, true) })
-            s.optBoolean("monitoring") -> f.row(f.chip("Stop monitoring") { send("pause") }, shutChip)
-            else -> f.row(f.chip("▶ Start monitoring") { send("resume") }.apply { Ui.setChipState(this, true) }, shutChip)
+            s.optBoolean("monitoring") -> f.row(f.chip("Stop monitoring") { send("pause") })
+            else -> f.row(f.chip("▶ Start monitoring") { send("resume") }.apply { Ui.setChipState(this, true) })
         }.also { row -> if (!enabled) for (i in 0 until row.childCount) row.getChildAt(i).apply { isEnabled = false; alpha = 0.4f } }
+        if (enabled) {
+            val offAt = s.optLong("offAt")
+            when {
+                s.optBoolean("monitoring") -> f.note("Stopping keeps the camera on for ${com.motioncam.CameraService.AUTO_OFF_MIN} minutes " +
+                    "(start again instantly, watch live), then it turns off to save battery if it can be started again from here.")
+                s.optBoolean("standby") -> f.note("Stopped · the camera is off to save power; starting takes a few seconds.")
+                offAt > 0 -> {
+                    val min = ((offAt - System.currentTimeMillis() + 59_999) / 60_000).coerceAtLeast(1)
+                    f.note("Stopped · the camera turns off in about $min min to save power (start again any time).")
+                }
+            }
+        }
         // a failsafe when MotionCam isn't running there (offline): wake it by push, if that phone allows it
         if (!online()) {
             val allowed = phone?.remoteStart == true && !phone.push.isNullOrEmpty()

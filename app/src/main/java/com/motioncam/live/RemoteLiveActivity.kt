@@ -340,7 +340,7 @@ class RemoteLiveActivity : Activity() {
             setOnClickListener { if (!feed.watching) feed.start() else toggleControls() }
         }
         root.addView(image, FrameLayout.LayoutParams(-1, -1))
-        if (Rtc.enabled) try {
+        if (Rtc.enabled && prefs.liveSmooth) try {
             // always present, under the pictures: Android only creates a video surface for a view that's shown, so a
             // hidden one never draws a frame (and video never started). The pictures step aside once video plays.
             renderer = org.webrtc.SurfaceViewRenderer(this).apply {

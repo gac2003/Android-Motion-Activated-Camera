@@ -852,12 +852,14 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         } catch (_: Exception) {} finally { img.close() }
     }
 
+    private var rowBuf = ByteArray(0)
+
     /** Copies a YUV_420_888 camera image into a WebRTC I420 buffer (any row / pixel strides). */
     private fun toI420(img: Image, out: org.webrtc.JavaI420Buffer) {
         val w = img.width; val h = img.height
         fun plane(src: Image.Plane, dst: java.nio.ByteBuffer, dstStride: Int, pw: Int, ph: Int) {
             val sb = src.buffer; val rs = src.rowStride; val ps = src.pixelStride
-            val row = ByteArray(rs)
+            val row = rowBuf.takeIf { it.size >= rs } ?: ByteArray(rs).also { rowBuf = it }   // reused: no garbage per frame
             for (y in 0 until ph) {
                 sb.position(y * rs)
                 val n = minOf(rs, sb.remaining())

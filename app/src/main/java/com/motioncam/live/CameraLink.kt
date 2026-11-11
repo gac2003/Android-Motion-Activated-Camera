@@ -352,7 +352,12 @@ object CameraLink {
         val important = prev == null || prev.mode != s.mode || prev.monitoring != s.monitoring || prev.lens != s.lens || prev.format != s.format
         val minor = prev != null && (Math.abs(prev.batteryPct - s.batteryPct) >= 1 || Math.abs(prev.tempC - s.tempC) >= 1f ||
             prev.charging != s.charging || prev.lastMotionWall != s.lastMotionWall)
-        if (important || (minor && now - lastPub >= 60_000) || now - lastPub >= 10 * 60_000) publishStatus(ctx, s)
+        // small changes (battery, temperature, last motion): once a minute while one of your phones has MotionCam open,
+        // otherwise every 5 minutes (each upload wakes the radio); important ones at once
+        val me = me(ctx)
+        val watched = Live.phones.values.any { it.id != me && it.online && it.viewer }
+        val gap = if (watched) 60_000L else 5 * 60_000L
+        if (important || (minor && now - lastPub >= gap) || now - lastPub >= 10 * 60_000) publishStatus(ctx, s)
     }
 
     fun publishStatus(ctx: Context, s: Status = StatusBus.status) {

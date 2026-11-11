@@ -135,15 +135,24 @@ object Rtc {
     val egl: EglBase by lazy { EglBase.create() }
     @Volatile private var factory: PeerConnectionFactory? = null
 
+    private var initialized = false
+
     @Synchronized
     fun factory(ctx: Context): PeerConnectionFactory {
         factory?.let { return it }
-        PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(ctx.applicationContext).createInitializationOptions())
+        if (!initialized) {
+            PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(ctx.applicationContext).createInitializationOptions())
+            initialized = true
+        }
         return PeerConnectionFactory.builder()
             .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
             .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
             .createPeerConnectionFactory().also { factory = it }
     }
+
+    /** Frees WebRTC's threads and memory when nothing uses it (it's made again when needed). */
+    @Synchronized
+    fun freeFactory() { try { factory?.dispose() } catch (_: Throwable) {}; factory = null }
 
     fun config(servers: List<PeerConnection.IceServer>) = PeerConnection.RTCConfiguration(servers).apply {
         sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
@@ -307,13 +316,18 @@ object RtcCamera {
     private fun holdCamera(ctx: Context) {
         if (holding) return
         holding = true
+        main.removeCallbacks(idleFree)
         com.motioncam.FrameHub.rtcSink = sink
         try { com.motioncam.EngineHost.acquire(ctx, "rtc").applyPro() } catch (_: Exception) {}
     }
 
+    /** No viewer for 5 minutes: WebRTC's threads and buffers are freed too (made again for the next viewer). */
+    private val idleFree = Runnable { if (sessions.isEmpty() && !holding) Rtc.freeFactory() }
+
     private fun releaseCamera() {
         if (!holding) return
         holding = false
+        main.removeCallbacks(idleFree); main.postDelayed(idleFree, 5 * 60_000L)
         com.motioncam.FrameHub.rtcSink = null
         try { com.motioncam.EngineHost.release("rtc") } catch (_: Exception) {}
         try { track?.dispose() } catch (_: Exception) {}
@@ -453,7 +467,7 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
 class LiveVideo(private val a: android.app.Activity, private val cam: String, private val r: CamRemote,
                 frame: android.widget.FrameLayout, private val under: android.view.View,
                 private val playing: () -> Unit, private val fallback: (why: String) -> Unit) {
-    private val renderer: org.webrtc.SurfaceViewRenderer? = if (!Rtc.enabled) null else try {
+    private val renderer: org.webrtc.SurfaceViewRenderer? = if (!Rtc.enabled || !com.motioncam.Prefs(a).liveSmooth) null else try {
         org.webrtc.SurfaceViewRenderer(a).apply {
             init(Rtc.egl.eglBaseContext, object : org.webrtc.RendererCommon.RendererEvents {
                 override fun onFirstFrameRendered() {

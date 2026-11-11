@@ -85,7 +85,8 @@ object Alerts {
                      clip: JSONObject? = null, at: Long = System.currentTimeMillis(), picture: android.graphics.Bitmap? = null) {
         // "inside MotionCam only", or MotionCam is open on screen right now: the in-app card (not for silent updates),
         // never a phone notification on top of the app you are looking at (everything is in Activity anyway)
-        if (Prefs(ctx).alertsInApp || AlertInbox.front?.get() != null) {
+        val p0 = Prefs(ctx)
+        if (p0.alertsInApp || (AlertInbox.front?.get() != null && !p0.alertsAlways)) {
             if (!update) AlertInbox.banner(cam, title, text)
             return
         }
@@ -164,7 +165,7 @@ object Alerts {
                 val silent = gate(ctx, cam, false) ?: return
                 val st = motion.getOrPut(cam) { MotionState() }
                 val now = System.currentTimeMillis()
-                if (now - st.lastAlert < p.alertMotionGapMin * 60_000L) {
+                if (now - st.lastAlert < p.alertMotionGapSec * 1000L) {
                     // within the quiet gap: update the same notification, no sound
                     st.count++
                     post(ctx, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent = true, update = true, clip = st.clip, picture = st.pic)
@@ -176,7 +177,7 @@ object Alerts {
             "clip" -> {
                 val ref = clipRef(d)
                 val st = motion[cam]
-                val toMotion = ref != null && p.alertMotion && st != null && System.currentTimeMillis() - st.lastAlert < maxOf(p.alertMotionGapMin, 10) * 60_000L
+                val toMotion = ref != null && p.alertMotion && st != null && System.currentTimeMillis() - st.lastAlert < maxOf(p.alertMotionGapSec * 1000L, 10 * 60_000L)
                 if (!toMotion && !p.alertClip) return
                 val app = ctx.applicationContext
                 // the clip's picture (fetched in the background, a few KB), then the alerts
@@ -199,7 +200,7 @@ object Alerts {
                 val silent = gate(ctx, cam, false) ?: return
                 val st = motion.getOrPut(cam) { MotionState() }
                 val now = System.currentTimeMillis()
-                val within = now - st.lastAlert < p.alertMotionGapMin * 60_000L
+                val within = now - st.lastAlert < p.alertMotionGapSec * 1000L
                 if (!within) st.lastAlert = now
                 post(ctx, cam, "motion", CH_MOTION, "Motion · $name", "Lots of motion (×${d.optInt("n")} this hour)", silent = silent || within, update = within)
             }
@@ -258,7 +259,7 @@ object Alerts {
         if (out.isEmpty()) return
         val latestClip = events.lastOrNull { it.second.optString("type") == "clip" }?.let { clipRef(it.second) }
         // the 15-minute background check: these are fresh enough to alert like live ones (sound, quiet hours apply)
-        if (Live.bgCheck && AlertInbox.front?.get() == null && !p.alertsInApp) {
+        if (Live.bgCheck && (AlertInbox.front?.get() == null || p.alertsAlways) && !p.alertsInApp) {
             for ((t, kind, tt) in out) {
                 val silent = gate(ctx, cam, false) ?: continue
                 val ch = when (kind) { "motion" -> CH_MOTION; "clip" -> CH_CLIP; else -> CH_STATUS }
@@ -273,7 +274,7 @@ object Alerts {
             (out.size - (if (motions.isNotEmpty()) 1 else 0) - (if (clips.isNotEmpty()) 1 else 0)).takeIf { it > 0 }?.let { "$it other" },
         ).joinToString(" · ")
         val title = "While you were away · $name"
-        if (AlertInbox.front?.get() != null || p.alertsInApp) { AlertInbox.banner(cam, title, "$summary — tap to see them in Activity", openList = true); return }
+        if ((AlertInbox.front?.get() != null && !p.alertsAlways) || p.alertsInApp) { AlertInbox.banner(cam, title, "$summary — tap to see them in Activity", openList = true); return }
         try {
             channels(ctx)
             val open = PendingIntent.getActivity(ctx, nid(cam, "missed"),

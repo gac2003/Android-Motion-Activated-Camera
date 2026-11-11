@@ -161,6 +161,8 @@ class Prefs(ctx: Context) {
     var cardSnapshot: Boolean get() = b("cardSnapshot", false); set(v) = put("cardSnapshot", v)
     /** Where camera alerts appear: false = phone notifications, true = only inside MotionCam (a card on the open screen). */
     var alertsInApp: Boolean get() = b("alertsInApp", false); set(v) = put("alertsInApp", v)
+    /** Phone notifications also while MotionCam is on screen (instead of a card in the app). */
+    var alertsAlways: Boolean get() = b("alertsAlways", false); set(v) = put("alertsAlways", v)
     /** Without "Stay connected": check for alerts about every 15 minutes (connects briefly, then disconnects). */
     var alertsPoll: Boolean get() = b("alertsPoll", true); set(v) = put("alertsPoll", v)
     var alertRemote: Boolean get() = b("alertRemote", true); set(v) = put("alertRemote", v)
@@ -169,6 +171,8 @@ class Prefs(ctx: Context) {
     var alertMotion: Boolean get() = b("alertMotion", true); set(v) = put("alertMotion", v)
     /** Minutes between motion alerts per camera; motion in between updates the same alert silently. */
     var alertMotionGapMin: Int get() = i("alertMotionGapMin", 5); set(v) = put("alertMotionGapMin", v)
+    /** At most one motion alert per camera every this many seconds (from 15 s); older versions kept minutes. */
+    var alertMotionGapSec: Int get() = i("alertMotionGapSec", alertMotionGapMin * 60); set(v) = put("alertMotionGapSec", v)
     var alertClip: Boolean get() = b("alertClip", false); set(v) = put("alertClip", v)
     /** A picture of the clip in its alerts (off: text only, e.g. on a lock screen others can see). */
     var alertPicture: Boolean get() = b("alertPicture", true); set(v) = put("alertPicture", v)
@@ -215,7 +219,7 @@ class Prefs(ctx: Context) {
         val LIVE_KEYS = listOf("liveStay", "livePinForView", "liveCamera", "liveStandby", "liveRemoteStart", "cardSnapshot")
         val REMOTE_FOLDER_KEYS = listOf("remoteKeepCopy")
         val PLAYER_KEYS = listOf("skipMs", "stripZoom")
-        val ALERT_KEYS = listOf("alertsOn", "alertsInApp", "alertsPoll", "alertRemote", "alertMotion", "alertMotionGapMin", "alertClip", "alertPicture", "alertBattery", "alertBatteryPct",
+        val ALERT_KEYS = listOf("alertsOn", "alertsInApp", "alertsAlways", "alertsPoll", "alertRemote", "alertMotion", "alertMotionGapMin", "alertMotionGapSec", "alertClip", "alertPicture", "alertBattery", "alertBatteryPct",
             "alertCharger", "alertHot", "alertOffline", "alertOfflineMin", "alertBackOnline", "alertMonitoring", "alertSync",
             "quietOn", "quietFrom", "quietTo", "quietMode")
         val CAMERA_KEYS = listOf("camera", "exposureAuto", "evIndex", "iso", "shutterNs", "focusAuto", "focusPos",

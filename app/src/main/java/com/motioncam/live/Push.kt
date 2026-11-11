@@ -1,6 +1,7 @@
 package com.motioncam.live
 
 import android.content.Context
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
@@ -87,6 +88,7 @@ object Push {
     // ------------------------------------------------------------------ receiving phone: a push arrived
 
     fun received(ctx: Context, data: Map<String, String>) {
+        if (data["x"] == "start") { remoteStartReceived(ctx, data); return }
         val cam = data["c"] ?: return
         if (cam == Device.id(ctx)) return
         val d = LiveNet.open(ctx, data["e"])?.let { try { JSONObject(it) } catch (_: Exception) { null } } ?: return   // not our network
@@ -100,6 +102,68 @@ object Push {
         try { LiveNet.db(ctx)?.goOnline() } catch (_: Exception) {}
         main.postDelayed({ if (!Live.viewerActive && !Live.cameraActive) try { LiveNet.db(ctx)?.goOffline() } catch (_: Exception) {} }, 30_000)
         main.post { Alerts.onEvent(ctx, cam, t, d, key) }
+    }
+
+    // ------------------------------------------------------------------ remote start (a failsafe for a camera that isn't running)
+
+    /** This phone can be started by push: allowed here, a PIN, the overlay permission, and a push address. */
+    fun remoteStartReady(ctx: Context): Boolean {
+        val p = com.motioncam.Prefs(ctx)
+        return p.liveCamera && p.liveRemoteStart && canReceive && token(ctx) != null && CameraLink.hasPin(ctx) &&
+            android.provider.Settings.canDrawOverlays(ctx)
+    }
+
+    /** Another phone asks this camera to start monitoring (signed with its PIN; at most 10 minutes old; once). */
+    private fun remoteStartReceived(ctx: Context, data: Map<String, String>) {
+        if (data["to"] != Device.id(ctx)) return
+        val sealed = data["e"] ?: return
+        val d = LiveNet.open(ctx, sealed)?.let { try { JSONObject(it) } catch (_: Exception) { null } } ?: return
+        val who = d.optString("byName").ifEmpty { "another phone" }
+        fun refuse(why: String) = com.motioncam.Health.log(ctx, "Remote start by $who refused: $why")
+        if (!remoteStartReady(ctx)) { refuse("Remote start is off (or not fully set up) on this phone"); return }
+        if (!CameraLink.verifyStart(ctx, sealed, data["s"])) { refuse("wrong PIN"); return }
+        val at = d.optLong("at")
+        if (Math.abs(System.currentTimeMillis() - at) > 10 * 60_000L) { refuse("the request is too old"); return }
+        if (at <= sp(ctx).getLong("startAt", 0L)) return   // already done
+        sp(ctx).edit().putLong("startAt", at).apply()
+        if (com.motioncam.CameraService.monitoring) { com.motioncam.Health.log(ctx, "Remote start by $who: already monitoring"); return }
+        com.motioncam.Health.log(ctx, "Remote start by $who")
+        main.post {
+            try {
+                ctx.startActivity(Intent(ctx, com.motioncam.RemoteStartActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION).putExtra("by", who))
+            } catch (e: Exception) { refuse("Android didn't let MotionCam open (${e.message})") }
+        }
+    }
+
+    /**
+     * Asks camera [cam] (push address [token]) to start, signed with its [pin]. [done] on the main thread: whether
+     * FCM accepted it (delivery to the phone follows, usually within seconds).
+     */
+    fun sendStart(ctx: Context, cam: String, token: String, pin: String, done: (Boolean) -> Unit) {
+        val app = ctx.applicationContext
+        val payload = JSONObject().put("type", "start").put("by", Device.id(app)).put("byName", Device.name(app)).put("at", System.currentTimeMillis())
+        val sealed = LiveNet.seal(app, payload.toString())
+        val data = JSONObject().put("x", "start").put("to", cam).put("e", sealed).put("s", CameraLink.sign(cam, pin, sealed))
+        Thread {
+            val ok = try {
+                val access = accessToken() ?: throw IllegalStateException("no access")
+                post(access, JSONObject().put("message", JSONObject().put("token", token).put("data", data)
+                    .put("android", JSONObject().put("priority", "HIGH").put("ttl", "600s")))) == 200
+            } catch (_: Exception) { false }
+            main.post { done(ok) }
+        }.start()
+    }
+
+    private fun post(access: String, msg: JSONObject): Int {
+        val c = URL("https://fcm.googleapis.com/v1/projects/${LiveConfig.PROJECT_ID}/messages:send").openConnection() as HttpURLConnection
+        c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 10_000; c.readTimeout = 15_000
+        c.setRequestProperty("Authorization", "Bearer $access")
+        c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        c.outputStream.use { it.write(msg.toString().toByteArray()) }
+        val code = c.responseCode
+        c.disconnect()
+        return code
     }
 
     // ------------------------------------------------------------------ camera: sending

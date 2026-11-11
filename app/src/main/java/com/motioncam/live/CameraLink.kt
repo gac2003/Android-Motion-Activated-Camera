@@ -503,6 +503,9 @@ object CameraLink {
     private var lockedUntil = 0L
     private var lockouts = 0
 
+    /** A remote start (by push) signed with this camera's PIN; it must have a PIN. Counts towards the lock-out. */
+    fun verifyStart(ctx: Context, sealed: String, sig: String?): Boolean = hasPin(ctx) && pinOk(ctx, sealed, sig) == true
+
     /** Checks the PIN signature; after 5 wrong ones, refuses everything for 10 minutes. */
     private fun pinOk(ctx: Context, payload: String, sig: String?): Boolean? {
         val p = pin(ctx) ?: return true

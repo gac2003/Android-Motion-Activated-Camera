@@ -164,6 +164,10 @@ be a camera needs a **PIN**.
   other phones instantly with MotionCam closed, no *Stay connected* or 15-minute check needed.
 * **Clip pictures**: once a clip is saved, its alert and its row in Activity show a small picture of it (the camera
   keeps a week of them); Alerts → *Show a picture of the clip* turns them off in notifications. A camera's Home card shows its latest clip, not the last live view or screenshot.
+* **Remote start** (optional, on the camera phone: Settings → Your phones; needs its PIN, *Display over other apps*
+  and push alerts): if MotionCam isn't running there (Android closed it, or it was shut off), the camera's screen on
+  your other phones offers **Start MotionCam remotely**. The phone lights up for a few seconds over its lock screen
+  (it stays locked) and starts monitoring.
 * **A motion alert opens its clip** from the camera's backup folder (add that folder once under Remote folders).
   If the clip is in several of your folders, it plays from one of them; MotionCam only asks which when the copies differ
   (another size or length).
@@ -203,6 +207,10 @@ Turn the phone sideways and every screen uses the width (portrait stays the same
   peephole with ZONES; raise *Motion must last at least* (e.g. 500 ms) to ignore flashes.
 * **A phone you watch from** doesn't keep a camera running: camera mode lets go of the camera as soon as you leave it,
   and *Standby* (reachable to be started from another phone) is only kept on a phone that monitored in the last week.
+* **If Android stops MotionCam** on a camera (to free memory, a battery manager, a crash), it restarts and resumes
+  monitoring when Android allows it. When it doesn't, the camera phone shows a *Monitoring stopped unexpectedly*
+  notification (tap to resume), your other phones get an alert, and opening camera mode resumes it. **Settings →
+  Camera → Camera log** shows what happened (crashes, restarts, camera errors, connection drops); *Share* sends it.
 * **A phone that's a camera** saves power by itself: a minute after you stop touching camera mode while it's
   monitoring (or with MotionCam in the background), it stops following your other cameras and their alerts. Touch
   the screen or open another tab and it catches up within a second.

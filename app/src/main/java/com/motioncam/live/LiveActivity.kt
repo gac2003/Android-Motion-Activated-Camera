@@ -135,9 +135,39 @@ class LiveActivity : Activity() {
             f.note("When monitoring is stopped, MotionCam stays connected with the camera off (a small notification shows " +
                 "\"standby\"), so your other phones can start monitoring again. Turn it off from that notification or here. " +
                 "Most reliable while the phone is charging.")
+            f.toggle("Remote start: your other phones can start MotionCam here, even when it's locked or closed", prefs.liveRemoteStart) { on ->
+                prefs.liveRemoteStart = on
+                if (on && !android.provider.Settings.canDrawOverlays(this)) askOverlay()
+                Live.publishDevice(this); render()
+            }
+            if (prefs.liveRemoteStart) {
+                val missing = listOfNotNull(
+                    if (!android.provider.Settings.canDrawOverlays(this)) "allow \"Display over other apps\"" else null,
+                    if (!Push.canReceive) "push alerts in your build (SETUP.md step 7)" else if (Push.token(this) == null) "push registration (reopen MotionCam)" else null,
+                )
+                if (missing.isNotEmpty()) {
+                    f.note("Not ready yet: needs " + missing.joinToString(" and ") + ".", Ui.ACCENT)
+                    if (!android.provider.Settings.canDrawOverlays(this)) f.row(f.chip("Allow display over other apps") { askOverlay() })
+                }
+            }
+            f.note("A failsafe for when MotionCam isn't running on this phone (Android closed it, or it was shut off): a phone " +
+                "that knows the PIN can wake it with a push and start monitoring. The screen lights up for a few seconds over " +
+                "the lock screen (the phone stays locked), then turns off again.")
             f.note("The PIN protects the camera's controls, settings and pausing/stopping monitoring (and, if on, its live view). " +
                 "It is never sent: requests are signed with it. After 5 wrong PINs remote control is locked for 10 minutes.")
         } else f.note("Viewer only: this phone sees the cameras and gets their alerts, but is never shown or controllable as a camera.")
+    }
+
+    /** Remote start opens MotionCam over the lock screen: Android's "Display over other apps" permission. */
+    private fun askOverlay() {
+        android.app.AlertDialog.Builder(this).setTitle("Allow display over other apps")
+            .setMessage("Android only lets MotionCam open by itself (to start the camera when another phone asks) with this permission. " +
+                "On the next screen, turn on MotionCam, then come back.")
+            .setPositiveButton("Open settings") { _, _ ->
+                try { startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName"))) }
+                catch (_: Exception) { startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION)) }
+            }
+            .setNegativeButton("Cancel", null).show()
     }
 
     private fun phoneRow(p: Live.Phone, isMe: Boolean): View {

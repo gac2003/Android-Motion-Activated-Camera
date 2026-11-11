@@ -145,6 +145,8 @@ class Prefs(ctx: Context) {
     var livePinForView: Boolean get() = b("livePinForView", true); set(v) = put("livePinForView", v)
     /** This phone may act as a camera on the network (seen and controlled while monitoring). Needs a PIN. Off = viewer only. */
     var liveCamera: Boolean get() = b("liveCamera", false); set(v) = put("liveCamera", v)
+    /** Your other phones may start MotionCam here by push (even locked, even if MotionCam was closed). Off by default. */
+    var liveRemoteStart: Boolean get() = b("liveRemoteStart", false); set(v) = put("liveRemoteStart", v)
     /** When this phone last started monitoring (standby is only for phones actually used as cameras). */
     var lastMonitoredAt: Long
         get() {
@@ -210,7 +212,7 @@ class Prefs(ctx: Context) {
         val REMOTE_KEYS = listOf("serverOn", "streamHd", "port")
         val CLOUD_KEYS = listOf("cloudWifiOnly", "cloudChargingOnly", "cloudQuality", "cloudDeleteLocal", "cloudThumbs", "cloudPaused")
         /** Stay connected, PIN for the view, camera role (the network sign-in, its connection and PINs are kept). */
-        val LIVE_KEYS = listOf("liveStay", "livePinForView", "liveCamera", "liveStandby", "cardSnapshot")
+        val LIVE_KEYS = listOf("liveStay", "livePinForView", "liveCamera", "liveStandby", "liveRemoteStart", "cardSnapshot")
         val REMOTE_FOLDER_KEYS = listOf("remoteKeepCopy")
         val PLAYER_KEYS = listOf("skipMs", "stripZoom")
         val ALERT_KEYS = listOf("alertsOn", "alertsInApp", "alertsPoll", "alertRemote", "alertMotion", "alertMotionGapMin", "alertClip", "alertPicture", "alertBattery", "alertBatteryPct",

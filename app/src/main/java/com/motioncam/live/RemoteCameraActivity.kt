@@ -357,6 +357,16 @@ class RemoteCameraActivity : Activity() {
     private fun status(): JSONObject? = r.status()
     private fun caps(): JSONObject? = r.caps()
     private fun online() = r.online()
+
+    /** Remote start: a push signed with the camera's PIN (asked for if this phone doesn't know it yet). */
+    private fun remoteStart() {
+        val token = Live.phones[cam]?.push ?: return
+        val pin = pinFor() ?: run { r.askPin({ remoteStart() }); return }
+        Toast.makeText(this, "Sending…", Toast.LENGTH_SHORT).show()
+        Push.sendStart(this, cam, token, pin) { ok ->
+            Toast.makeText(this, if (ok) "Sent: the camera should come online within a minute" else "Couldn't send it (no connection?)", Toast.LENGTH_LONG).show()
+        }
+    }
     private fun pinFor(): String? = r.pinFor()
     private fun askPin(then: () -> Unit) = r.askPin(then)
 
@@ -517,6 +527,21 @@ class RemoteCameraActivity : Activity() {
             s.optBoolean("monitoring") -> f.row(f.chip("Stop monitoring") { send("pause") }, shutChip)
             else -> f.row(f.chip("▶ Start monitoring") { send("resume") }.apply { Ui.setChipState(this, true) }, shutChip)
         }.also { row -> if (!enabled) for (i in 0 until row.childCount) row.getChildAt(i).apply { isEnabled = false; alpha = 0.4f } }
+        // a failsafe when MotionCam isn't running there (offline): wake it by push, if that phone allows it
+        if (!online()) {
+            val allowed = phone?.remoteStart == true && !phone.push.isNullOrEmpty()
+            val start = f.chip("▶ Start MotionCam remotely") { remoteStart() }
+            f.row(start)
+            if (allowed && Push.canSend) {
+                Ui.setChipState(start, true)
+                f.note("Wakes MotionCam on that phone with a push (also when it's locked or MotionCam was closed) and starts monitoring. " +
+                    "It shows up here within a minute if the phone has internet.")
+            } else {
+                start.isEnabled = false; start.alpha = 0.4f
+                f.note(if (!Push.canSend) "Needs push alerts in your build (SETUP.md step 7)."
+                    else "Turn on Remote start on that phone (Settings › Your phones) to start it from here while it's offline.")
+            }
+        }
 
         // never show (or send) defaults: the controls appear only once the camera has said what its settings are
         if (!s.has("settings")) { f.title("Settings"); f.note("Loading the camera's settings…"); return }

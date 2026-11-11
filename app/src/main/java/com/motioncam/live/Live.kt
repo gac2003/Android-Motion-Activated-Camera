@@ -143,6 +143,7 @@ object Live {
         .put("name", Device.name(ctx)).put("camera", cameraActive).put("viewer", viewerActive)
         .put("canCamera", Prefs(ctx).liveCamera)
         .put("pushes", Push.canSend)
+        .put("remoteStart", Push.remoteStartReady(ctx))
         .put("app", try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName } catch (_: Exception) { "" })
         .put("sync", syncHealth(ctx))
 
@@ -168,7 +169,9 @@ object Live {
     class Phone(val id: String, var name: String = "", var online: Boolean = false, var seen: Long = 0,
                 var camera: Boolean = false, var viewer: Boolean = false, var sync: JSONObject = JSONObject(), var kicked: Boolean = false,
                 /** Its push address (to alert it while MotionCam is closed), and whether it sends pushes as a camera. */
-                var push: String? = null, var pushes: Boolean = false)
+                var push: String? = null, var pushes: Boolean = false,
+                /** It allows being started remotely by push (Remote start). */
+                var remoteStart: Boolean = false)
     class Cam(val id: String) {
         var status: JSONObject? = null
         var statusAt = 0L
@@ -223,6 +226,7 @@ object Live {
                             p.name = o.optString("name"); p.camera = o.optBoolean("camera"); p.viewer = o.optBoolean("viewer")
                             p.sync = o.optJSONObject("sync") ?: JSONObject()
                             p.pushes = o.optBoolean("pushes")
+                            p.remoteStart = o.optBoolean("remoteStart")
                         } catch (_: Exception) {}
                     }
                     if (id == Device.id(ctx)) { if (p.kicked) main.post { removedByOtherPhone(ctx) }; continue }

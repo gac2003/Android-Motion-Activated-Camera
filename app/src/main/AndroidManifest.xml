@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- lets queued cloud uploads resume after a reboot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Remote start (opt-in): lets MotionCam open over the lock screen when another phone starts it -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
@@ -61,6 +63,9 @@
         <activity android:name=".live.LiveActivity" android:exported="false" />
         <activity android:name=".live.RemoteCameraActivity" android:exported="false" />
         <activity android:name=".live.OpenClipActivity" android:exported="false" />
+        <activity android:name=".RemoteStartActivity" android:exported="false"
+            android:showWhenLocked="true" android:turnScreenOn="true" android:excludeFromRecents="true"
+            android:taskAffinity="" android:noHistory="true" />
         <service android:name=".CameraWatchdog" android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
         <service android:name=".live.AlertCheckJob" android:exported="false"

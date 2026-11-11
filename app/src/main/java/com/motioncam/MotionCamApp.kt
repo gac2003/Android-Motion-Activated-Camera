@@ -29,7 +29,7 @@ class MotionCamApp : Application() {
     private val idle = Runnable {
         if (started == 0 && !LiveService.running) { Live.viewerActive = false; Live.refresh(this) }
         // in the background while monitoring: camera duty (Stay connected stops following the other cameras)
-        else if (started == 0 && CameraService.monitoring) { Live.cameraDuty = true; Live.refresh(this) }
+        else if (started == 0 && CameraService.watching) { Live.cameraDuty = true; Live.refresh(this) }
     }
 
     override fun onCreate() {

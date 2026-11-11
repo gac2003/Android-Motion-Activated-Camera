@@ -47,7 +47,7 @@ class HomeActivity : Activity(), Nav.Reselect {
     private val changed: () -> Unit = { renderSoon() }
     private var camState = ""
     private val statusL: (Status) -> Unit = { st ->
-        val k = "${CameraService.monitoring}/${CameraService.inStandby}/${st.mode == Mode.RECORDING}"
+        val k = "${CameraService.watching}/${CameraService.inStandby}/${st.mode == Mode.RECORDING}"
         if (k != camState) { camState = k; renderSoon() }
     }
     private var pending = false
@@ -269,7 +269,7 @@ class HomeActivity : Activity(), Nav.Reselect {
     /** This phone as a camera: its exact state, one tap away (like the Camera tab). */
     private fun cameraModeRow(): View {
         val s = StatusBus.status
-        val monitoring = CameraService.monitoring
+        val monitoring = CameraService.watching
         val watched = CameraLink.streaming
         val (sub, color) = when {
             monitoring && s.mode == Mode.RECORDING -> "Recording · motion now" to 0xFFFF8A85.toInt()

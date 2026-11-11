@@ -126,7 +126,9 @@ object Push {
         if (Math.abs(System.currentTimeMillis() - at) > 10 * 60_000L) { refuse("the request is too old"); return }
         if (at <= sp(ctx).getLong("startAt", 0L)) return   // already done
         sp(ctx).edit().putLong("startAt", at).apply()
-        if (com.motioncam.CameraService.monitoring) { com.motioncam.Health.log(ctx, "Remote start by $who: already monitoring"); return }
+        if (com.motioncam.CameraService.watching) { com.motioncam.Health.log(ctx, "Remote start by $who: already monitoring"); return }
+        // stopped from another phone with the camera still on: just watch again
+        if (com.motioncam.CameraService.resumeHere(ctx)) { com.motioncam.Health.log(ctx, "Remote start by $who: monitoring again"); return }
         com.motioncam.Health.log(ctx, "Remote start by $who")
         main.post {
             try {

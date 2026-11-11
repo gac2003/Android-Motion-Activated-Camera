@@ -230,7 +230,7 @@ object Nav {
             cam.icon.addView(dot, FrameLayout.LayoutParams(Ui.dp(ctx, 9), Ui.dp(ctx, 9), Gravity.TOP or Gravity.END).apply { rightMargin = Ui.dp(ctx, 6) })
             val update = {
                 val watched = com.motioncam.live.CameraLink.streaming
-                val on = CameraService.monitoring
+                val on = CameraService.watching
                 dot.visibility = if (watched || on) View.VISIBLE else View.GONE
                 dot.background = android.graphics.drawable.GradientDrawable().apply {
                     shape = android.graphics.drawable.GradientDrawable.OVAL

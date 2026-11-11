@@ -36,7 +36,7 @@ class RemoteStartActivity : Activity() {
         val who = intent.getStringExtra("by") ?: "another phone"
         try { CameraService.start(this) } catch (e: Exception) { Health.log(this, "Remote start failed: ${e.message}") }
         ui.postDelayed({
-            if (CameraService.monitoring) {
+            if (CameraService.watching) {
                 Health.log(this, "Monitoring started remotely by $who")
                 try { com.motioncam.live.CameraLink.event(this, "monitor_on", "Started remotely by $who (MotionCam wasn't running)") } catch (_: Exception) {}
             } else Health.log(this, "Remote start by $who: monitoring didn't start")

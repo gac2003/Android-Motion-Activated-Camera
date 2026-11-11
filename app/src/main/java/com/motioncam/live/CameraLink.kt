@@ -220,7 +220,7 @@ object CameraLink {
         override fun run() {
             val c = app ?: return
             if (!running) return
-            if (Prefs(c).cardSnapshot && CameraService.monitoring) Thread {
+            if (Prefs(c).cardSnapshot && CameraService.watching) Thread {
                 try { FrameHub.latest()?.let { cardPicture(c, it, System.currentTimeMillis()) } } catch (_: Exception) {}
             }.start()
             main.postDelayed(this, 15 * 60_000L)

@@ -517,8 +517,9 @@ class LiveVideo(private val a: android.app.Activity, private val cam: String, pr
     private var viewer: RtcViewer? = null
     /** Video is showing. */
     var on = false; private set
-    /** Video was tried (and is connecting or showing). */
-    val active get() = viewer != null
+    /** Video was tried (checking the relay allowance, connecting or showing). */
+    val active get() = viewer != null || starting
+    private var starting = false
 
     /** Tries video; false when it can't be used here (then the pictures are the live view). */
     fun start(): Boolean {
@@ -529,8 +530,10 @@ class LiveVideo(private val a: android.app.Activity, private val cam: String, pr
         if (!s.optBoolean("rtc")) return false
         val pin = r.pinFor()
         if (s.optBoolean("pinForView") && pin == null) return false
+        starting = true
         Rtc.usage(a) { used, capGb ->
-            if (a.isFinishing || viewer != null) return@usage
+            if (!starting || a.isFinishing || viewer != null) return@usage   // stopped meanwhile
+            starting = false
             viewer = RtcViewer(a, cam, pin, rd, used < capGb * 1_000_000_000L, used, capGb,
                 overCap = { done("this month's relay allowance is used up") }) { why -> done(why) }.also { it.start() }
         }
@@ -544,6 +547,7 @@ class LiveVideo(private val a: android.app.Activity, private val cam: String, pr
     }
 
     fun stop() {
+        starting = false
         viewer?.stop(); viewer = null; on = false
         renderer?.clearImage()
         under.visibility = android.view.View.VISIBLE

@@ -181,6 +181,7 @@ class RemoteCameraActivity : Activity() {
             }) { why ->
             Toast.makeText(this, "Video didn't connect ($why): showing pictures", Toast.LENGTH_LONG).show()
             if (!feed.watching) feed.start()
+            liveBtn.text = if (feed.watching) "■ Stop live" else "▶ Live view"
         }
         feed = r.Feed(3 * 60_000L, { bmp, at ->
             // video is on (or connecting): pictures don't belong here (a late one arriving after the switch)

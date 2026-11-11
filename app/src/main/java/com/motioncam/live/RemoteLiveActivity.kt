@@ -58,9 +58,9 @@ class RemoteLiveActivity : Activity() {
         val rd = renderer ?: return
         if (rtc != null || rtcFailed || rtcChecking || !prefs.liveSmooth || !r.online()) return
         val s = status() ?: return
-        if (!s.optBoolean("rtc")) return
+        if (!s.optBoolean("rtc")) { videoIssue = "the camera phone needs the latest MotionCam (with video)"; updateLiveLabel(); return }
         val pin = r.pinFor()
-        if (s.optBoolean("pinForView") && pin == null) return
+        if (s.optBoolean("pinForView") && pin == null) { videoIssue = "enter the camera's PIN"; return }
         rtcChecking = true
         // the relay's monthly allowance (Cloudflare has no cap of its own): over it, direct connections only
         Rtc.usage(this) { used, capGb ->
@@ -78,14 +78,30 @@ class RemoteLiveActivity : Activity() {
                 overCap = {
                     rtcFailed = true; backToPictures()
                     Toast.makeText(this, "This month's video relay allowance ($capGb GB) is used up: back to pictures", Toast.LENGTH_LONG).show()
-                }) {
-                // no connection: keep (or go back to) the pictures
+                }) { why ->
+                // no connection: keep (or go back to) the pictures, and say why
                 rtcFailed = true; backToPictures()
+                videoIssue = why
+                com.motioncam.Health.log(this, "Live video from ${r.name()} didn't work: $why")
+                Toast.makeText(this, "Video didn't connect ($why): showing pictures", Toast.LENGTH_LONG).show()
+                updateLiveLabel()
             }.also { it.start() }
+            // connected, but no picture: the camera isn't sending frames
+            ui.postDelayed({
+                val v = rtc ?: return@postDelayed
+                if (!rtcOn && v.connected) {
+                    v.stop(); rtcFailed = true; backToPictures()
+                    videoIssue = "connected, but the camera sent no picture"
+                    com.motioncam.Health.log(this, "Live video from ${r.name()}: $videoIssue")
+                    Toast.makeText(this, "Video connected but no picture arrived: showing pictures", Toast.LENGTH_LONG).show()
+                }
+            }, 30_000)
         }
     }
     private var rtcChecking = false
     private var relayNote: String? = null
+    /** Why video didn't work (shown with the pictures). */
+    private var videoIssue: String? = null
     private var resumedNow = false
 
     private fun stopRtc() {
@@ -581,6 +597,7 @@ class RemoteLiveActivity : Activity() {
         if (!::feed.isInitialized || !::liveTv.isInitialized) return
         val text = when {
             rtcOn && r.online() -> "● LIVE · video" + (relayNote?.let { " (direct only: $it)" } ?: "")
+            videoIssue != null && feed.watching && lastFrameAt > 0 && r.online() -> "● LIVE · pictures (video: ${videoIssue})"
             !r.online() -> "offline"
             !feed.watching -> "paused"
             lastFrameAt <= 0 -> "connecting…"

@@ -54,32 +54,46 @@ object Rtc {
     fun iceServers(): List<PeerConnection.IceServer> {
         ice?.let { (l, until) -> if (System.currentTimeMillis() < until) return l }
         val out = ArrayList<PeerConnection.IceServer>()
-        try {
-            val c = URL("https://rtc.live.cloudflare.com/v1/turn/keys/${com.motioncam.BuildConfig.CF_TURN_KEY_ID}/credentials/generate-ice-servers")
-                .openConnection() as HttpURLConnection
-            c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 10_000; c.readTimeout = 10_000
-            c.setRequestProperty("Authorization", "Bearer ${com.motioncam.BuildConfig.CF_TURN_API_TOKEN}")
-            c.setRequestProperty("Content-Type", "application/json")
-            c.outputStream.use { it.write("""{"ttl": 86400}""".toByteArray()) }
-            if (c.responseCode in 200..299) {
-                val r = JSONObject(c.inputStream.bufferedReader().readText())
-                // an array of servers (current API) or a single object (older one)
-                val arr = r.optJSONArray("iceServers") ?: JSONArray().apply { r.optJSONObject("iceServers")?.let { put(it) } }
-                for (i in 0 until arr.length()) {
-                    val s = arr.getJSONObject(i)
-                    val urls = s.opt("urls").let { u -> if (u is JSONArray) (0 until u.length()).map { u.getString(it) } else listOf(u.toString()) }
-                    val b = PeerConnection.IceServer.builder(urls)
-                    s.optString("username").takeIf { it.isNotEmpty() }?.let { b.setUsername(it) }
-                    s.optString("credential").takeIf { it.isNotEmpty() }?.let { b.setPassword(it) }
-                    out += b.createIceServer()
-                }
-            }
-            c.disconnect()
-        } catch (_: Exception) {}
+        // Cloudflare's current endpoint, then the older one (their answers differ slightly; both are read)
+        for (path in listOf("generate-ice-servers", "generate")) {
+            try {
+                val c = URL("https://rtc.live.cloudflare.com/v1/turn/keys/${com.motioncam.BuildConfig.CF_TURN_KEY_ID}/credentials/$path")
+                    .openConnection() as HttpURLConnection
+                c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 10_000; c.readTimeout = 10_000
+                c.setRequestProperty("Authorization", "Bearer ${com.motioncam.BuildConfig.CF_TURN_API_TOKEN}")
+                c.setRequestProperty("Content-Type", "application/json")
+                c.outputStream.use { it.write("""{"ttl": 86400}""".toByteArray()) }
+                val code = c.responseCode
+                if (code in 200..299) {
+                    val r = JSONObject(c.inputStream.bufferedReader().readText())
+                    // an array of servers (current API) or a single object (older one)
+                    val arr = r.optJSONArray("iceServers") ?: JSONArray().apply { r.optJSONObject("iceServers")?.let { put(it) } }
+                    for (i in 0 until arr.length()) {
+                        val o = arr.getJSONObject(i)
+                        val urls = o.opt("urls").let { u -> if (u is JSONArray) (0 until u.length()).map { u.getString(it) } else listOf(u.toString()) }
+                            .filter { it.isNotEmpty() }
+                        if (urls.isEmpty()) continue
+                        val b = PeerConnection.IceServer.builder(urls)
+                        o.optString("username").takeIf { it.isNotEmpty() }?.let { b.setUsername(it) }
+                        o.optString("credential").takeIf { it.isNotEmpty() }?.let { b.setPassword(it) }
+                        out += b.createIceServer()
+                        if (urls.any { it.startsWith("turn") }) relayReady = true
+                    }
+                    issue = if (relayReady) null else "Cloudflare gave no relay addresses"
+                } else issue = "Cloudflare refused the relay key (HTTP $code): check MC_CF_TURN_KEY_ID / MC_CF_TURN_API_TOKEN"
+                c.disconnect()
+            } catch (e: Exception) { issue = "Couldn't reach Cloudflare (${e.javaClass.simpleName})" }
+            if (relayReady) break
+        }
         if (out.isEmpty()) out += PeerConnection.IceServer.builder("stun:stun.cloudflare.com:3478").createIceServer()
-        else ice = out to System.currentTimeMillis() + 20 * 3_600_000L
+        if (relayReady) ice = out to System.currentTimeMillis() + 20 * 3_600_000L
         return out
     }
+
+    /** The relay (TURN) answered with credentials this time. */
+    @Volatile var relayReady = false; private set
+    /** What went wrong getting the relay, if anything (shown when video can't connect). */
+    @Volatile var issue: String? = null; private set
 
     // ------------------------------------------------------------------ the relay's monthly allowance (Cloudflare has no cap)
     //
@@ -173,6 +187,7 @@ object RtcCamera {
     private var track: VideoTrack? = null
     private var app: Context? = null
     @Volatile private var lastFrameAt = 0L
+    @Volatile private var framesSent = 0L
     private var holding = false
 
     fun start(ctx: Context) {
@@ -203,8 +218,10 @@ object RtcCamera {
             val buf = org.webrtc.JavaI420Buffer.allocate(w, h)
             try {
                 fill(buf)
-                val f = VideoFrame(buf, rot, ts)
+                // WebRTC's own clock (the camera's timestamps can be on a different one, which makes frames look stale)
+                val f = VideoFrame(buf, rot, System.nanoTime())
                 src.capturerObserver.onFrameCaptured(f)
+                framesSent++
                 f.release()
             } catch (_: Exception) { buf.release() }
         }
@@ -215,7 +232,9 @@ object RtcCamera {
         val o = LiveNet.open(ctx, sealed)?.let { try { JSONObject(it) } catch (_: Exception) { null } } ?: return
         if (System.currentTimeMillis() - o.optLong("at") > 5 * 60_000L) return
         // the live view needs the PIN on this camera: the offer must be signed with it
-        if (CameraLink.pinFor(ctx) != null && !CameraLink.verifyView(ctx, sealed, s.child("offer/sig").value as? String)) return
+        if (CameraLink.pinFor(ctx) != null && !CameraLink.verifyView(ctx, sealed, s.child("offer/sig").value as? String)) {
+            com.motioncam.Health.log(ctx, "Live video: refused a request (wrong or missing PIN)"); return
+        }
         val f = Rtc.factory(ctx)
         // the month's relay allowance is used up: direct connections only (the viewer says so)
         val servers = if (o.optBoolean("relay", true)) Rtc.iceServers() else Rtc.stunOnly
@@ -226,6 +245,8 @@ object RtcCamera {
             val pc = f.createPeerConnection(Rtc.config(servers), object : Rtc.PcObserver() {
                 override fun onIceCandidate(c: IceCandidate) { ref.child("c").push().setValue(LiveNet.seal(ctx, Rtc.candJson(c))) }
                 override fun onIceConnectionChange(st: PeerConnection.IceConnectionState?) {
+                    if (st == PeerConnection.IceConnectionState.CONNECTED || st == PeerConnection.IceConnectionState.FAILED)
+                        com.motioncam.Health.log(ctx, "Live video: connection ${st.name.lowercase()}" + if (st == PeerConnection.IceConnectionState.CONNECTED) " (sending ${framesSent} frames so far)" else "")
                     if (st == PeerConnection.IceConnectionState.FAILED || st == PeerConnection.IceConnectionState.CLOSED) main.post { close(ctx, id) }
                 }
             }) ?: return@post
@@ -241,6 +262,8 @@ object RtcCamera {
             }
             sessions[id] = Session(id, pc, vl, o.optString("byName"))
             holdCamera(ctx)
+            com.motioncam.Health.log(ctx, "Live video: request from ${o.optString("byName").ifEmpty { "a phone" }} (relay " +
+                (if (!o.optBoolean("relay", true)) "off: monthly limit" else if (Rtc.relayReady) "ready" else "unavailable: " + (Rtc.issue ?: "?")) + ")")
             pc.setRemoteDescription(object : Rtc.Sdp() {
                 override fun onSetSuccess() {
                     pc.createAnswer(Rtc.Sdp { d ->
@@ -296,7 +319,10 @@ object RtcCamera {
  */
 class RtcViewer(private val ctx: Context, private val cam: String, private val pin: String?, private val renderTo: VideoSink,
                 private val allowRelay: Boolean, private val usedBefore: Long, private val capGb: Int,
-                private val overCap: () -> Unit, private val failed: () -> Unit) {
+                private val overCap: () -> Unit, private val failed: (why: String) -> Unit) {
+    @Volatile private var answered = false
+    /** The video connection is up (frames should follow). */
+    @Volatile var connected = false; private set
     private val main = Handler(Looper.getMainLooper())
     private val id = Device.id(ctx) + "-" + System.currentTimeMillis()
     private var pc: PeerConnection? = null
@@ -309,22 +335,32 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
         Thread {
             val f = try { Rtc.factory(ctx) } catch (_: Exception) { null }
             val servers = if (allowRelay) Rtc.iceServers() else Rtc.stunOnly
-            main.post { if (!stopped && f != null) connect(f, servers) else if (f == null) failed() }
+            main.post { if (!stopped && f != null) connect(f, servers) else if (f == null) failed("video isn't supported on this phone") }
         }.start()
-        main.postDelayed({ if (!stopped && pc?.iceConnectionState() != PeerConnection.IceConnectionState.CONNECTED &&
-            pc?.iceConnectionState() != PeerConnection.IceConnectionState.COMPLETED) { stop(); failed() } }, 20_000)
+        main.postDelayed({
+            if (stopped || connected) return@postDelayed
+            stop()
+            failed(when {
+                !answered -> "the camera didn't answer (it needs the same MotionCam version, with video)"
+                allowRelay && !Rtc.relayReady -> "couldn't connect, and no relay: " + (Rtc.issue ?: "Cloudflare didn't answer")
+                else -> "couldn't connect through this network"
+            })
+        }, 20_000)
     }
 
     private fun connect(f: PeerConnectionFactory, servers: List<PeerConnection.IceServer>) {
-        val r = ref ?: run { failed(); return }
+        val r = ref ?: run { failed("not connected to your phones"); return }
         r.onDisconnect().removeValue()
         val p = f.createPeerConnection(Rtc.config(servers), object : Rtc.PcObserver() {
             override fun onIceCandidate(c: IceCandidate) { ref?.child("v")?.push()?.setValue(LiveNet.seal(ctx, Rtc.candJson(c))) }
             override fun onTrack(t: RtpTransceiver?) { (t?.receiver?.track() as? VideoTrack)?.let { v -> main.post { if (!stopped) v.addSink(renderTo) } } }
             override fun onIceConnectionChange(st: PeerConnection.IceConnectionState?) {
-                if (st == PeerConnection.IceConnectionState.FAILED) main.post { if (!stopped) { stop(); failed() } }
+                if (st == PeerConnection.IceConnectionState.CONNECTED || st == PeerConnection.IceConnectionState.COMPLETED) connected = true
+                if (st == PeerConnection.IceConnectionState.FAILED) main.post {
+                    if (!stopped) { stop(); failed(if (allowRelay && !Rtc.relayReady) "connection failed, and no relay: " + (Rtc.issue ?: "Cloudflare didn't answer") else "connection failed") }
+                }
             }
-        }) ?: run { failed(); return }
+        }) ?: run { failed("couldn't start video"); return }
         pc = p
         p.addTransceiver(org.webrtc.MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY))
         p.createOffer(Rtc.Sdp { d ->
@@ -340,6 +376,7 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
                 answerL = object : ValueEventListener {
                     override fun onDataChange(s: DataSnapshot) {
                         val sdp = LiveNet.open(ctx, s.child("d").value as? String) ?: return
+                        answered = true
                         if (p.remoteDescription == null) p.setRemoteDescription(Rtc.Sdp(), SessionDescription(SessionDescription.Type.ANSWER, sdp))
                     }
                     override fun onCancelled(e: DatabaseError) {}

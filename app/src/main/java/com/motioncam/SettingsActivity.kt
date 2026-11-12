@@ -472,7 +472,7 @@ open class SettingsActivity : Activity() {
         "display" to "screen preview peaking clock time 24 hour am pm power",
         "phones" to "network pin remote control live connect sign in standby firebase",
         "alerts" to "notifications notify ring sound vibrate alert activity history keep quiet hours",
-        "about" to "version help guide setup",
+        "about" to "version help guide setup diagnostics troubleshooting battery drain log debug",
         "reset" to "default restore reset",
         "camera" to "lens exposure ev iso shutter focus white balance wb zoom preview camera mode",
     )
@@ -755,6 +755,8 @@ open class SettingsActivity : Activity() {
             catch (_: Exception) { Toast.makeText(this, "No browser found", Toast.LENGTH_SHORT).show() }
         }
         note("Clips stay on your phones and in the folders you choose. To run MotionCam on your own free accounts, see SETUP.md on the project's page.")
+        button("Diagnostics (what's running, battery, heat, logs)") { startActivity(Intent(this, DiagnosticsActivity::class.java)) }
+        note("For troubleshooting: what MotionCam is doing on this phone right now. Copy it to share it.")
     }
 
     private fun confirmReset(title: String, msg: String, keys: List<String>) {

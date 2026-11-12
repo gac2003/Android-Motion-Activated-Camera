@@ -80,6 +80,9 @@ object EngineHost {
 
     @Synchronized fun peek(): CameraEngine? = engine
 
+    /** Who keeps the camera open (Diagnostics): ui = camera mode, service = monitoring, live = pictures, rtc = video. */
+    @Synchronized fun holdersText(): String = holders.sorted().joinToString()
+
     @Synchronized fun acquire(ctx: Context, who: String): CameraEngine {
         holders += who
         return get(ctx).also { it.setActive(true) }
@@ -762,6 +765,9 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         }
     }
 
+    /** Running at the low idle frame rate right now (Diagnostics). */
+    val lowPowerNow: Boolean get() = lowPowerIdle()
+
     private fun lowPowerIdle() = pre == null && monitoring && mode != Mode.RECORDING && sessionSt == null && FrameHub.overlaySink == null &&
         FrameHub.rtcSink == null && prefs.lowPowerIdle
 
@@ -1034,6 +1040,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
                 ah = Handler(HandlerThread("cam-analysis").also { it.start() }.looper)
                 analysisSince = 0L
             }
+            Diagnostics.count("camera stalled, restarted")
             restartCamera("Camera stalled — restarting")
             return
         }

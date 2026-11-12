@@ -130,6 +130,7 @@ object Live {
     private fun onConnection(ctx: Context, connected: Boolean) {
         val again = connected && !wasConnected
         if (connected != wasConnected && cameraActive) com.motioncam.Health.log(ctx, if (connected) "Live connection back" else "Live connection lost")
+        if (connected != wasConnected && !connected) com.motioncam.Diagnostics.count("live connection dropped")
         wasConnected = connected
         if (!again) return
         synchronized(this) {
@@ -192,6 +193,8 @@ object Live {
     private var syncListener: ChildEventListener? = null
     private var offsetListener: ValueEventListener? = null
     private val camListeners = HashMap<String, Pair<ValueEventListener, ChildEventListener>>()
+    /** How many cameras this phone follows right now (Diagnostics). */
+    fun watchedCount() = camListeners.size
     private var attachedAt = 0L
 
     private fun startListening(ctx: Context) {

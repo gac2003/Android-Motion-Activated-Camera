@@ -8,7 +8,12 @@ class Prefs(ctx: Context) {
     private val sp: SharedPreferences =
         ctx.applicationContext.getSharedPreferences("motioncam", Context.MODE_PRIVATE)
 
-    init { migrate() }
+    init {
+        migrate()
+        // once: forget the "just monitored" date an earlier version gave every phone (it let viewer phones with the
+        // camera role go into standby); real camera phones set it again the next time they start monitoring
+        if (!sp.getBoolean("standbyFix1", false)) sp.edit().remove("lastMonitoredAt").putBoolean("standbyFix1", true).apply()
+    }
 
     /** Keeps the user's chosen behaviour when the meaning of a stored value changes between versions. */
     private fun migrate() {
@@ -152,13 +157,9 @@ class Prefs(ctx: Context) {
     /** The network's monthly relay limit as last seen here (the network's own value is in the live connection). */
     var relayCapGb: Int get() = i("relayCapGb", 975); set(v) = put("relayCapGb", v)
     /** When this phone last started monitoring (standby is only for phones actually used as cameras). */
-    var lastMonitoredAt: Long
-        get() {
-            // phones updated from before this was kept: counted from now (a camera in standby stays reachable)
-            if (!sp.contains("lastMonitoredAt")) sp.edit().putLong("lastMonitoredAt", System.currentTimeMillis()).apply()
-            return sp.getLong("lastMonitoredAt", 0L)
-        }
-        set(v) = sp.edit().putLong("lastMonitoredAt", v).apply()
+    // never set = never monitored (no standby). An earlier version counted every phone as "just monitored" on its
+    // first check, which let viewer phones with the camera role sit in standby for a week.
+    var lastMonitoredAt: Long get() = sp.getLong("lastMonitoredAt", 0L); set(v) = sp.edit().putLong("lastMonitoredAt", v).apply()
     /** Camera: when monitoring stops, stay in standby (camera closed) so other phones can start it again. */
     var liveStandby: Boolean get() = b("liveStandby", true); set(v) = put("liveStandby", v)
     /** Camera: also send a fresh card picture every 15 minutes while monitoring (otherwise the latest clip's motion frame). */

@@ -87,7 +87,15 @@ object Push {
 
     // ------------------------------------------------------------------ receiving phone: a push arrived
 
+    private var appCtx: Context? = null
+    private val offlineAgain = Runnable {
+        val c = appCtx ?: return@Runnable
+        if (!Live.viewerActive && !Live.cameraActive) try { LiveNet.db(c)?.goOffline() } catch (_: Exception) {}
+    }
+
     fun received(ctx: Context, data: Map<String, String>) {
+        appCtx = ctx.applicationContext
+        com.motioncam.Diagnostics.count("pushes received")
         if (data["x"] == "start") { remoteStartReceived(ctx, data); return }
         val cam = data["c"] ?: return
         if (cam == Device.id(ctx)) return
@@ -98,9 +106,12 @@ object Push {
         val type = d.optString("type")
         if (type in ActivityTypes.OVERVIEW && type != "clip") AlertInbox.noteEvent(ctx, cam, t - Live.serverOffset)
         Live.markHandled(ctx, cam, t)
-        // the clip's picture comes over the live connection: online for a moment, offline again unless something uses it
-        try { LiveNet.db(ctx)?.goOnline() } catch (_: Exception) {}
-        main.postDelayed({ if (!Live.viewerActive && !Live.cameraActive) try { LiveNet.db(ctx)?.goOffline() } catch (_: Exception) {} }, 30_000)
+        // only a clip alert with its picture needs the live connection (to fetch the picture, ~10 KB): online just for that
+        // (it gives up after 8 s), then offline again unless MotionCam is using it. Other alerts don't connect at all.
+        if (type == "clip" && com.motioncam.Prefs(ctx).alertPicture) {
+            try { LiveNet.db(ctx)?.goOnline() } catch (_: Exception) {}
+            main.removeCallbacks(offlineAgain); main.postDelayed(offlineAgain, 10_000)
+        }
         main.post { Alerts.onEvent(ctx, cam, t, d, key) }
     }
 
@@ -200,10 +211,11 @@ object Push {
         val tokens = to ?: Live.phones.values.filter { it.id != me && !it.push.isNullOrEmpty() }.mapNotNull { it.push }.distinct()
         if (tokens.isEmpty() || !allow(type, System.currentTimeMillis())) return
         val app = ctx.applicationContext
+        appCtx = app
         val sealed = LiveNet.seal(app, d.toString())
         val name = Device.name(app)
         Thread {
-            val access = try { accessToken() } catch (_: Exception) { null } ?: return@Thread
+            val access = try { accessToken() } catch (_: Exception) { null } ?: run { pushFailed("Couldn't get a push access token from Google (check the push key)"); return@Thread }
             for (tok in tokens) try { send(access, tok, me, name, type, sealed, key, t) } catch (_: Exception) {}
         }.start()
     }
@@ -222,8 +234,18 @@ object Push {
         c.setRequestProperty("Authorization", "Bearer $access")
         c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
         c.outputStream.use { it.write(msg.toString().toByteArray()) }
-        c.responseCode   // 404 UNREGISTERED: that phone's address is stale (it publishes a new one when it opens)
+        val code = c.responseCode   // 404 UNREGISTERED: that phone's address is stale (it publishes a new one when it opens)
         c.disconnect()
+        if (code == 200) com.motioncam.Diagnostics.count("pushes sent")
+        else pushFailed("Google refused a push (HTTP $code)" + when (code) { 401, 403 -> ": check the push key and that the Cloud Messaging API is enabled"; 404 -> ": a phone's push address is out of date"; else -> "" })
+    }
+
+    private var lastFailLog = 0L
+    /** Counted, and logged at most every 10 minutes (so the camera log shows it without filling up). */
+    private fun pushFailed(why: String) {
+        com.motioncam.Diagnostics.count("pushes refused")
+        val c = appCtx ?: return
+        if (System.currentTimeMillis() - lastFailLog > 10 * 60_000L) { lastFailLog = System.currentTimeMillis(); com.motioncam.Health.log(c, why) }
     }
 
     // ---- the service account: a short-lived access token from a signed JWT (cached ~55 min)

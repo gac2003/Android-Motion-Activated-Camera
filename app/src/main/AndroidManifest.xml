@@ -63,6 +63,7 @@
         <activity android:name=".live.LiveActivity" android:exported="false" />
         <activity android:name=".live.RemoteCameraActivity" android:exported="false" />
         <activity android:name=".live.OpenClipActivity" android:exported="false" />
+        <activity android:name=".DiagnosticsActivity" android:exported="false" />
         <activity android:name=".RemoteStartActivity" android:exported="false"
             android:showWhenLocked="true" android:turnScreenOn="true" android:excludeFromRecents="true"
             android:taskAffinity="" android:noHistory="true" />

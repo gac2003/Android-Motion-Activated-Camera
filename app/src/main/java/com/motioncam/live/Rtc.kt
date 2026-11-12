@@ -238,6 +238,10 @@ object RtcCamera {
         }.also { CameraLink.path(c, "rtc")?.addChildEventListener(it) }
     }
 
+    /** Diagnostics: viewers watching this camera as video now, and frames sent since MotionCam started. */
+    fun viewers() = sessions.size
+    fun frames() = framesSent
+
     fun stop(ctx: Context) {
         listener?.let { CameraLink.path(ctx, "rtc")?.removeEventListener(it) }
         listener = null
@@ -322,6 +326,7 @@ object RtcCamera {
                 override fun onCancelled(e: DatabaseError) {}
             }
             sessions[id] = Session(id, pc, vl, o.optString("byName"))
+            com.motioncam.Diagnostics.count("video sessions served")
             seen[id] = System.currentTimeMillis()
             main.removeCallbacks(sweep); main.postDelayed(sweep, 15_000L)
             holdCamera(ctx)
@@ -537,6 +542,7 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
         stopped = true
         main.removeCallbacks(meter)
         main.removeCallbacks(heartbeat)
+        com.motioncam.Diagnostics.count(if (gotFrame) "video watched (sessions)" else "video sessions without picture")
         try { track?.removeSink(sink) } catch (_: Throwable) {}
         track = null
         val r = ref
@@ -578,9 +584,15 @@ class LiveVideo(private val a: android.app.Activity, private val cam: String, pr
     private var starting = false
 
     /** Tries video; false when it can't be used here (then the pictures are the live view). */
+    /** Live view is on here (Live view tapped, not stopped or left): a pending reconnect only runs while it is. */
+    private var wanted = false
+    private val ui = android.os.Handler(android.os.Looper.getMainLooper())
+    private val reconnect = Runnable { if (wanted && !a.isFinishing && viewer == null && !starting) start() }
+
     fun start(): Boolean {
         val rd = renderer ?: return false
         if (viewer != null) return true
+        wanted = true
         if (!com.motioncam.Prefs(a).liveSmooth || !r.online()) return false
         val s = r.status() ?: return false
         if (!s.optBoolean("rtc")) return false
@@ -613,7 +625,7 @@ class LiveVideo(private val a: android.app.Activity, private val cam: String, pr
             reconnects++
             com.motioncam.Health.log(a, "Live video from ${r.name()} dropped ($why): reconnecting")
             viewer?.stop(); viewer = null; on = false
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ if (!a.isFinishing && viewer == null && !starting) start() }, 1500)
+            ui.removeCallbacks(reconnect); ui.postDelayed(reconnect, 1500)
             return
         }
         stop()
@@ -622,6 +634,9 @@ class LiveVideo(private val a: android.app.Activity, private val cam: String, pr
     }
 
     fun stop() {
+        // also cancels a pending reconnect: leaving the screen must never start video again in the background
+        wanted = false
+        ui.removeCallbacks(reconnect)
         starting = false
         viewer?.stop(); viewer = null; on = false
         renderer?.clearImage()

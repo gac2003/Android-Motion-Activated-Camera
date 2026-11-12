@@ -203,7 +203,7 @@ object Rtc {
  */
 object RtcCamera {
     private val main = Handler(Looper.getMainLooper())
-    private class Session(val id: String, val pc: PeerConnection, val vListener: ChildEventListener, val by: String)
+    private class Session(val id: String, val pc: PeerConnection, val vListener: ChildEventListener, val by: String, val byId: String = "")
     private val sessions = HashMap<String, Session>()
     private var listener: ChildEventListener? = null
     @Volatile private var source: VideoSource? = null
@@ -253,6 +253,8 @@ object RtcCamera {
 
     /** Diagnostics: viewers watching this camera as video now, and frames sent since MotionCam started. */
     fun viewers() = sessions.size
+    /** The phones watching this camera as video (device ids), for the eye on the camera's screen. */
+    fun viewerIds(): List<String> = sessions.values.map { it.byId }.filter { it.isNotEmpty() }
     fun frames() = framesSent
 
     fun stop(ctx: Context) {
@@ -338,7 +340,8 @@ object RtcCamera {
                 override fun onChildMoved(c: DataSnapshot, prev: String?) {}
                 override fun onCancelled(e: DatabaseError) {}
             }
-            sessions[id] = Session(id, pc, vl, o.optString("byName"))
+            sessions[id] = Session(id, pc, vl, o.optString("byName"), o.optString("by"))
+            Live.notifyChanged()   // the camera's own screen shows it's being watched (the eye)
             com.motioncam.Diagnostics.count("video sessions served")
             seen[id] = System.currentTimeMillis()
             main.removeCallbacks(sweep); main.postDelayed(sweep, 15_000L)
@@ -376,6 +379,7 @@ object RtcCamera {
     private fun close(ctx: Context, id: String, why: String) {
         val s = sessions.remove(id) ?: return
         seen.remove(id); downSince.remove(id)
+        Live.notifyChanged()
         com.motioncam.Health.log(ctx, "Live video to ${s.by.ifEmpty { "a phone" }} ended: $why" +
             if (sessions.isEmpty()) " (camera back to normal)" else " (${sessions.size} still watching)")
         CameraLink.path(ctx, "rtc/$id/v")?.removeEventListener(s.vListener)

@@ -572,7 +572,10 @@ object CameraLink {
     @Volatile private var newestWatch = 0L
     @Volatile private var liveThread: Thread? = null
     /** This phone is sending its live picture to another phone right now. */
-    val streaming: Boolean get() = running && liveThread != null
+    val streaming: Boolean get() = running && (liveThread != null || RtcCamera.viewers() > 0)
+
+    /** Everyone watching this camera now: pictures or video (device ids). */
+    fun watching(): List<String> = (watchers + RtcCamera.viewerIds()).distinct()
 
     /** Low-rate live view while someone watches (a frame every 2 s). */
     private fun startLive(ctx: Context) {

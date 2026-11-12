@@ -186,7 +186,7 @@ class MainActivity : Activity() {
         watchersPop?.let { if (!watching) { it.dismiss(); watchersPop = null } else fillWatchers(it) }
     }
 
-    private fun watcherNames(): List<String> = com.motioncam.live.CameraLink.watchers.map { id ->
+    private fun watcherNames(): List<String> = com.motioncam.live.CameraLink.watching().map { id ->
         com.motioncam.live.Live.phones[id]?.name?.ifEmpty { null } ?: "A phone"
     }
 

@@ -543,6 +543,7 @@ object CameraLink {
                     val at = (c.child("at").value as? Number)?.toLong() ?: 0
                     at > Live.now() - 30_000 && (!Prefs(ctx).livePinForView || pinOk(ctx, "watch:${c.key}:$at", c.child("sig").value as? String) == true)
                 }.mapNotNull { it.key }
+                newestWatch = s.children.maxOfOrNull { (it.child("at").value as? Number)?.toLong() ?: 0L } ?: 0L
                 watchers = who
                 if (who.isNotEmpty()) startLive(ctx) else stopLive()
                 Live.notifyChanged()
@@ -567,6 +568,8 @@ object CameraLink {
 
     /** Phones (device ids) watching this camera's live view right now. */
     @Volatile var watchers: List<String> = emptyList()
+    /** The newest "still watching" (every 15 s from a viewer): the pictures stop when it's 45 s old. */
+    @Volatile private var newestWatch = 0L
     @Volatile private var liveThread: Thread? = null
     /** This phone is sending its live picture to another phone right now. */
     val streaming: Boolean get() = running && liveThread != null
@@ -582,6 +585,8 @@ object CameraLink {
             try {
                 var seq = FrameHub.currentSeq()
                 while (running && liveThread === Thread.currentThread()) {
+                    // a viewer that vanished without saying so (its entry wasn't removed): stop sending to nobody
+                    if (newestWatch < Live.now() - 45_000L) { main.post { watchers = emptyList(); stopLive(); Live.notifyChanged() }; break }
                     val f = FrameHub.waitNext(seq, 3000)
                     if (f != null) {
                         seq = f.first

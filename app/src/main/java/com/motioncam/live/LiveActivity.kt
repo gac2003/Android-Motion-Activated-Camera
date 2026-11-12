@@ -154,7 +154,7 @@ class LiveActivity : Activity() {
             f.toggle("Remote start: your other phones can start MotionCam here, even when it's locked or closed", prefs.liveRemoteStart) { on ->
                 prefs.liveRemoteStart = on
                 if (on && !android.provider.Settings.canDrawOverlays(this)) askOverlay()
-                Live.publishDevice(this); render()
+                Live.publishDevice(this, force = true); render()
             }
             if (prefs.liveRemoteStart) {
                 val missing = listOfNotNull(

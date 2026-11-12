@@ -159,9 +159,17 @@ object Live {
         return o
     }
 
-    /** Updates this phone's entry (e.g. after a sync). */
-    fun publishDevice(ctx: Context) {
+    @Volatile private var lastDevicePublish = 0L
+
+    /**
+     * Updates this phone's entry (e.g. after a sync). Every phone downloads the whole phone list when one entry
+     * changes, so routine updates (after a folder change) go at most once a minute; [force] for a setting just changed.
+     */
+    fun publishDevice(ctx: Context, force: Boolean = false) {
         if (presenceFor == null) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastDevicePublish < 60_000L) return
+        lastDevicePublish = now
         try { ref(ctx, "devices/${Device.id(ctx)}")?.updateChildren(mapOf("d" to LiveNet.seal(ctx, deviceInfo(ctx).toString()), "seen" to ServerValue.TIMESTAMP)) } catch (_: Exception) {}
     }
 
@@ -387,6 +395,26 @@ object Live {
         publishDevice(ctx)
     }
 
+    private val lastRefresh = ConcurrentHashMap<String, Long>()
+    private val refreshQueued = java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
+    /**
+     * A folder listing after another phone's change, at most once a minute per folder: a busy camera uploads a clip
+     * every few seconds, and each listing reads the whole folder. One more runs at the end of the minute if needed.
+     */
+    private fun refreshSoon(ctx: Context, key: String, work: () -> Unit) {
+        val now = System.currentTimeMillis()
+        val wait = 60_000L - (now - (lastRefresh[key] ?: 0L))
+        if (wait <= 0) {
+            lastRefresh[key] = now
+            Thread { try { work() } catch (_: Exception) {} }.start()
+        } else if (refreshQueued.add(key)) main.postDelayed({
+            refreshQueued.remove(key)
+            lastRefresh[key] = System.currentTimeMillis()
+            Thread { try { work() } catch (_: Exception) {} }.start()
+        }, wait)
+    }
+
     private fun onNudge(ctx: Context, s: DataSnapshot) {
         val key = s.key ?: return
         if (s.child("by").value == Device.id(ctx)) return
@@ -395,7 +423,7 @@ object Live {
         for (src in com.motioncam.remote.RemoteSources.all(ctx)) {
             if (folderKey(src.kind, src.folderId) != key) continue
             com.motioncam.remote.SharedSync.schedule(ctx, src.id, 0)
-            if (what == "clips") Thread { try { com.motioncam.remote.RemoteRepo.refresh(ctx, src) } catch (_: Exception) {} }.start()
+            if (what == "clips") refreshSoon(ctx, "r:" + src.id) { com.motioncam.remote.RemoteRepo.refresh(ctx, src) }
         }
         // the camera phone itself: protections / collections affect its clean-up
         for (k in com.motioncam.cloud.Dest.all(ctx)) {
@@ -404,7 +432,7 @@ object Live {
             if (what == "settings") { com.motioncam.cloud.SharedFolderSettings.changedElsewhere(ctx, k); continue }
             com.motioncam.cloud.MarkSync.schedule(ctx, com.motioncam.cloud.MarkSync.backupKey(k))
             // clips deleted from the cloud on another phone: forget them as "backed up" so they can be uploaded again
-            if (what == "clips") Thread { try { com.motioncam.cloud.CloudSync.reconcile(ctx, k) } catch (_: Exception) {} }.start()
+            if (what == "clips") refreshSoon(ctx, "c:" + k.key) { com.motioncam.cloud.CloudSync.reconcile(ctx, k) }
         }
     }
 }

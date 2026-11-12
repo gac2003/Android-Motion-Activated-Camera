@@ -36,7 +36,9 @@ class MotionCamApp : Application() {
         super.onCreate()
         Health.install(this)
         Recorder.resume(this)   // a diagnostics recording under way carries on
-        Health.log(this, "MotionCam started" + if (Health.wanted(this)) " (monitoring was on)" else "")
+        // worth logging on a camera phone (an unexpected restart matters there); a viewer phone starts often (each push)
+        if (Health.wanted(this) || Prefs(this).liveCamera) Health.log(this, "MotionCam started" + if (Health.wanted(this)) " (monitoring was on)" else "")
+        else Diagnostics.count("app process started")
         try { com.motioncam.live.Push.init(this) } catch (_: Exception) {}   // push alerts (own build with a push key)
         try { com.motioncam.live.AlertCheckJob.schedule(this) } catch (_: Exception) {}   // 15-minute alert check
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {

@@ -403,6 +403,10 @@ class RemoteCameraActivity : Activity() {
         feed.stop()
         video?.stop()
         liveBtn.text = "▶ Live view"
+        // back to the paused label: the last picture on screen and when it was taken
+        if (::imageLabel.isInitialized) imageLabel.text = CamRemote.lastFrames[cam]?.let { (_, at) ->
+            "Paused · frame sent " + Fmt.t(prefs, at) + " — tap Live view for a new one"
+        } ?: "Paused · tap Live view or Screenshot to see the camera"
     }
 
     override fun onDestroy() {

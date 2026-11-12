@@ -35,6 +35,7 @@ class MotionCamApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Health.install(this)
+        Recorder.resume(this)   // a diagnostics recording under way carries on
         Health.log(this, "MotionCam started" + if (Health.wanted(this)) " (monitoring was on)" else "")
         try { com.motioncam.live.Push.init(this) } catch (_: Exception) {}   // push alerts (own build with a push key)
         try { com.motioncam.live.AlertCheckJob.schedule(this) } catch (_: Exception) {}   // 15-minute alert check

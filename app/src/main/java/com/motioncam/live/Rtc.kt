@@ -153,7 +153,20 @@ object Rtc {
 
     /** Frees WebRTC's threads and memory when nothing uses it (it's made again when needed). */
     @Synchronized
-    fun freeFactory() { try { factory?.dispose() } catch (_: Throwable) {}; factory = null }
+    fun freeFactory() {
+        if (viewing > 0 || RtcCamera.viewers() > 0) return
+        try { factory?.dispose() } catch (_: Throwable) {}; factory = null
+    }
+
+    /** Live videos being watched on this phone; a minute after the last one, WebRTC is freed here too. */
+    @Volatile var viewing = 0; private set
+    private val freeLater = Runnable { if (viewing == 0) freeFactory() }
+    private val freeTimer = Handler(Looper.getMainLooper())
+    fun viewerStarted() { viewing++; freeTimer.removeCallbacks(freeLater) }
+    fun viewerStopped() {
+        viewing = (viewing - 1).coerceAtLeast(0)
+        if (viewing == 0) { freeTimer.removeCallbacks(freeLater); freeTimer.postDelayed(freeLater, 60_000L) }
+    }
 
     fun config(servers: List<PeerConnection.IceServer>) = PeerConnection.RTCConfiguration(servers).apply {
         sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
@@ -433,7 +446,10 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
     private var candL: ChildEventListener? = null
     private val ref get() = Live.ref(ctx, "cams/$cam/rtc/$id")
 
+    private var counted = false
+
     fun start() {
+        Rtc.viewerStarted(); counted = true
         Thread {
             val f = try { Rtc.factory(ctx) } catch (_: Exception) { null }
             val servers = if (allowRelay) Rtc.iceServers() else Rtc.stunOnly
@@ -543,6 +559,7 @@ class RtcViewer(private val ctx: Context, private val cam: String, private val p
         main.removeCallbacks(meter)
         main.removeCallbacks(heartbeat)
         com.motioncam.Diagnostics.count(if (gotFrame) "video watched (sessions)" else "video sessions without picture")
+        if (counted) { counted = false; Rtc.viewerStopped() }
         try { track?.removeSink(sink) } catch (_: Throwable) {}
         track = null
         val r = ref

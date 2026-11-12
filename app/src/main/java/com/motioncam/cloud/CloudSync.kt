@@ -508,13 +508,21 @@ object CloudSync {
     private fun charging(ctx: Context): Boolean =
         (ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
 
+    @Volatile private var lastNetState = -1
+
     private fun watchNetwork(ctx: Context) {
         if (netCallbackRegistered) return
         netCallbackRegistered = true
         try {
             ctx.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
-                override fun onCapabilitiesChanged(n: Network, c: NetworkCapabilities) { if (c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) kick(ctx) }
-                override fun onAvailable(n: Network) { kick(ctx) }
+                // Android reports capability changes many times a minute (signal strength…): only a real change
+                // (internet now working, or Wi-Fi vs mobile data) is worth a look at the queue
+                override fun onCapabilitiesChanged(n: Network, c: NetworkCapabilities) {
+                    val state = (if (c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) 1 else 0) +
+                        (if (c.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) 2 else 0)
+                    if (state != lastNetState) { lastNetState = state; if (state and 1 != 0) kick(ctx) }
+                }
+                override fun onAvailable(n: Network) { lastNetState = -1; kick(ctx) }
             })
         } catch (_: Exception) { netCallbackRegistered = false }
     }

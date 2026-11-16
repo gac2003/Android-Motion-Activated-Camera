@@ -398,6 +398,9 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     }
 
     private fun closeCamera() {
+        // the camera closes (stopped, restarted, paused for heat): the AI's models are freed at once
+        if (aiInClip) { aiInClip = false; com.motioncam.ai.AiEngine.clipEnd(ctx) }
+        com.motioncam.ai.AiEngine.shutdown()
         disarm()
         sessionGen++
         try { session?.close() } catch (_: Exception) {}
@@ -547,6 +550,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             recordStartedWall = System.currentTimeMillis() - if (preRoll) prefs.preRecordMs else 0
             mode = Mode.RECORDING
             message = "Recording"
+            aiClip(true)
             pushRepeating()
             publish()
             return
@@ -586,6 +590,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         recordStartedWall = System.currentTimeMillis()
         mode = Mode.RECORDING
         message = "Recording"
+        aiClip(true)
         pushRepeating()
         publish()
     }
@@ -596,6 +601,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             preClip = null
             mode = if (monitoring) Mode.WATCHING else Mode.PREVIEW
             message = if (monitoring) "Watching for motion" else ""
+            aiClip(false)
             pushRepeating()
             val held = heldAsShort()
             val ok = pre?.stopClip() == true
@@ -615,6 +621,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         recorder = null
         mode = if (monitoring) Mode.WATCHING else Mode.PREVIEW
         message = if (monitoring) "Watching for motion" else ""
+        aiClip(false)
         pushRepeating()   // stop feeding the encoder first
         val held = heldAsShort()
         // under ~0.3 s there may be no complete frame (stop() then fails anyway); anything longer is a real clip
@@ -800,7 +807,14 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
                 b.set(CaptureRequest.SENSOR_FRAME_DURATION, max(1_000_000_000L / fps, shutter))
             }
 
-            if (prefs.focusAuto || !c.canManualFocus) {
+            if (prefs.aiFocus && monitoring && c.canManualFocus) {
+                // person-aware focus: the lens is set directly (no autofocus hunting): at the usual distance while
+                // resting, where the AI sees a person during a clip
+                val rest = com.motioncam.ai.FocusPilot.resting(ctx, (1f - prefs.focusPos.coerceIn(0f, 1f)) * c.minFocusDiopter, c.minFocusDiopter)
+                val t = com.motioncam.ai.FocusPilot.target
+                b.set(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
+                b.set(CaptureRequest.LENS_FOCUS_DISTANCE, if (t.isNaN() || mode != Mode.RECORDING) rest else t.coerceIn(0f, c.minFocusDiopter))
+            } else if (prefs.focusAuto || !c.canManualFocus) {
                 b.set(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
             } else {
                 b.set(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
@@ -861,6 +875,43 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         } catch (_: Exception) {} finally { img.close(); analysisSince = 0L }
     }
 
+    // ---- person-aware focus (see ai/AiEngine)
+    @Volatile private var aiInClip = false
+    private var aiKeep = false
+
+    /** A clip started or ended: the AI wakes up for it (only with the setting on, on a lens that can be focused by hand). */
+    private fun aiClip(on: Boolean) {
+        if (aiKeep) return
+        if (on) {
+            val c = caps
+            if (prefs.aiFocus && c != null && c.canManualFocus) {
+                com.motioncam.ai.AiEngine.onFocusChanged = { h.post { pushRepeating() } }
+                aiInClip = true
+                com.motioncam.ai.AiEngine.clipStart(ctx)
+            }
+        } else if (aiInClip) {
+            aiInClip = false
+            com.motioncam.ai.AiEngine.clipEnd(ctx)
+        }
+    }
+
+    /** How large things appear in the upright picture (focal length in picture widths / heights), for distances. */
+    private fun aiInfo(c: ProCaps, w: Int, hh: Int, now: Long): com.motioncam.ai.AiEngine.Info {
+        val rot = recordRotation()
+        val z = if (c.canZoom) prefs.zoom.coerceIn(c.zoomMin, c.zoomMax) else 1f
+        val aS = w.toFloat() / hh
+        val fx: Float; val fy: Float
+        if (c.focalMm > 0f && c.sensorWmm > 0f && c.sensorHmm > 0f) {
+            // the analysis picture is the sensor's picture cut to its own shape, then zoomed
+            val aP = c.sensorWmm / c.sensorHmm
+            val fracW = if (aS >= aP) 1f else aS / aP
+            val fracH = if (aS >= aP) aP / aS else 1f
+            fx = c.focalMm * z / (c.sensorWmm * fracW); fy = c.focalMm * z / (c.sensorHmm * fracH)
+        } else { fx = 0.75f * z; fy = fx * aS }   // a typical phone main camera
+        val turned = rot == 90 || rot == 270
+        return com.motioncam.ai.AiEngine.Info(rot, if (turned) fy else fx, if (turned) fx else fy, c.minFocusDiopter, now)
+    }
+
     private var rowBuf = ByteArray(0)
     private var packBuf = ByteArray(0)
 
@@ -895,6 +946,11 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         lastFrameAt = now
         val m = mode
         val monitoringNow = m == Mode.WATCHING || m == Mode.RECORDING
+        // person-aware focus: during a clip the AI gets a copy of this frame when it is free and one is due (a few a
+        // second at most); it works on its own thread, so this thread never waits for it
+        if (m == Mode.RECORDING && aiInClip && com.motioncam.ai.AiEngine.due(now)) caps?.let { c ->
+            com.motioncam.ai.AiEngine.offer(now, aiInfo(c, img.width, img.height, now)) { reuse -> YuvTools.read(img, color = true, reuse = reuse) }
+        }
         val sink = FrameHub.overlaySink
         val showMotion = sink != null && FrameHub.showMotion
         val peaking = sink != null && FrameHub.peaking
@@ -984,6 +1040,8 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     private fun housekeeping() {
         val now = SystemClock.elapsedRealtime()
         val bat = batteryInfo()
+        // AI heat rules: read only while its models are in memory (during clips and a few minutes after)
+        if (prefs.aiFocus && (aiInClip || com.motioncam.ai.AiEngine.loaded)) com.motioncam.ai.AiGovernor.sample(ctx, bat.tempC, thermalStatus(), prefs.maxTempC)
 
         if (monitoring) {
             // battery
@@ -1060,10 +1118,13 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             if (sinceMotion >= max(prefs.stopDelaySec * 1000L, 750L)) {
                 stopRecording(rearm = true)
             } else if (clipLen >= prefs.maxClipMin * 60_000L || (pre?.bytesWritten ?: 0L) > 3_800_000_000L) {
-                // split long events: stop and immediately continue in a new file
+                // split long events: stop and immediately continue in a new file (the AI carries on across the split)
+                aiKeep = true
                 stopRecording(rearm = false)
                 arm()
                 startRecording(preRoll = false)
+                aiKeep = false
+                if (mode != Mode.RECORDING) aiClip(false)
             }
         } else if (mode == Mode.WATCHING) {
             val a = armed

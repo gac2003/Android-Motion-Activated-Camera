@@ -81,6 +81,10 @@ object Diagnostics {
         line("Frames sent as video", com.motioncam.live.RtcCamera.frames())
         line("Web viewer clients", FrameHub.clients)
 
+        head("AI (person-aware focus)")
+        if (!p.aiFocus) line("Setting", "off (nothing loaded, nothing runs)")
+        else try { com.motioncam.ai.AiEngine.report(ctx) { k, v -> line(k, v) } } catch (_: Exception) {}
+
         head("Phone")
         val bat = ctx.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val pct = bat?.let { it.getIntExtra("level", -1) * 100 / it.getIntExtra("scale", 100).coerceAtLeast(1) }

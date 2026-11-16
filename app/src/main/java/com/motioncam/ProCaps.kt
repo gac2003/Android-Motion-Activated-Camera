@@ -64,6 +64,11 @@ class ProCaps(val lens: Lens, val ctrl: CameraCharacteristics, val lensChars: Ca
         ctrl.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) == CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
 
     val canManualFocus get() = minFocusDiopter > 0f
+
+    /** The lens's focal length and the sensor's size in mm (0 when the phone doesn't say): how large things appear. */
+    val focalMm: Float = (lensChars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS) ?: ctrl.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS))?.firstOrNull() ?: 0f
+    val sensorWmm: Float = (lensChars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: ctrl.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE))?.width ?: 0f
+    val sensorHmm: Float = (lensChars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: ctrl.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE))?.height ?: 0f
     val canZoom get() = zoomMax > zoomMin + 0.01f
 
     /** Longest shutter allowed at [fps] (cannot exceed the frame time). */

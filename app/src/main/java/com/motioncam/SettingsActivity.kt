@@ -437,6 +437,24 @@ open class SettingsActivity : Activity() {
                         hint = "∞") { prefs.focusPos = it.toFloat(); pro() }
                     note("Closest: about %.2f m. Leave the box empty for infinity (∞).".format(1 / minFocus))
                 }
+                // person-aware focus (on-device AI): off unless turned on
+                sf.toggle("Person-aware focus (AI, experimental)", prefs.aiFocus) { prefs.aiFocus = it; pro(); build() }
+                if (prefs.aiFocus) {
+                    sf.note("While monitoring, the lens rests at the usual distance instead of autofocus (no hunting against glass). " +
+                        "When motion starts a clip, people are looked for a few times a second and the lens is set to their distance. " +
+                        "It runs only during clips, slows down when the phone warms and stops well before the heat pause. " +
+                        com.motioncam.ai.AiEngine.settingsNote(this))
+                    fun chip(label: String, click: () -> Unit) = holder.addView(Ui.chip(this, label).apply { setOnClickListener { click() } },
+                        LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
+                    chip("Forget learned focus") {
+                        com.motioncam.ai.FocusPilot.forget(this); pro()
+                        android.widget.Toast.makeText(this, "Forgotten: the lens rests at your manual focus distance again", android.widget.Toast.LENGTH_SHORT).show(); build()
+                    }
+                    chip("Test this phone's speed again") {
+                        com.motioncam.ai.AiEngine.retest(this)
+                        android.widget.Toast.makeText(this, "The speed test runs again with the next clip", android.widget.Toast.LENGTH_SHORT).show(); build()
+                    }
+                }
             }
             // white balance: automatic, or the camera's presets
             val presets = ProCaps.wbPresets

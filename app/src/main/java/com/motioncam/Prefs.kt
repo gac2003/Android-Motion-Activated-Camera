@@ -90,6 +90,8 @@ class Prefs(ctx: Context) {
         get() = sp.getLong("shutterNs", 16_666_667L)
         set(v) = sp.edit().putLong("shutterNs", v).apply()
     var focusAuto: Boolean get() = b("focusAuto", true); set(v) = put("focusAuto", v)
+    /** Person-aware focus (on-device AI, only while a clip records). Off until turned on. */
+    var aiFocus: Boolean get() = b("aiFocus", false); set(v) = put("aiFocus", v)
     /** 0 = nearest focus, 1 = infinity. */
     var focusPos: Float get() = f("focusPos", 1f); set(v) = put("focusPos", v)
     var wbAuto: Boolean get() = b("wbAuto", true); set(v) = put("wbAuto", v)

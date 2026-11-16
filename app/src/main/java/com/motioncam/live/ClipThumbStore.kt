@@ -47,8 +47,8 @@ object ClipThumbStore {
         val body = if (pin != null) CameraLink.pinSeal(CameraLink.me(ctx), pin, out.toByteArray()) else out.toByteArray()
         val ref = CameraLink.path(ctx, "clipThumbs") ?: return
         val task = ref.child(key(name)).setValue(mapOf("t" to ServerValue.TIMESTAMP, "pin" to (pin != null), "img" to LiveNet.sealBytes(ctx, body)))
-        // wait a moment so the picture is there before the clip's alert goes out (not forever: the alert matters more)
-        try { com.google.android.gms.tasks.Tasks.await(task, 4, TimeUnit.SECONDS) } catch (_: Exception) {}
+        // wait so the picture is there before the clip's alert goes out (on a slow upload up to 10 s; the phones also wait for a late one)
+        try { com.google.android.gms.tasks.Tasks.await(task, 10, TimeUnit.SECONDS) } catch (_: Exception) {}
         // clip names start with their date and time, so older keys sort first
         val cut = "MC_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
             .format(java.util.Date(System.currentTimeMillis() - KEEP_DAYS * 86_400_000L))
@@ -74,24 +74,30 @@ object ClipThumbStore {
 
     /**
      * The picture, fetched if needed; waits up to [waitMs]. Background threads only. Null when the camera didn't make
-     * one (older version, older than a week) or this phone doesn't know the PIN it is locked with.
+     * one (older version, older than a week) or this phone doesn't know the PIN it is locked with. [forAlert]: waits
+     * for a picture still on its way instead of one read; [reached] is set once the database answered at all.
      */
-    fun get(ctx: Context, cam: String, name: String, waitMs: Long = 8000): Bitmap? {
+    fun get(ctx: Context, cam: String, name: String, waitMs: Long = 8000, forAlert: Boolean = false,
+            reached: java.util.concurrent.atomic.AtomicBoolean? = null): Bitmap? {
         cached(ctx, cam, name)?.let { return it }
         val k = "$cam/$name"
-        // don't ask again and again for a picture that isn't there
-        if (System.currentTimeMillis() - (missing[k] ?: 0L) < 5 * 60_000L) return null
+        // don't ask again and again for a picture that isn't there (an alert asks anyway: it may just be late)
+        if (!forAlert && System.currentTimeMillis() - (missing[k] ?: 0L) < 5 * 60_000L) return null
         val ref = Live.ref(ctx, "cams/$cam/clipThumbs/${key(name)}") ?: return null
         var snap: DataSnapshot? = null
         val done = CountDownLatch(1)
-        ref.addListenerForSingleValueEvent(object : ValueEventListener {
-            override fun onDataChange(s: DataSnapshot) { snap = s; done.countDown() }
+        // an alert waits for the picture to arrive (the camera's upload of it may still be on its way); else one read
+        val l = object : ValueEventListener {
+            override fun onDataChange(s: DataSnapshot) { reached?.set(true); if (!forAlert || s.child("img").exists()) { snap = s; done.countDown() } }
             override fun onCancelled(e: DatabaseError) { done.countDown() }
-        })
+        }
+        if (forAlert) ref.addValueEventListener(l) else ref.addListenerForSingleValueEvent(l)
         try { done.await(waitMs, TimeUnit.MILLISECONDS) } catch (_: Exception) {}
+        if (forAlert) try { ref.removeEventListener(l) } catch (_: Exception) {}
         val s = snap ?: return null
         val sealed = s.child("img").value as? String
         if (sealed == null) { missing[k] = System.currentTimeMillis(); return null }
+        missing.remove(k)
         var bytes = LiveNet.openBytes(ctx, sealed) ?: return null
         if (s.child("pin").value == true) {
             val pin = com.motioncam.cloud.SecretStore.get(ctx, "live.pin.$cam") ?: return null

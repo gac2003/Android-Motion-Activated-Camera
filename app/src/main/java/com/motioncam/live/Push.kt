@@ -123,11 +123,19 @@ object Push {
         val type = d.optString("type")
         if (type in ActivityTypes.OVERVIEW && type != "clip") AlertInbox.noteEvent(ctx, cam, t - Live.serverOffset)
         Live.markHandled(ctx, cam, t)
-        // only a clip alert with its picture needs the live connection (to fetch the picture, ~10 KB): online just for that
-        // (it gives up after 8 s), then offline again unless MotionCam is using it. Other alerts don't connect at all.
+        // only a clip alert with its picture needs the live connection (to fetch the picture, ~10 KB): online just for that,
+        // then offline again unless MotionCam is using it. Other alerts don't connect at all. The fetch happens while this
+        // push is being handled (Android keeps the phone awake for that, also when it's locked: work left for later
+        // was put on hold with the screen off, so the picture often never came); a picture that doesn't come in time
+        // is fetched once more later ([AlertPictureJob]).
         if (type == "clip" && com.motioncam.Prefs(ctx).alertPicture) {
+            main.removeCallbacks(offlineAgain)
             try { LiveNet.db(ctx)?.goOnline() } catch (_: Exception) {}
-            main.removeCallbacks(offlineAgain); main.postDelayed(offlineAgain, 10_000)
+            val done = java.util.concurrent.CountDownLatch(1)
+            main.post { Alerts.onEvent(ctx, cam, t, d, key) { done.countDown() } }
+            try { done.await(Alerts.PIC_WAIT_MS + 1500, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Exception) {}
+            main.removeCallbacks(offlineAgain); main.postDelayed(offlineAgain, 1500)
+            return
         }
         main.post { Alerts.onEvent(ctx, cam, t, d, key) }
     }
@@ -261,7 +269,9 @@ object Push {
             "clip" -> {
                 val wantClip = a.optBoolean("clip", false)
                 val forMotion = clipFor.remove(tok)
-                (wantClip || forMotion) to wantClip
+                // high priority whenever it changes what's shown: a normal one waits while the phone sleeps (often until
+                // it's unlocked), so the motion alert's picture never came while the screen was off
+                (wantClip || forMotion) to (wantClip || (forMotion && a.optBoolean("pic", true)))
             }
             "hot" -> a.optBoolean("hot", true) to true
             "unplugged" -> a.optBoolean("power", true) to true

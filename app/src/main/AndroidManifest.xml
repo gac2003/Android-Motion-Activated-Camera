@@ -72,6 +72,8 @@
             android:permission="android.permission.BIND_JOB_SERVICE" />
         <service android:name=".live.AlertCheckJob" android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+        <service android:name=".live.AlertPictureJob" android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
         <activity android:name=".live.RemoteLiveActivity" android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize" />
         <activity android:name=".live.ActivityLogActivity" android:exported="false" />

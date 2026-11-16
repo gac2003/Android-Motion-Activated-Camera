@@ -35,6 +35,8 @@ object Alerts {
     const val CH_SYNC = "live_sync"
     const val CH_QUIET = "live_quiet"
     const val EXTRA_CAM = "cam"
+    /** How long a clip alert waits for the clip's picture (while the push is handled; [AlertPictureJob] tries again later). */
+    const val PIC_WAIT_MS = 9_000L
 
     private val main = Handler(Looper.getMainLooper())
 
@@ -85,7 +87,8 @@ object Alerts {
     private fun nid(cam: String, kind: String) = (cam + kind).hashCode() and 0x7fffffff
 
     private fun post(ctx: Context, cam: String, kind: String, channel: String, title: String, text: String, silent: Boolean, update: Boolean = false,
-                     clip: JSONObject? = null, at: Long = System.currentTimeMillis(), picture: android.graphics.Bitmap? = null) {
+                     clip: JSONObject? = null, at: Long = System.currentTimeMillis(), picture: android.graphics.Bitmap? = null,
+                     st: MotionState? = null) {
         // where it shows (Settings › Alerts): "inside MotionCam only" or, by default, a card while MotionCam is on screen
         // instead of a notification; "always" also notifies while it's open, with or without the card
         val p0 = Prefs(ctx)
@@ -120,6 +123,12 @@ object Alerts {
                 .setGroup("cam_$cam")
                 .setOnlyAlertOnce(update)          // updating an alert never rings again
                 .setWhen(at).setShowWhen(true)
+                // what this alert is about, so it can still be updated after MotionCam was closed (its picture arriving late)
+                .addExtras(android.os.Bundle().apply {
+                    putString(X_KIND, kind)
+                    if (clip != null) { putString(X_CLIP, clip.optString("name")); putString(X_REF, clip.toString()) }
+                    if (st != null) { putInt(X_COUNT, st.count); putLong(X_SINCE, st.since); putLong(X_LAST, st.lastAlert) }
+                })
                 .apply {
                     if (clip != null) addAction(Notification.Action.Builder(null, "Watch clip", open).build())
                     else if (kind == "motion") addAction(Notification.Action.Builder(null, "Live view", PendingIntent.getActivity(ctx, nid(cam, "live"),
@@ -129,6 +138,44 @@ object Alerts {
                 .build()
             ctx.getSystemService(NotificationManager::class.java).notify(nid(cam, kind), n)
         } catch (_: Exception) {}
+    }
+
+    private const val X_KIND = "mc_kind"
+    private const val X_CLIP = "mc_clip"
+    private const val X_REF = "mc_ref"
+    private const val X_COUNT = "mc_count"
+    private const val X_SINCE = "mc_since"
+    private const val X_LAST = "mc_last"
+
+    /** The camera's motion alert as it is still shown, when MotionCam was closed (and forgot it) since it was posted. */
+    private fun restoreMotion(ctx: Context, cam: String): MotionState? = try {
+        ctx.getSystemService(NotificationManager::class.java).activeNotifications
+            .firstOrNull { it.id == nid(cam, "motion") }?.notification?.extras
+            ?.takeIf { it.getString(X_KIND) == "motion" && it.containsKey(X_SINCE) }
+            ?.let { MotionState(lastAlert = it.getLong(X_LAST), count = it.getInt(X_COUNT, 1), since = it.getLong(X_SINCE)) }
+    } catch (_: Exception) { null }
+
+    /**
+     * A clip's picture that came late: added to the alerts about that clip that are still shown (silently, as they
+     * are). Alerts swiped away meanwhile stay away. Main thread.
+     */
+    fun attachPicture(ctx: Context, cam: String, name: String, pic: android.graphics.Bitmap) {
+        if (gate(ctx, cam, false) == null) return
+        val active = try { ctx.getSystemService(NotificationManager::class.java).activeNotifications } catch (_: Exception) { return }
+        for (sbn in active) {
+            val n = sbn.notification ?: continue
+            val ex = n.extras ?: continue
+            if (ex.getString(X_CLIP) != name) continue
+            val kind = ex.getString(X_KIND) ?: continue
+            if (sbn.id != nid(cam, kind)) continue
+            val ref = ex.getString(X_REF)?.let { try { JSONObject(it) } catch (_: Exception) { null } }
+            val st = if (kind == "motion") (motion[cam]?.takeIf { it.clip?.optString("name") == name }?.also { it.pic = pic }
+                ?: MotionState(lastAlert = ex.getLong(X_LAST), count = ex.getInt(X_COUNT, 1), since = ex.getLong(X_SINCE), clip = ref))
+                else null
+            post(ctx, cam, kind, if (kind == "motion") CH_MOTION else CH_CLIP, ex.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: continue,
+                ex.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: continue, silent = true, update = true, clip = ref, at = n.`when`,
+                picture = pic, st = st?.takeIf { ex.containsKey(X_SINCE) })
+        }
     }
 
     private fun cancel(ctx: Context, cam: String, kind: String) =
@@ -156,9 +203,16 @@ object Alerts {
     /** Events already alerted (a push and the live connection can both bring one). */
     private val handled = LinkedHashSet<String>()
 
-    fun onEvent(ctx: Context, cam: String, t: Long, d: JSONObject, key: String? = null) {
+    /** [done]: called once handling is over (a clip alert: after its picture was fetched or given up on). */
+    fun onEvent(ctx: Context, cam: String, t: Long, d: JSONObject, key: String? = null, done: (() -> Unit)? = null) {
+        var later = false
+        try { later = handle(ctx, cam, t, d, key, done) } finally { if (!later) done?.invoke() }
+    }
+
+    /** True when [done] is left to the picture fetch (it then calls it). */
+    private fun handle(ctx: Context, cam: String, t: Long, d: JSONObject, key: String?, done: (() -> Unit)?): Boolean {
         if (key != null) synchronized(handled) {
-            if (!handled.add("$cam/$key")) return
+            if (!handled.add("$cam/$key")) return false
             while (handled.size > 300) handled.remove(handled.first())
         }
         val p = Prefs(ctx)
@@ -166,43 +220,55 @@ object Alerts {
         val name = camName(cam)
         when (type) {
             "motion" -> {
-                if (!p.alertMotion) return
-                val silent = gate(ctx, cam, false) ?: return
+                if (!p.alertMotion) return false
+                val silent = gate(ctx, cam, false) ?: return false
                 val st = motion.getOrPut(cam) { MotionState() }
                 val now = System.currentTimeMillis()
                 if (now - st.lastAlert < p.alertMotionGapSec * 1000L) {
                     // within the quiet gap: update the same notification, no sound
                     st.count++
-                    post(ctx, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent = true, update = true, clip = st.clip, picture = st.pic)
+                    post(ctx, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent = true, update = true, clip = st.clip, picture = st.pic, st = st)
                 } else {
                     st.lastAlert = now; st.count = 1; st.since = now; st.clip = null; st.pic = null
-                    post(ctx, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent)
+                    post(ctx, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent, st = st)
                 }
             }
             "clip" -> {
                 val ref = clipRef(d)
-                val st = motion[cam]
+                // MotionCam may have been closed since the motion alert (Android ends it in the background): the alert
+                // still shown says what it was about
+                val st = motion[cam] ?: restoreMotion(ctx, cam)?.also { motion[cam] = it }
                 val toMotion = ref != null && p.alertMotion && st != null && System.currentTimeMillis() - st.lastAlert < maxOf(p.alertMotionGapSec * 1000L, 10 * 60_000L)
-                if (!toMotion && !p.alertClip) return
+                if (!toMotion && !p.alertClip) return false
                 val app = ctx.applicationContext
-                // the clip's picture (fetched in the background, a few KB), then the alerts
+                // the clip's picture (fetched in the background, a few KB; waits for one still on its way), then the alerts
                 Thread {
-                    val pic = if (!p.alertPicture) null else ref?.let { try { ClipThumbStore.get(app, cam, it.optString("name")) } catch (_: Exception) { null } }
+                    val reached = java.util.concurrent.atomic.AtomicBoolean(false)
+                    val pic = try {
+                        if (!p.alertPicture) null else ref?.let { ClipThumbStore.get(app, cam, it.optString("name"), PIC_WAIT_MS, forAlert = true, reached = reached) }
+                    } catch (_: Exception) { null }
                     main.post {
-                        // the motion alert now leads to the clip it recorded (updated silently), with its picture
-                        if (toMotion && st != null) {
-                            st.clip = ref; if (pic != null) st.pic = pic
-                            gate(app, cam, false)?.let { post(app, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent = true, update = true, clip = ref, picture = pic) }
-                        }
-                        if (p.alertClip) gate(app, cam, false)?.let { s -> post(app, cam, "clip", CH_CLIP, "New clip · $name",
-                            d.optString("text") + if (ref != null) " — tap to watch" else "", s, clip = ref, picture = pic) }
+                        try {
+                            // the motion alert now leads to the clip it recorded (updated silently), with its picture
+                            if (toMotion && st != null) {
+                                st.clip = ref; if (pic != null) st.pic = pic
+                                gate(app, cam, false)?.let { post(app, cam, "motion", CH_MOTION, "Motion · $name", motionText(p, st), silent = true, update = true, clip = ref, picture = pic, st = st) }
+                            }
+                            if (p.alertClip) gate(app, cam, false)?.let { s -> post(app, cam, "clip", CH_CLIP, "New clip · $name",
+                                d.optString("text") + if (ref != null) " — tap to watch" else "", s, clip = ref, picture = pic) }
+                            // no picture because the phone couldn't reach the database in time (slow network, locked): once
+                            // more later. Reached but no picture (a camera that doesn't make them): nothing to retry.
+                            if (pic == null && !reached.get() && p.alertPicture && ref != null && (toMotion || p.alertClip))
+                                AlertPictureJob.add(app, cam, ref.optString("name"))
+                        } finally { done?.invoke() }
                     }
                 }.start()
+                return true
             }
             "motion_burst" -> {
                 // a very busy hour at the camera: one calm alert instead of one per motion
-                if (!p.alertMotion) return
-                val silent = gate(ctx, cam, false) ?: return
+                if (!p.alertMotion) return false
+                val silent = gate(ctx, cam, false) ?: return false
                 val st = motion.getOrPut(cam) { MotionState() }
                 val now = System.currentTimeMillis()
                 val within = now - st.lastAlert < p.alertMotionGapSec * 1000L
@@ -227,6 +293,7 @@ object Alerts {
                 }
             }
         }
+        return false
     }
 
     /**

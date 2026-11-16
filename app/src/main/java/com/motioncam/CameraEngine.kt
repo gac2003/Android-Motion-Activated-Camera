@@ -299,6 +299,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             }
             pushRepeating()
         }
+        aiSetup()
         publish()
     }
 
@@ -756,6 +757,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         pushRepeating()
         pre?.setCapturing(monitoring)
         if (monitoring && mode == Mode.WATCHING) arm()
+        aiSetup()
         publish()
     }
 
@@ -818,7 +820,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
                 val rest = com.motioncam.ai.FocusPilot.resting(ctx, (1f - prefs.focusPos.coerceIn(0f, 1f)) * c.minFocusDiopter, c.minFocusDiopter)
                 val t = com.motioncam.ai.FocusPilot.target
                 b.set(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
-                b.set(CaptureRequest.LENS_FOCUS_DISTANCE, if (t.isNaN() || mode != Mode.RECORDING) rest else t.coerceIn(0f, c.minFocusDiopter))
+                b.set(CaptureRequest.LENS_FOCUS_DISTANCE, if (t.isNaN()) rest else t.coerceIn(0f, c.minFocusDiopter))
             } else if (prefs.focusAuto || !c.canManualFocus) {
                 b.set(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
             } else {
@@ -882,6 +884,21 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
 
     // ---- person-aware focus (see ai/AiEngine)
     @Volatile private var aiInClip = false
+    /** Person-aware focus is on for this lens while watching: frames may go to the AI from the first motion. */
+    @Volatile private var aiWatch = false
+
+    /** Person-aware focus settings changed, monitoring started / stopped or the camera opened: the AI is set up to match. */
+    fun applyAi() = h.post { aiSetup() }
+
+    private fun aiSetup() {
+        val c = caps
+        val on = prefs.aiFocus && monitoring && c != null && c.canManualFocus
+        aiWatch = on
+        if (on) {
+            com.motioncam.ai.AiEngine.onFocusChanged = { h.post { pushRepeating() } }
+            if (prefs.aiFast) com.motioncam.ai.AiEngine.prepare(ctx) else if (!aiInClip) com.motioncam.ai.AiEngine.shutdown()
+        } else if (!aiInClip) com.motioncam.ai.AiEngine.shutdown()
+    }
     private var aiKeep = false
 
     /** A clip started or ended: the AI wakes up for it (only with the setting on, on a lens that can be focused by hand). */
@@ -977,7 +994,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         val monitoringNow = m == Mode.WATCHING || m == Mode.RECORDING
         // person-aware focus: during a clip the AI gets a copy of this frame when it is free and one is due (a few a
         // second at most); it works on its own thread, so this thread never waits for it
-        if (m == Mode.RECORDING && aiInClip && com.motioncam.ai.AiEngine.due(now)) caps?.let { c ->
+        if (((m == Mode.RECORDING && aiInClip) || (m == Mode.WATCHING && aiWatch)) && com.motioncam.ai.AiEngine.due(now)) caps?.let { c ->
             com.motioncam.ai.AiEngine.offer(now, aiInfo(c, img.width, img.height, now)) { reuse -> YuvTools.read(img, color = true, reuse = reuse) }
         }
         val sink = FrameHub.overlaySink
@@ -1020,6 +1037,8 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             motionBlocks = largest
             val need = max(1, ceil(prefs.minAreaPct / 100f * MotionDetector.N).toInt())
             val hit = largest >= need
+            // person-aware focus looks from the first sign of motion (before the clip starts)
+            if (hit && m == Mode.WATCHING && aiWatch) com.motioncam.ai.AiEngine.motion(ctx, now)
             consecutive = if (hit) consecutive + 1 else 0
             if (m == Mode.RECORDING && largest > peakBlocks) { peakBlocks = largest; peakElapsed = now }
             if (monitoringNow && hit) {
@@ -1070,7 +1089,10 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         val now = SystemClock.elapsedRealtime()
         val bat = batteryInfo()
         // AI heat rules: read only while its models are in memory (during clips and a few minutes after)
-        if (prefs.aiFocus && (aiInClip || com.motioncam.ai.AiEngine.loaded)) com.motioncam.ai.AiGovernor.sample(ctx, bat.tempC, thermalStatus(), prefs.aiTempLimit)
+        // (every second while someone may be in view, every 15 s while the models just sit in memory)
+        if (prefs.aiFocus && (com.motioncam.ai.AiEngine.lively(now) || (com.motioncam.ai.AiEngine.loaded && now / 1000 % 15 == 0L)))
+            com.motioncam.ai.AiGovernor.sample(ctx, bat.tempC, thermalStatus(), prefs.aiTempLimit)
+        if (aiWatch) com.motioncam.ai.AiEngine.settle(now)
         // describing saved clips: may it run now? (asks Android's heat level only while clips are waiting)
         if ((prefs.aiDescribe || prefs.aiFocus) && com.motioncam.ai.ClipAnalyzer.waiting != 0) com.motioncam.ai.ClipAnalyzer.tick(ctx, true, prefs.aiChargingOnly,
             bat.charging, bat.tempC, thermalStatus(), prefs.aiTempLimit, mode == Mode.RECORDING)

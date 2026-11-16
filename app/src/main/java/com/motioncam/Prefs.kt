@@ -92,6 +92,8 @@ class Prefs(ctx: Context) {
     var focusAuto: Boolean get() = b("focusAuto", true); set(v) = put("focusAuto", v)
     /** Person-aware focus (on-device AI, only while a clip records). Off until turned on. */
     var aiFocus: Boolean get() = b("aiFocus", false); set(v) = put("aiFocus", v)
+    /** Person-aware focus: models stay in memory while monitoring, so the lens can move the moment someone appears. */
+    var aiFast: Boolean get() = b("aiFast", true); set(v) = put("aiFast", v)
     /** Describe saved clips (people, colours, objects) so Search can find them. Off until turned on. */
     var aiDescribe: Boolean get() = b("aiDescribe", false); set(v) = put("aiDescribe", v)
     /** Search by meaning: fingerprints of clips' pictures (a recording phone) and the words box in Search (any phone). */

@@ -438,7 +438,7 @@ open class SettingsActivity : Activity() {
                     note("Closest: about %.2f m. Leave the box empty for infinity (∞).".format(1 / minFocus))
                 }
                 // person-aware focus (on-device AI): off unless turned on
-                sf.toggle("Person-aware focus (AI, experimental)", prefs.aiFocus) { prefs.aiFocus = it; pro(); build() }
+                sf.toggle("Person-aware focus (AI, experimental)", prefs.aiFocus) { prefs.aiFocus = it; EngineHost.peek()?.applyAi(); pro(); build() }
                 if (prefs.aiFocus) {
                     sf.note("While monitoring, the lens rests at the usual distance instead of autofocus (no hunting against glass). " +
                         "The usual distance is learned from saved clips: each new one is looked through afterwards (camera open, charging, cool), " +
@@ -446,6 +446,10 @@ open class SettingsActivity : Activity() {
                         "start over and let it learn from clips of the new place. During a clip, someone who stays a few seconds also gets " +
                         "the lens set to their own distance. " +
                         com.motioncam.ai.AiEngine.settingsNote(this))
+                    sf.toggle("Ready at once (keeps the AI in memory while monitoring)", prefs.aiFast) { prefs.aiFast = it; EngineHost.peek()?.applyAi(); build() }
+                    sf.note("On: people are looked for from the first sign of motion and the lens moves to them within about half a second. " +
+                        "It uses memory (about 40 MB) but no processor while nothing moves. Off: the AI is loaded when a clip starts and freed " +
+                        "3 minutes later, which is usually too late for someone walking past.")
                     fun chip(label: String, click: () -> Unit) = holder.addView(Ui.chip(this, label).apply { setOnClickListener { click() } },
                         LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
                     chip("Learn from the last 20 clips") {

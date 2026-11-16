@@ -25,6 +25,8 @@ object FocusPilot {
     private const val SEARCH_FROM = 0.4f       // only closer than 2.5 m: farther away everything is in focus anyway
     private const val SETTLE_MS = 180L         // the lens needs a moment to arrive before sharpness means anything
     private const val LOST_MS = 2000L
+    private const val STAY_MS = 1500L
+    private const val SHARP_RANGE = 0.25f      // what the lens keeps acceptably sharp either side of its setting (diopters)
     private const val BIN = 0.25f
     private const val BINS = 17
     const val USUAL_MIN = 10
@@ -49,6 +51,7 @@ object FocusPilot {
     private var clipOffset = 0f
     private var setAt = 0L
     private var lastPersonAt = 0L
+    private var firstSeenAt = 0L
     private var clipSum = 0f
     private var clipN = 0
 
@@ -105,7 +108,26 @@ object FocusPilot {
         load(ctx)
         if (usual.size < USUAL_MIN) return Float.NaN
         val recent = usual.takeLast(USUAL_RECENT).sorted()
-        return recent[recent.size / 2]
+        // the setting that keeps the most of them sharp (people spread over a wide hallway), the middle one on a tie
+        val mid = recent[recent.size / 2]
+        var best = mid; var bestCount = recent.count { Math.abs(it - mid) <= SHARP_RANGE }
+        for (c in recent) {
+            val n = recent.count { Math.abs(it - c) <= SHARP_RANGE }
+            if (n > bestCount) { bestCount = n; best = c }
+        }
+        return best
+    }
+
+    /** Where people were in the newest clips: nearest and farthest tenth (metres), and the share kept sharp at rest. */
+    @Synchronized
+    fun spread(ctx: Context): String {
+        load(ctx)
+        if (usual.size < USUAL_MIN) return ""
+        val r = usual.takeLast(USUAL_RECENT).sorted()
+        val u = usual(ctx)
+        fun m(d: Float) = if (d < 0.1f) "far" else "%.1f m".format(1 / d)
+        val share = r.count { Math.abs(it - u) <= SHARP_RANGE } * 100 / r.size
+        return "people between ${m(r[r.size * 9 / 10])} and ${m(r[r.size / 10])}, about $share% of them sharp at rest"
     }
 
     @Synchronized
@@ -171,12 +193,20 @@ object FocusPilot {
     }
 
     /** A clip started: the lens is at the resting focus (the engine does that); nothing is known yet. */
-    fun clipStart() {
+    fun clipStart(now: Long) {
+        clipSum = 0f; clipN = 0
+        // someone was already seen in the motion just before the clip: the lens stays on them
+        if (lastPersonAt > 0 && now - lastPersonAt < LOST_MS && !target.isNaN()) return
+        rest()
+    }
+
+    /** Back to the resting focus, nobody followed. */
+    fun rest() {
         phase = 0
         lastSearchEst = Float.NaN
         clipOffset = 0f
-        clipSum = 0f; clipN = 0
         lastPersonAt = 0L
+        firstSeenAt = 0L
         target = Float.NaN
     }
 
@@ -195,10 +225,7 @@ object FocusPilot {
     /** No person in this frame. After a moment without one, the lens goes back to the resting focus. */
     fun noPerson(now: Long) {
         if (lastPersonAt > 0 && now - lastPersonAt > LOST_MS && !target.isNaN()) {
-            target = Float.NaN
-            phase = 0
-            lastSearchEst = Float.NaN
-            clipOffset = 0f
+            rest()
         }
     }
 
@@ -208,6 +235,7 @@ object FocusPilot {
      */
     fun person(est: Float, how: String, sharp: Float, maxD: Float, takenAt: Long, now: Long): Boolean {
         val before = target
+        if (firstSeenAt == 0L || now - lastPersonAt > LOST_MS) firstSeenAt = now
         lastPersonAt = now
         lastEst = est
         lastHow = how
@@ -233,7 +261,8 @@ object FocusPilot {
             }
         } else {
             val near = est >= SEARCH_FROM
-            if (near && !sharp.isNaN() && (lastSearchEst.isNaN() || abs(est - lastSearchEst) > 0.5f)) {
+            // the sharpness test is for someone who stays (it moves the lens to and fro): a passer-by just gets their distance
+            if (near && now - firstSeenAt >= STAY_MS && !sharp.isNaN() && (lastSearchEst.isNaN() || abs(est - lastSearchEst) > 0.5f)) {
                 // try the estimate, then one step closer and one step farther
                 searchEst = est
                 probes[0] = base

@@ -79,21 +79,77 @@ object AiEngine {
 
     // ================================================================== from the camera engine
 
-    /** A clip started (engine thread): the AI thread and models come up if they aren't. */
+    /** Models stay in memory while monitoring ("Ready at once"): no loading delay when someone appears. */
+    @Volatile private var keep = false
+    /** Motion was seen until then (elapsed time): the AI looks at frames from the first sign of motion, before the clip. */
+    @Volatile private var motionUntil = 0L
+    /** When the current burst of motion began: the first second and a half is looked at twice as often. */
+    @Volatile private var burstStart = 0L
+    @Volatile private var loading = false
+
     @Synchronized
+    private fun handlerNow(): Handler {
+        handler?.let { return it }
+        val t = HandlerThread("ai", android.os.Process.THREAD_PRIORITY_BACKGROUND + 1).also { it.start() }
+        thread = t
+        return Handler(t.looper).also { handler = it }
+    }
+
+    private fun load(app: Context) {
+        try { ensureLoaded(app) } catch (t: Throwable) { disabledWhy = "couldn't start (${t.javaClass.simpleName})"; Health.log(app, "AI: couldn't start: $t") }
+        loading = false
+    }
+
+    /** Monitoring started with "Ready at once" on (engine thread): the models are loaded now and stay until monitoring stops. */
+    fun prepare(ctx: Context) {
+        val app = ctx.applicationContext
+        keep = true
+        val h = handlerNow()
+        h.removeCallbacks(unloadTask)
+        if (!loaded && !loading) { loading = true; h.post { load(app) } }
+    }
+
+    /**
+     * Motion in the picture (analysis thread, up to 8 times a second while something moves, before any clip): frames
+     * are looked at from now until 2 s after the last motion. Without "Ready at once" the models are loaded now (and
+     * freed again 3 minutes later if no clip follows).
+     */
+    fun motion(ctx: Context, now: Long) {
+        if (disabledWhy != null) return
+        if (!inClip && now - motionUntil > 3000L) burstStart = now
+        motionUntil = now + 2000L
+        if (!loaded && !loading) {
+            loading = true
+            val app = ctx.applicationContext
+            val h = handlerNow()
+            h.post { load(app) }
+            if (!keep) { h.removeCallbacks(unloadTask); h.postDelayed(unloadTask, UNLOAD_AFTER_MS) }
+        }
+    }
+
+    /** Once a second from the engine: motion ended without a clip while the lens was on a person → back to rest. */
+    fun settle(now: Long) {
+        if (inClip || now < motionUntil + 500L || FocusPilot.target.isNaN()) return
+        handler?.post { FocusPilot.rest(); onFocusChanged?.invoke() }
+    }
+
+    /** A person may be in view right now (a clip is recording, or motion was just seen): heat is read every second then. */
+    fun lively(now: Long) = inClip || now < motionUntil + 5000L
+
+    /** A clip started (engine thread): the AI thread and models come up if they aren't. */
     fun clipStart(ctx: Context) {
         val app = ctx.applicationContext
+        val now = SystemClock.elapsedRealtime()
+        // counted from the first sign of motion when that was a moment ago, else from now
+        val fresh = now - motionUntil > 3000L
+        if (fresh) burstStart = now
         inClip = true
-        var h = handler
-        if (h == null) {
-            val t = HandlerThread("ai", android.os.Process.THREAD_PRIORITY_BACKGROUND + 1).also { it.start() }
-            thread = t
-            h = Handler(t.looper)
-            handler = h
-        }
+        val h = handlerNow()
         h.removeCallbacks(unloadTask)   // only the pending unload: a frame being handed over must still run
         h.post {
-            try { clipFrames = 0; clipPersons = 0; clipMeasured = 0; clipTop = 0f; FocusPilot.clipStart(); ensureLoaded(app) } catch (t: Throwable) { disabledWhy = "couldn't start (${t.javaClass.simpleName})"; Health.log(app, "AI: couldn't start: $t") }
+            if (fresh) { clipFrames = 0; clipPersons = 0; clipMeasured = 0; clipTop = 0f }
+            FocusPilot.clipStart(SystemClock.elapsedRealtime())
+            if (!loaded) { loading = true; load(app) }
         }
     }
 
@@ -112,7 +168,7 @@ object AiEngine {
                     (if (clipPersons == 0) " (closest to a person: %.0f%% sure, %.0f%% needed)".format(clipTop * 100, MIN_SCORE * 100) else "")
                 disabledWhy != null -> "nothing looked at: off on this phone ($disabledWhy)"
                 AiGovernor.level == AiGovernor.OFF -> "nothing looked at: paused for heat (${AiGovernor.why})"
-                !loaded -> "nothing looked at: the clip ended before the models were ready"
+                !loaded -> "nothing looked at: the clip ended before the models were ready (turn on Ready at once)"
                 else -> "nothing looked at"
             }
             try { sp(app).edit().putString("lastClip", lastClip).apply() } catch (_: Throwable) {}
@@ -120,13 +176,15 @@ object AiEngine {
             onFocusChanged?.invoke()
         }
         h.removeCallbacks(unloadTask)
-        h.postDelayed(unloadTask, UNLOAD_AFTER_MS)   // once; cancelled by the next clip
+        if (!keep) h.postDelayed(unloadTask, UNLOAD_AFTER_MS)   // once; cancelled by the next clip
     }
 
     /** The engine stopped (camera closed, feature turned off): everything is freed now. */
     @Synchronized
     fun shutdown() {
         inClip = false
+        keep = false
+        motionUntil = 0L
         val h = handler ?: return
         h.removeCallbacks(unloadTask)
         h.post(unloadTask)
@@ -134,10 +192,17 @@ object AiEngine {
 
     /** Cheap check on the analysis thread (every camera frame during a clip): is a frame wanted right now? */
     fun due(now: Long): Boolean {
-        if (handler == null || !inClip || !loaded || disabledWhy != null || busy.get()) return false
+        if (handler == null || !loaded || disabledWhy != null || busy.get()) return false
+        if (!inClip && now >= motionUntil) return false
         val lvl = AiGovernor.level
         if (lvl == AiGovernor.OFF) return false
-        return now - lastTake >= (if (lvl == AiGovernor.REDUCED) intervalMs * 2 else intervalMs)
+        return now - lastTake >= every(now, lvl)
+    }
+
+    /** Time between looks: twice as often in the first second and a half of motion (to get the lens there fast). */
+    private fun every(now: Long, lvl: Int): Long {
+        val base = if (now - burstStart < 1500L) minOf(intervalMs, 125L) else intervalMs
+        return if (lvl == AiGovernor.REDUCED) base * 2 else base
     }
 
     /**
@@ -146,11 +211,10 @@ object AiEngine {
      */
     fun offer(now: Long, info: Info, copy: (Frame?) -> Frame) {
         val h = handler ?: return
-        if (!inClip || !loaded || disabledWhy != null) return
+        if ((!inClip && now >= motionUntil) || !loaded || disabledWhy != null) return
         val lvl = AiGovernor.level
         if (lvl == AiGovernor.OFF) return
-        val every = if (lvl == AiGovernor.REDUCED) intervalMs * 2 else intervalMs
-        if (now - lastTake < every) return
+        if (now - lastTake < every(now, lvl)) return
         if (!busy.compareAndSet(false, true)) { skippedBusy++; return }
         lastTake = now
         val f = try { copy(frame) } catch (_: Throwable) { busy.set(false); return }
@@ -165,7 +229,7 @@ object AiEngine {
 
     private fun process(f: Frame, info: Info) {
         val det = small ?: return
-        if (!inClip) return
+        if (!inClip && SystemClock.elapsedRealtime() >= motionUntil + 500L) return
         val t0 = SystemClock.elapsedRealtime()
         val boxes = det.detect(f, info.rotation)
         val t1 = SystemClock.elapsedRealtime()
@@ -307,13 +371,13 @@ object AiEngine {
 
     /** Frees the models and ends the AI thread (3 minutes after the last clip, or when the camera closes). */
     private fun unload() {
-        if (inClip) return
+        if (inClip || keep) return
         closeModels()
         if (loaded) Diagnostics.count("AI models freed")
         loaded = false
         frame = null
         synchronized(this) {
-            if (inClip) return
+            if (inClip || keep) return
             thread?.quitSafely()
             thread = null
             handler = null
@@ -339,7 +403,7 @@ object AiEngine {
             else "Runs on this phone's ${backendText(b)}: about %.0f ms a frame.".format(s.getFloat("msSmall", 0f) + s.getFloat("msPose", 0f))
         val u = FocusPilot.usual(ctx)
         val learned = if (u.isNaN()) "Learning the usual distance: ${FocusPilot.clipsLearned(ctx)} of ${FocusPilot.USUAL_MIN} clips with a person (saved clips are looked through while charging). Until then the lens rests at your manual focus distance."
-            else "Usual distance: " + (if (u < 0.1f) "far (∞)" else "%.1f m".format(1 / u)) + " (from ${FocusPilot.clipsLearned(ctx)} clips)."
+            else "Usual distance: " + (if (u < 0.1f) "far (∞)" else "%.1f m".format(1 / u)) + " (from ${FocusPilot.clipsLearned(ctx)} clips; ${FocusPilot.spread(ctx)})."
         val last = lastClip.ifEmpty { s.getString("lastClip", "") ?: "" }
         return "$speed $learned" + (if (last.isEmpty()) "" else " Last clip: $last.")
     }
@@ -347,7 +411,7 @@ object AiEngine {
     /** Lines for Diagnostics. */
     fun report(ctx: Context, line: (String, Any?) -> Unit) {
         val s = sp(ctx)
-        line("Models in memory", if (loaded) "yes (loaded in $loadMs ms)" else "no")
+        line("Models in memory", (if (loaded) "yes (loaded in $loadMs ms)" else "no") + if (keep) " · kept while monitoring (Ready at once)" else "")
         line("Runs on", backendText(s.getString("backend", "") ?: "") + (disabledWhy?.let { " · off: $it" } ?: ""))
         line("Speed test", s.getString("benchNotes", "")?.ifEmpty { "not run yet" })
         line("Detector / body points", if (frames == 0L) "no frames yet" else "%.0f ms / %.0f ms a frame".format(msDetAvg, msPoseAvg))

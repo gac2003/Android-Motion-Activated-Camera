@@ -27,6 +27,8 @@ object StreamCache {
         @Volatile var available = 0L
         @Volatile var complete = false
         @Volatile var error: Exception? = null
+        /** When the last bytes arrived: a slow download keeps going as long as it moves. */
+        @Volatile var lastProgress = System.currentTimeMillis()
         val lock = Object()
         val size get() = entry.file.size
     }
@@ -62,25 +64,40 @@ object StreamCache {
         }
     }
 
+    /** A slow connection: the download only gives up after this long without receiving anything. */
+    const val STALL_MS = 3 * 60_000L
+
     private fun run(ctx: Context, dl: Download) {
         try {
-            var offset = if (dl.part.exists()) dl.part.length() else 0L   // resume a partial download
-            if (dl.size in 1 until offset) { dl.part.delete(); offset = 0 }
-            dl.available = offset
-            if (dl.size <= 0 || offset < dl.size) {
-                RemoteSources.reader(ctx, dl.entry.src).use { r ->
-                    r.open(dl.entry.file, offset).use { input ->
-                        RandomAccessFile(dl.part, "rw").use { out ->
-                            out.seek(offset)
-                            val buf = ByteArray(128 * 1024)
-                            while (true) {
-                                val n = input.read(buf)
-                                if (n < 0) break
-                                out.write(buf, 0, n)
-                                synchronized(dl.lock) { dl.available += n; dl.lock.notifyAll() }
+            if (dl.part.exists() && dl.size in 1 until dl.part.length()) dl.part.delete()
+            // like a video app on a slow connection: a dropped or timed-out download picks up where it stopped, as long
+            // as it still gets somewhere (it only gives up after STALL_MS with nothing arriving)
+            var tries = 0
+            while (true) {
+                val offset = if (dl.part.exists()) dl.part.length() else 0L   // resume a partial download
+                dl.available = offset
+                if (dl.size > 0 && offset >= dl.size) break
+                try {
+                    RemoteSources.reader(ctx, dl.entry.src).use { r ->
+                        r.open(dl.entry.file, offset).use { input ->
+                            RandomAccessFile(dl.part, "rw").use { out ->
+                                out.seek(offset)
+                                val buf = ByteArray(128 * 1024)
+                                while (true) {
+                                    val n = input.read(buf)
+                                    if (n < 0) break
+                                    out.write(buf, 0, n)
+                                    synchronized(dl.lock) { dl.available += n; dl.lastProgress = System.currentTimeMillis(); dl.lock.notifyAll() }
+                                }
                             }
                         }
                     }
+                    break
+                } catch (e: Exception) {
+                    if (e is com.motioncam.cloud.CloudException && e.kind == com.motioncam.cloud.CloudException.Kind.AUTH) throw e   // retrying won't help
+                    if (System.currentTimeMillis() - dl.lastProgress > STALL_MS) throw e
+                    tries++
+                    Thread.sleep(minOf(2_000L * tries, 15_000L))
                 }
             }
             if (dl.size > 0 && dl.part.length() != dl.size) throw IOException("download incomplete (${dl.part.length()} of ${dl.size} bytes)")
@@ -95,14 +112,15 @@ object StreamCache {
         }
     }
 
-    /** Waits until [pos] bytes are available (or the download ended). Returns false on failure / timeout. */
-    fun waitFor(dl: Download, pos: Long, timeoutMs: Long = 90_000): Boolean {
-        val until = System.currentTimeMillis() + timeoutMs
+    /**
+     * Waits until [pos] bytes are available (or the download ended). Returns false on failure, or when nothing has
+     * arrived for [timeoutMs]: a slow download that still moves is waited for (not a fixed time for each piece).
+     */
+    fun waitFor(dl: Download, pos: Long, timeoutMs: Long = STALL_MS): Boolean {
         synchronized(dl.lock) {
             while (dl.available < pos && !dl.complete && dl.error == null) {
-                val left = until - System.currentTimeMillis()
-                if (left <= 0) return false
-                dl.lock.wait(minOf(left, 1000))
+                if (System.currentTimeMillis() - dl.lastProgress > timeoutMs) return false
+                dl.lock.wait(1000)
             }
             return dl.available >= pos || dl.complete
         }

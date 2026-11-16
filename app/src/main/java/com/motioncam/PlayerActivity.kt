@@ -373,6 +373,9 @@ class PlayerActivity : Activity() {
                 else onCurrentCompleted()
             }
             mp.setOnErrorListener { _, _, _ ->
+                // a slow connection: Android's player gave up waiting, but the download is still moving: keep the place and
+                // try again as more arrives (like a video app buffering), instead of skipping the clip
+                if (slot === cur && remote != null && slowRetry(slot, index)) return@setOnErrorListener true
                 if (slot === cur && remote != null) Toast.makeText(this, "Could not load this clip (no connection?)", Toast.LENGTH_SHORT).show()
                 if (slot === cur) ui.post { advanceTo(slot.index + 1) } else slot.release()
                 true
@@ -637,6 +640,22 @@ class PlayerActivity : Activity() {
         try {
             if (playing) { m.start(); applySpeed(m) } else m.pause()
         } catch (_: Exception) {}
+    }
+
+    private var slowToast: Toast? = null
+
+    /** The clip's download is still going (slow): show how far it got and load the clip again in a few seconds. */
+    private fun slowRetry(slot: Slot, index: Int): Boolean {
+        val c = clips.getOrNull(index) ?: return false
+        val e = com.motioncam.remote.RemoteRepo.entry(c.id) ?: return false
+        val dl = com.motioncam.remote.StreamCache.start(this, e)
+        if (dl.error != null || System.currentTimeMillis() - dl.lastProgress > com.motioncam.remote.StreamCache.STALL_MS) return false
+        val pos = try { slot.mp?.currentPosition ?: 0 } catch (_: Exception) { 0 }
+        val pct = if (dl.size > 0) (dl.available * 100 / dl.size).toInt() else -1
+        slowToast?.cancel()
+        slowToast = Toast.makeText(this, "Slow connection — loading" + (if (pct >= 0) "… $pct%" else "…"), Toast.LENGTH_SHORT).also { it.show() }
+        ui.postDelayed({ if (!isFinishing && cur === slot && slot.index == index) load(slot, index, pos) }, 4000)
+        return true
     }
 
     private fun curPos(): Int = try { if (cur.prepared) cur.mp?.currentPosition ?: 0 else 0 } catch (_: Exception) { 0 }

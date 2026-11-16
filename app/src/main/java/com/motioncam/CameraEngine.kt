@@ -401,6 +401,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         // the camera closes (stopped, restarted, paused for heat): the AI's models are freed at once
         if (aiInClip) { aiInClip = false; com.motioncam.ai.AiEngine.clipEnd(ctx) }
         com.motioncam.ai.AiEngine.shutdown()
+        if (!active) com.motioncam.ai.ClipAnalyzer.cameraClosed()
         disarm()
         sessionGen++
         try { session?.close() } catch (_: Exception) {}
@@ -551,6 +552,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             mode = Mode.RECORDING
             message = "Recording"
             aiClip(true)
+            com.motioncam.ai.ClipAnalyzer.recordingStarted()
             pushRepeating()
             publish()
             return
@@ -591,6 +593,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         mode = Mode.RECORDING
         message = "Recording"
         aiClip(true)
+        com.motioncam.ai.ClipAnalyzer.recordingStarted()
         pushRepeating()
         publish()
     }
@@ -1042,6 +1045,10 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         val bat = batteryInfo()
         // AI heat rules: read only while its models are in memory (during clips and a few minutes after)
         if (prefs.aiFocus && (aiInClip || com.motioncam.ai.AiEngine.loaded)) com.motioncam.ai.AiGovernor.sample(ctx, bat.tempC, thermalStatus(), prefs.maxTempC)
+        // describing saved clips: may it run now? (asks Android's heat level only while clips are waiting)
+        if (prefs.aiDescribe && com.motioncam.ai.ClipAnalyzer.waiting != 0) com.motioncam.ai.ClipAnalyzer.tick(ctx, true, prefs.aiChargingOnly,
+            bat.charging, bat.tempC, thermalStatus(), prefs.maxTempC, mode == Mode.RECORDING)
+        else if (com.motioncam.ai.ClipAnalyzer.running) com.motioncam.ai.ClipAnalyzer.tick(ctx, false, true, false, 0f, 0, 0, false)
 
         if (monitoring) {
             // battery

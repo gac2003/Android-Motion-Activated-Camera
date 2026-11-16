@@ -215,6 +215,7 @@ object CloudSync {
 
     /** Called when a clip has been saved: queue it for every enabled destination. */
     fun onClipSaved(ctx: Context, clipId: Long) {
+        try { com.motioncam.ai.ClipAnalyzer.onClipSaved(ctx, clipId) } catch (_: Exception) {}   // described later (AI, if turned on)
         com.motioncam.live.CameraLink.clipSaved(ctx, clipId)   // viewing phones' alerts can then open this clip
         val kinds = enabledKinds(ctx)
         if (kinds.isEmpty()) return
@@ -828,6 +829,27 @@ object CloudSync {
      * length is part of the name. Best effort: returns false if it could not be done now.
      */
     /** A clip's tags go into the folder with it, so they show (and can be searched) on every phone viewing it. */
+    /**
+     * Adds [tags] to a clip in the backup folders it is already in (a clip not uploaded yet takes its tags along when
+     * it is). Network; false when a folder couldn't be reached now (no internet, waiting for Wi-Fi).
+     */
+    fun pushTags(ctx: Context, clip: Clip, tags: Set<String>): Boolean {
+        if (tags.isEmpty()) return true
+        var ok = true
+        for (k in enabledKinds(ctx)) {
+            val cfg = CloudConfig(ctx, k)
+            val folder = cfg.folderId ?: continue
+            val there = synchronized(lock) { load(ctx); index!!.any { it.kind == k && it.clipId == clip.id } }
+            if (!there) continue
+            if (waitReason(ctx) != null) { ok = false; continue }
+            try {
+                providerFor(ctx, k).use { p -> com.motioncam.TagStore.writeTo(ctx, p, folder, mapOf(clip.name to tags)) }
+                com.motioncam.live.Live.nudge(ctx, cfg.kind, folder, "tags")
+            } catch (_: Exception) { ok = false }
+        }
+        return ok
+    }
+
     private fun uploadTags(ctx: Context, p: CloudProvider, folder: String, clip: Clip) {
         val t = com.motioncam.TagStore.tagsOf(ctx, null, clip)
         if (t.isEmpty()) return

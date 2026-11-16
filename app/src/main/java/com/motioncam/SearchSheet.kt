@@ -98,7 +98,8 @@ class SearchSheet private constructor(
 
         val body = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(d(16), 0, d(16), d(24)) }
         dateSection(body)
-        tagSection(body)
+        tagSection(body, false)
+        tagSection(body, true)
         colSection(body)
         rangeSection(body, "Length", "seconds", LENGTHS, { f.minSec }, { f.maxSec }) { lo, hi -> f.minSec = lo; f.maxSec = hi }
         rangeSection(body, "File size", "MB", SIZES, { f.minMb }, { f.maxMb }) { lo, hi -> f.minMb = lo; f.maxMb = hi }
@@ -314,8 +315,11 @@ class SearchSheet private constructor(
 
     // ------------------------------------------------------------------ tags and collections
 
-    private fun tagSection(body: LinearLayout) {
-        val sub = header(body, "Tags", segmented(listOf("Any", "All"), { if (f.tagsAll) 1 else 0 }) { f.tagsAll = it == 1 })
+    /** [ai] false: your own tags; true: what the AI saw in the clips (automatic tags, shown without their mark). */
+    private fun tagSection(body: LinearLayout, ai: Boolean) {
+        val tagCounts = this.tagCounts.filter { com.motioncam.ai.ClipFacts.isAi(it.first) == ai }
+        if (ai && tagCounts.isEmpty()) return
+        val sub = header(body, if (ai) "Seen in clip (AI)" else "Tags", segmented(listOf("Any", "All"), { if (f.tagsAll) 1 else 0 }) { f.tagsAll = it == 1 })
         repaints += { setSub(sub, if (f.tagsIn.size > 1) (if (f.tagsAll) "Clips with all the ✓ tags" else "Clips with any ✓ tag") else null) }
         if (tagCounts.isEmpty()) {
             hint(body, "No tags yet. To tag clips, select them (hold a clip) and choose More → Tags…, or use ⋮ while playing.")
@@ -348,7 +352,7 @@ class SearchSheet private constructor(
         repaints += {
             flow.removeAllViews()
             // chosen ones first, then the most used; a search shows every match
-            val matching = tagCounts.filter { query.isEmpty() || it.first.contains(query, true) }
+            val matching = tagCounts.filter { query.isEmpty() || com.motioncam.ai.ClipFacts.label(it.first).contains(query, true) }
             val chosen = matching.filter { it.first in f.tagsIn || it.first in f.tagsOut }
             val rest = matching.filter { it.first !in f.tagsIn && it.first !in f.tagsOut }
             val limit = if (showAll || query.isNotEmpty()) Int.MAX_VALUE else maxOf(0, SHOWN_TAGS - chosen.size)
@@ -361,7 +365,7 @@ class SearchSheet private constructor(
                     }
                     changed()
                 }
-                paintTri(tv, when (tag) { in f.tagsIn -> 1; in f.tagsOut -> 2; else -> 0 }, tag, n)
+                paintTri(tv, when (tag) { in f.tagsIn -> 1; in f.tagsOut -> 2; else -> 0 }, com.motioncam.ai.ClipFacts.label(tag), n)
                 flow.addView(tv)
             }
             if (matching.isEmpty()) flow.addView(Ui.label(a, "No tag matches \"$query\"", 13f, Ui.GREY))

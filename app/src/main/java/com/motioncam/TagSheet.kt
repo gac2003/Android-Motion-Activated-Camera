@@ -30,6 +30,7 @@ object TagSheet {
         val n = clips.size
         val rows = ArrayList<Row>()
         for ((tag, _) in TagStore.all(a, scope, pool)) {
+            if (com.motioncam.ai.ClipFacts.isAi(tag)) continue   // what the AI saw isn't edited by hand
             val have = clips.count { c -> TagStore.tagsOf(a, scope, c).any { it.equals(tag, true) } }
             rows += Row(tag, when { have >= n -> State.ALL; have > 0 -> State.SOME; else -> State.NONE })
         }

@@ -363,8 +363,8 @@ object AiEngine {
     private fun direct(bytes: Int): ByteBuffer = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder())
 
     /** The person detector: a square picture in, a score and a box for each of its fixed "anchor" positions out. */
-    private class Detector(ctx: Context, name: String, backend: String) {
-        private val net = Net(ctx, name, backend, 4)
+    internal class Detector(ctx: Context, name: String, backend: String, threads: Int = 4) {
+        private val net = Net(ctx, name, backend, threads)
         private val n: Int = net.tfl.getInputTensor(0).shape()[1]
         private val quant = net.tfl.getInputTensor(0).dataType() == DataType.UINT8
         private val rgb = ByteArray(n * n * 3)
@@ -456,6 +456,45 @@ object AiEngine {
                 }
                 if (!dup) keep.add(b)
                 if (keep.size >= 5) break
+            }
+            return keep
+        }
+
+        /**
+         * Things of the given [kinds] in a picture (already upright): [left, top, right, bottom, score, kind], 0..1,
+         * best first, overlaps of the same kind removed. For describing saved clips.
+         */
+        fun detectBitmap(bmp: android.graphics.Bitmap, kinds: IntArray): List<FloatArray> {
+            val scaled = if (bmp.width == n && bmp.height == n) bmp else android.graphics.Bitmap.createScaledBitmap(bmp, n, n, true)
+            val px = IntArray(n * n)
+            scaled.getPixels(px, 0, n, 0, 0, n, n)
+            if (scaled !== bmp) scaled.recycle()
+            for (i in px.indices) { val c = px[i]; rgb[i * 3] = (c shr 16).toByte(); rgb[i * 3 + 1] = (c shr 8).toByte(); rgb[i * 3 + 2] = c.toByte() }
+            infer()
+            val found = ArrayList<FloatArray>()
+            for (i in 0 until count) for (kind in kinds) {
+                val s = scores.get(i * classes + kind)
+                if (s < MIN_SCORE) continue
+                val ay = anchors[i * 4]; val ax = anchors[i * 4 + 1]; val ah = anchors[i * 4 + 2]; val aw = anchors[i * 4 + 3]
+                val yc = boxes.get(i * 4) * ah + ay; val xc = boxes.get(i * 4 + 1) * aw + ax
+                val h = exp(boxes.get(i * 4 + 2)) * ah; val w = exp(boxes.get(i * 4 + 3)) * aw
+                found.add(floatArrayOf(((xc - w / 2) / n).coerceIn(0f, 1f), ((yc - h / 2) / n).coerceIn(0f, 1f),
+                    ((xc + w / 2) / n).coerceIn(0f, 1f), ((yc + h / 2) / n).coerceIn(0f, 1f), s, kind.toFloat()))
+            }
+            found.sortByDescending { it[4] }
+            val keep = ArrayList<FloatArray>()
+            for (b in found) {
+                var dup = false
+                for (k in keep) {
+                    if (k[5] != b[5]) continue
+                    val ix = (minOf(b[2], k[2]) - maxOf(b[0], k[0])).coerceAtLeast(0f)
+                    val iy = (minOf(b[3], k[3]) - maxOf(b[1], k[1])).coerceAtLeast(0f)
+                    val inter = ix * iy
+                    val union = (b[2] - b[0]) * (b[3] - b[1]) + (k[2] - k[0]) * (k[3] - k[1]) - inter
+                    if (union > 0f && inter / union > 0.5f) { dup = true; break }
+                }
+                if (!dup) keep.add(b)
+                if (keep.size >= 20) break
             }
             return keep
         }

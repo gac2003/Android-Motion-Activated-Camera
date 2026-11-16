@@ -456,6 +456,20 @@ open class SettingsActivity : Activity() {
                     }
                 }
             }
+            // describing saved clips (on-device AI): off unless turned on
+            sf.toggle("Describe clips for Search (AI, experimental)", prefs.aiDescribe) { prefs.aiDescribe = it; build() }
+            if (prefs.aiDescribe) {
+                sf.toggle("Only while charging", prefs.aiChargingOnly) { prefs.aiChargingOnly = it }
+                sf.note("After a clip is saved, this phone works out who and what was in it (people, how long they stayed, clothing " +
+                    "colours, cars, animals, bags) and adds that to the clip, so Search finds it on all your phones (\"Seen in clip\"). " +
+                    "It works while the camera is open, the phone is cool and no clip is recording; at most ${com.motioncam.ai.ClipAnalyzer.MAX_QUEUE} " +
+                    "clips wait, older ones are skipped.")
+                holder.addView(Ui.chip(this, "Describe the last 20 clips").apply { setOnClickListener {
+                    com.motioncam.ai.ClipAnalyzer.describeRecent(this@SettingsActivity, 20) { n ->
+                        android.widget.Toast.makeText(this@SettingsActivity, if (n == 0) "They are all described already" else "$n clips wait to be described", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                } }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
+            }
             // white balance: automatic, or the camera's presets
             val presets = ProCaps.wbPresets
             sf.toggle("White balance: automatic", prefs.wbAuto) { prefs.wbAuto = it; pro(); build() }

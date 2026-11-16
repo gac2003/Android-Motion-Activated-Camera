@@ -92,6 +92,10 @@ class Prefs(ctx: Context) {
     var focusAuto: Boolean get() = b("focusAuto", true); set(v) = put("focusAuto", v)
     /** Person-aware focus (on-device AI, only while a clip records). Off until turned on. */
     var aiFocus: Boolean get() = b("aiFocus", false); set(v) = put("aiFocus", v)
+    /** Describe saved clips (people, colours, objects) so Search can find them. Off until turned on. */
+    var aiDescribe: Boolean get() = b("aiDescribe", false); set(v) = put("aiDescribe", v)
+    /** Describing clips only while the phone is charging. */
+    var aiChargingOnly: Boolean get() = b("aiChargingOnly", true); set(v) = put("aiChargingOnly", v)
     /** 0 = nearest focus, 1 = infinity. */
     var focusPos: Float get() = f("focusPos", 1f); set(v) = put("focusPos", v)
     var wbAuto: Boolean get() = b("wbAuto", true); set(v) = put("wbAuto", v)

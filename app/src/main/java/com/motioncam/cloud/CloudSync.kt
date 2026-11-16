@@ -721,10 +721,14 @@ object CloudSync {
                     listings.remove(cfg.dest)
                     job.nextAt = now + 5_000
                     job.attempts++
+                    if (job.attempts >= 8) job.failed = true   // not forever (each retry wakes the phone)
                 }
                 CloudException.Kind.NETWORK -> {
                     job.nextAt = now + BACKOFF_NET[job.attempts.coerceAtMost(BACKOFF_NET.size - 1)]
                     job.attempts++
+                    // the internet works (no connection is handled apart, without retries) but this keeps failing:
+                    // give up after about half a day instead of waking the phone every 15 minutes forever
+                    if (job.attempts >= 50) job.failed = true
                 }
                 CloudException.Kind.OTHER -> {
                     job.nextAt = now + BACKOFF_OTHER[job.attempts.coerceAtMost(BACKOFF_OTHER.size - 1)]
@@ -833,8 +837,16 @@ object CloudSync {
         catch (e: Exception) { 0L } finally { try { r.release() } catch (_: Exception) {} }
     }
 
+    /**
+     * This phone records clips (it monitored in the last two weeks, or its camera service runs). Folder housekeeping
+     * (deleting old cloud copies, adding missing thumbnails) is the recording camera's job: a phone that only watches
+     * never does it in the background.
+     */
+    private fun recordsHere(ctx: Context): Boolean =
+        com.motioncam.CameraService.instance != null || System.currentTimeMillis() - Prefs(ctx).lastMonitoredAt < 14 * 86_400_000L
+
     private fun thumbsDue(ctx: Context, k: Dest): Boolean {
-        if (!Prefs(ctx).cloudThumbs) return false
+        if (!Prefs(ctx).cloudThumbs || !recordsHere(ctx)) return false
         val cfg = CloudConfig(ctx, k)
         if (!cfg.enabled || !cfg.isConfigured || cfg.folderId == null) return false
         return synchronized(lock) { load(ctx); index!!.any { it.kind == k && !it.thumb && "${it.clipId}:${k.key}" !in thumbTried } }
@@ -949,7 +961,7 @@ object CloudSync {
 
     private fun retentionDue(ctx: Context, k: Dest): Boolean {
         val cfg = CloudConfig(ctx, k)
-        return cfg.enabled && cfg.isConfigured && cfg.keepDays > 0 && cfg.folderId != null &&
+        return recordsHere(ctx) && cfg.enabled && cfg.isConfigured && cfg.keepDays > 0 && cfg.folderId != null &&
             System.currentTimeMillis() - cfg.lastRetentionAt > 6 * 3_600_000L
     }
 

@@ -63,7 +63,7 @@ object Diagnostics {
         line("Following cameras", com.motioncam.live.Live.watchedCount())
         line("Monitoring wanted", yes(Health.wanted(ctx)) + " (alive ${ago(Health.aliveAt(ctx))})")
         val js = ctx.getSystemService(android.app.job.JobScheduler::class.java)
-        line("Scheduled checks", js?.allPendingJobs?.joinToString { when (it.id) { 4207 -> "alerts 15 min"; 4208 -> "camera watchdog"; else -> "job ${it.id}" } }?.ifEmpty { "none" })
+        line("Scheduled checks", js?.allPendingJobs?.joinToString { when (it.id) { 4207 -> "alerts 15 min"; 4208 -> "camera watchdog"; 4242 -> "backup uploads"; else -> "job ${it.id}" } }?.ifEmpty { "none" })
         val q = try { com.motioncam.cloud.CloudSync.counts(ctx, null) } catch (_: Exception) { null }
         line("Uploads waiting / failed", q?.let { "${it.queued} / ${it.failed}" })
         line("Transfers running", try { com.motioncam.remote.TransferQueue.pending(ctx) } catch (_: Exception) { "?" })

@@ -184,6 +184,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     private var lastJpegRun = 0L
     private var overlayShown = false
     private var zonesSrc: String? = null
+    private var zonesCrop: android.graphics.RectF? = null
     private var zoneBlocks: BooleanArray? = null
     @Volatile private var motionBlocks = 0
     @Volatile private var lastFrameAt = SystemClock.elapsedRealtime()
@@ -920,9 +921,9 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             if (resetDetector) { detector.reset(); resetDetector = false; consecutive = 0 }
             // zones, and only inside the CROP area (the rest isn't recorded)
             val cr = cropRect
-            val z = prefs.zones + "|" + (cr?.toShortString() ?: "")
-            if (z != zonesSrc) {
-                zonesSrc = z
+            val z = prefs.zones
+            if (z != zonesSrc || cr !== zonesCrop) {   // compared as they are: no text built 8 times a second
+                zonesSrc = z; zonesCrop = cr
                 val zb = if (prefs.zones.isEmpty()) null else Zones.blockMask(Zones.parse(prefs.zones))
                 val cb = cr?.let { Crop.blockMask(it) }
                 zoneBlocks = when {
@@ -1083,7 +1084,15 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
 
     private class Bat(val pct: Int, val tempC: Float, val charging: Boolean)
 
+    // battery level / temperature and Android's heat level change slowly: asked of Android every 5 s, not every second
+    private var batCache: Bat? = null
+    private var batAt = 0L
+    private var thermalCache = 0
+    private var thermalAt = 0L
+
     private fun batteryInfo(): Bat {
+        val now = SystemClock.elapsedRealtime()
+        batCache?.let { if (now - batAt < 5_000L) return it }
         val i: Intent = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return Bat(-1, 0f, true)
         val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
         val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
@@ -1091,14 +1100,22 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             if (level >= 0 && scale > 0) level * 100 / scale else -1,
             i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10f,
             i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0,
-        )
+        ).also { batCache = it; batAt = now }
     }
 
-    private fun thermalStatus(): Int =
-        try { (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).currentThermalStatus } catch (_: Exception) { 0 }
+    private fun thermalStatus(): Int {
+        val now = SystemClock.elapsedRealtime()
+        if (thermalAt != 0L && now - thermalAt < 5_000L) return thermalCache
+        thermalCache = try { (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).currentThermalStatus } catch (_: Exception) { 0 }
+        thermalAt = now
+        return thermalCache
+    }
+
+    private var lastStatus: Status? = null
+    private var lastStatusAt = 0L
 
     private fun publish(bat: Bat = batteryInfo()) = try {
-        StatusBus.publish(
+        publishIfNew(
             Status(
                 mode = mode,
                 monitoring = monitoring,
@@ -1114,6 +1131,19 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             )
         )
     } catch (_: Exception) {}
+
+    /**
+     * The once-a-second status goes out when something in it changed, every second while recording or while the
+     * camera screen is open (it shows the running time), and otherwise every 30 s: with the screen off and nothing
+     * happening, the notification, the live connection and the screens aren't woken every second for the same values.
+     */
+    private fun publishIfNew(s: Status) {
+        val now = SystemClock.elapsedRealtime()
+        if (s == lastStatus && now - lastStatusAt < 30_000L && s.mode != Mode.RECORDING && FrameHub.overlaySink == null) return
+        lastStatus = s
+        lastStatusAt = now
+        StatusBus.publish(s)
+    }
 
     companion object {
         private val ALL_BLOCKS = BooleanArray(MotionDetector.N) { true }

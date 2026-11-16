@@ -5,6 +5,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
+// ============================================================================================================
+// TODO-REMOVE (AI leftovers): dead weight once every phone runs 1.1.87 or later and the camera has uploaded a clip. See TODO-REMOVE.md in the project folder for the full list and how to remove it.
+// This whole file can be deleted then.
+// ============================================================================================================
 /**
  * Clears what the removed on-device AI builds (1.1.78 – 1.1.85) left behind on this phone, once: their files and
  * settings, the automatic tags they put on clips ("✦ person", "✦ red top"…), and saved searches that used them.

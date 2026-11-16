@@ -35,6 +35,7 @@ class MotionCamApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Health.install(this)
+        // TODO-REMOVE (AI leftovers): dead weight once every phone runs 1.1.87 or later and the camera has uploaded a clip. See TODO-REMOVE.md in the project folder for the full list and how to remove it.
         Leftovers.clean(this)   // once: what the removed AI builds left on this phone
         Recorder.resume(this)   // a diagnostics recording under way carries on
         // worth logging on a camera phone (an unexpected restart matters there); a viewer phone starts often (each push)

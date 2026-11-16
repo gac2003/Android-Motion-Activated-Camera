@@ -580,6 +580,7 @@ object CloudSync {
                 if (waitReason(ctx) != null) { watchNetwork(ctx); break }   // kick (below) leaves it to Android's job
                 val job = claim(ctx, k)
                 if (job == null) {
+                    // TODO-REMOVE (AI leftovers): dead weight once every phone runs 1.1.87 or later and the camera has uploaded a clip. See TODO-REMOVE.md in the project folder for the full list and how to remove it.
                     // once, after an upload: what the removed AI builds left in this folder
                     if (leftoversDue(ctx, k)) {
                         if (p == null) p = try { provider(ctx, cfg) } catch (e: Exception) { break }
@@ -867,6 +868,8 @@ object CloudSync {
     private fun recordsHere(ctx: Context): Boolean =
         com.motioncam.CameraService.instance != null || System.currentTimeMillis() - Prefs(ctx).lastMonitoredAt < 14 * 86_400_000L
 
+    // TODO-REMOVE (AI leftovers): dead weight once every phone runs 1.1.87 or later and the camera has uploaded a clip. See TODO-REMOVE.md in the project folder for the full list and how to remove it.
+    // (leftoversDue and cleanLeftovers, both below, go together.)
     /**
      * The removed on-device AI builds (1.1.78 – 1.1.85) put automatic tags ("✦ …") and a ".ai" folder of small files
      * into the backup folder. The phone that records removes them once, when it is uploading anyway (no extra

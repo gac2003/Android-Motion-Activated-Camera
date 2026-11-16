@@ -18,8 +18,9 @@ import org.json.JSONObject
  *  - only exists after a picture failed (nothing is scheduled otherwise), one job for all of them;
  *  - at most [MAX_TRIES] tries per picture, Android's growing pauses in between (30 s, 1 min, 2 min…), and only
  *    while the database couldn't be reached (an answer without a picture ends it: nothing to wait for);
- *  - a picture is given up [KEEP_MS] after its alert, or as soon as its alert isn't shown any more (swiped away,
- *    opened): then nothing is fetched at all;
+ *  - a picture is given up [KEEP_MS] after its alert, or as soon as no alert shown is about its clip any more (swiped
+ *    away, opened, or replaced by a newer clip's alert: each camera has one motion and one clip alert, so only its
+ *    latest clip is ever waited for): then nothing is fetched at all;
  *  - connects only for the fetch, and disconnects again unless MotionCam is using the connection.
  */
 class AlertPictureJob : JobService() {
@@ -42,7 +43,9 @@ class AlertPictureJob : JobService() {
             val a = pending(ctx)
             val out = JSONArray()
             for (i in 0 until a.length()) a.optJSONObject(i)?.let {
-                if (now - it.optLong("at") < KEEP_MS && !(it.optString("c") == cam && it.optString("n") == name)) out.put(it)
+                // a newer clip from the same camera replaces its alerts (one motion and one clip alert per camera), so
+                // that camera's older pictures have nowhere to go any more: dropped
+                if (now - it.optLong("at") < KEEP_MS && it.optString("c") != cam) out.put(it)
             }
             out.put(JSONObject().put("c", cam).put("n", name).put("at", now).put("tries", 0))
             while (out.length() > MAX_PENDING) out.remove(0)

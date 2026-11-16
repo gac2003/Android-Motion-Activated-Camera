@@ -470,6 +470,20 @@ open class SettingsActivity : Activity() {
                     }
                 } }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
             }
+            // faces (on-device AI): off unless turned on
+            sf.toggle("Recognise faces (AI, experimental)", prefs.aiFaces) { prefs.aiFaces = it; build() }
+            if (prefs.aiFaces) sf.note("While clips are described, faces of the people in them are grouped: the same face again joins its group. " +
+                "Name a group under People and its clips show the name in Search on all your phones. Needs \"Describe clips\" on this phone" +
+                (if (!prefs.aiDescribe) " (it is off, so no faces are looked for)" else "") + ". Side-on, small or badly lit faces often can't be told apart.")
+            holder.addView(Ui.chip(this, "People…").apply { setOnClickListener { startActivity(android.content.Intent(this@SettingsActivity, PeopleActivity::class.java)) } },
+                LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
+            if (prefs.aiFaces) holder.addView(Ui.chip(this, "Delete all face data").apply { setOnClickListener {
+                android.app.AlertDialog.Builder(this@SettingsActivity).setTitle("Delete all face data?")
+                    .setMessage("Every face group, face picture and name made by this phone is removed, here and from its backup folder. Clips stay.")
+                    .setPositiveButton("Delete") { _, _ ->
+                        com.motioncam.ai.ClipAnalyzer.deleteFaces(this@SettingsActivity) { android.widget.Toast.makeText(this@SettingsActivity, "Face data deleted", android.widget.Toast.LENGTH_SHORT).show() }
+                    }.setNegativeButton("Cancel", null).show()
+            } }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
             // search by meaning (on-device AI): off unless turned on
             sf.toggle("Search by meaning (AI, experimental)", prefs.aiMeaning) { prefs.aiMeaning = it; build() }
             if (prefs.aiMeaning) sf.note("Search gets a box for words (\"red hat\", \"person with a package\"). On a phone that records, " +

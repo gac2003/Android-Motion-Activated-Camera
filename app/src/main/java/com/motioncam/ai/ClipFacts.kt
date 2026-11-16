@@ -96,7 +96,7 @@ object ClipFacts {
 
     /** One readable line from a clip's tags ("2 people · stayed 10–30 s · red top · car"), or "" without AI tags. */
     fun line(tags: Collection<String>): String {
-        val words = tags.filter { isAi(it) }.map { label(it) }
+        val words = tags.filter { isAi(it) }.map { label(it) }.filter { !it.startsWith("@") }
         if (words.isEmpty()) return ""
         val counted = words.any { it.endsWith(" people") }
         return words.filter { !(counted && it == "person") }.sortedWith(compareBy({ rank(it) }, { it })).joinToString(" · ")

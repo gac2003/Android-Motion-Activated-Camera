@@ -234,11 +234,25 @@ object Meaning {
      */
     fun sendDays(ctx: Context) {
         val s = sp(ctx)
+        // a clip that is neither on this phone nor in a backup folder any more takes its fingerprints with it
+        try {
+            val onPhone = com.motioncam.ClipStore.list(ctx).map { it.name }.toSet()
+            val inCloud = com.motioncam.cloud.CloudSync.indexNames(ctx)
+            if (onPhone.isNotEmpty() || inCloud.isNotEmpty()) synchronized(this) {
+                val m = localMap(ctx)
+                val gone = m.keys.filter { it !in onPhone && it !in inCloud }
+                if (gone.isNotEmpty()) {
+                    for (n in gone) m.remove(n)
+                    try { val f = localFile(ctx); val t = File(f.path + ".tmp"); t.writeBytes(writeRecords(m)); t.renameTo(f) } catch (_: Exception) {}
+                    s.edit().putStringSet("dirty", (s.getStringSet("dirty", emptySet()) ?: emptySet()) + gone.mapNotNull { dayOf(it) }).apply()
+                }
+            }
+        } catch (_: Throwable) {}
         val days = s.getStringSet("dirty", emptySet())?.toList() ?: return
         val dev = Device.id(ctx).take(8)
         for (day in days) {
             val records = synchronized(this) { localMap(ctx).filterKeys { dayOf(it) == day } }
-            val ok = records.isEmpty() || try { com.motioncam.cloud.CloudSync.pushMeaning(ctx, "m_${day}_$dev.bin", writeRecords(records)) } catch (_: Throwable) { false }
+            val ok = try { com.motioncam.cloud.CloudSync.pushMeaning(ctx, "m_${day}_$dev.bin", writeRecords(records)) } catch (_: Throwable) { false }
             if (!ok) return   // no way to the folder now: next time
             synchronized(this) { s.edit().putStringSet("dirty", (s.getStringSet("dirty", emptySet()) ?: emptySet()) - day).apply() }
         }

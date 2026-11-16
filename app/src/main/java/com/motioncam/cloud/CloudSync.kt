@@ -871,6 +871,40 @@ object CloudSync {
         return ok
     }
 
+    /** The names of the files in the backup folders' ".ai" subfolder (people's namings are file names), or null when unreachable. Network. */
+    fun aiFileNames(ctx: Context): List<String>? {
+        val out = ArrayList<String>()
+        var any = false
+        for (k in enabledKinds(ctx)) {
+            val cfg = CloudConfig(ctx, k)
+            val folder = cfg.folderId ?: continue
+            if (cfg.blocked != null || waitReason(ctx) != null) continue
+            try {
+                providerFor(ctx, k).use { p ->
+                    p.listFolders(folder).firstOrNull { it.name == com.motioncam.ai.Meaning.FOLDER }?.let { ai -> out += p.list(ai.id).map { it.name } }
+                    any = true
+                }
+            } catch (_: Exception) {}
+        }
+        return if (any) out else null
+    }
+
+    /** Takes this phone's face groups ([bundle]) and all namings out of the backup folders. Network, best effort. */
+    fun clearFaces(ctx: Context, bundle: String) {
+        for (k in enabledKinds(ctx)) {
+            val folder = CloudConfig(ctx, k).folderId ?: continue
+            try {
+                providerFor(ctx, k).use { p ->
+                    val ai = p.listFolders(folder).firstOrNull { it.name == com.motioncam.ai.Meaning.FOLDER } ?: return@use
+                    for (f in p.list(ai.id)) if (f.name == bundle || f.name.startsWith("n~")) try { p.delete(ai.id, f) } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    /** The names of the clips this phone has in its backup folders. */
+    fun indexNames(ctx: Context): Set<String> = synchronized(lock) { load(ctx); index!!.map { it.name }.toSet() }
+
     private fun uploadTags(ctx: Context, p: CloudProvider, folder: String, clip: Clip) {
         val t = com.motioncam.TagStore.tagsOf(ctx, null, clip)
         if (t.isEmpty()) return

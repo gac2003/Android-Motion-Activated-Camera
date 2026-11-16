@@ -795,7 +795,7 @@ open class ClipsActivity : Activity() {
             if (!filter.active) return all
         }
         val src = sourceId
-        return all.filter { c -> filter.matches(c, TagStore.tagsOf(this, src, c)) { id -> cols[id]?.contains(c.id) == true } }
+        return all.filter { c -> filter.matches(c, com.motioncam.ai.People.resolve(this, src, TagStore.tagsOf(this, src, c))) { id -> cols[id]?.contains(c.id) == true } }
     }
 
     /** A search that was open when the phone was turned: reopened with its choices once the clips are back. */
@@ -819,7 +819,7 @@ open class ClipsActivity : Activity() {
             remote != null -> remote!!.name
             else -> "Clips on this phone"
         }
-        SearchSheet.show(this, where, start, all, { TagStore.tagsOf(this, sourceId, it) }, colInfos(), sourceId) { f ->
+        SearchSheet.show(this, where, start, all, { com.motioncam.ai.People.resolve(this, sourceId, TagStore.tagsOf(this, sourceId, it)) }, colInfos(), sourceId) { f ->
             setFilter(f)
             list.setSelection(0)
         }

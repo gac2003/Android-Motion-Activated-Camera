@@ -96,6 +96,8 @@ class Prefs(ctx: Context) {
     var aiDescribe: Boolean get() = b("aiDescribe", false); set(v) = put("aiDescribe", v)
     /** Search by meaning: fingerprints of clips' pictures (a recording phone) and the words box in Search (any phone). */
     var aiMeaning: Boolean get() = b("aiMeaning", false); set(v) = put("aiMeaning", v)
+    /** Recognise faces in described clips: groups of similar faces that can be named. */
+    var aiFaces: Boolean get() = b("aiFaces", false); set(v) = put("aiFaces", v)
     /** Describing clips only while the phone is charging. */
     var aiChargingOnly: Boolean get() = b("aiChargingOnly", true); set(v) = put("aiChargingOnly", v)
     /** 0 = nearest focus, 1 = infinity. */

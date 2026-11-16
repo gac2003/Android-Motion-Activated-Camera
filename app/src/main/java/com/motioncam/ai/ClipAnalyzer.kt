@@ -122,14 +122,19 @@ object ClipAnalyzer {
     private fun work(ctx: Context) {
         var det: AiEngine.Detector? = null
         var half: Meaning.Half? = null
+        var finder: Faces.Finder? = null
         try {
             det = AiEngine.Detector(ctx, "det_l_q.tflite", "cpu", 2)
             // search by meaning: the picture half of that model too (when turned on)
             if (com.motioncam.Prefs(ctx).aiMeaning) half = try { Meaning.pictureHalf(ctx) } catch (t: Throwable) { Health.log(ctx, "AI: search by meaning couldn't start ($t)"); null }
+            // faces: the face finder and the fingerprint model (when turned on)
+            if (com.motioncam.Prefs(ctx).aiFaces) finder = try {
+                Faces.Finder(ctx.assets.open("ai/face_d.onnx").use { it.readBytes() }, ctx.assets.open("ai/face_p.onnx").use { it.readBytes() }, 2)
+            } catch (t: Throwable) { Health.log(ctx, "AI: faces couldn't start ($t)"); null }
             Diagnostics.count("AI clip descriptions: runs")
             while (pausedWhy == null) {
                 val id = synchronized(this) { queue!!.firstOrNull() } ?: break
-                val finished = try { describe(ctx, det, half, id) } catch (t: Throwable) { Health.log(ctx, "AI: a clip couldn't be described ($t)"); true }
+                val finished = try { describe(ctx, det, half, finder, id) } catch (t: Throwable) { Health.log(ctx, "AI: a clip couldn't be described ($t)"); true }
                 synchronized(this) {
                     if (finished || (tries[id] ?: 0) >= 3) { queue!!.remove(id); tries.remove(id); if (!finished) dropped++ }
                     save(ctx)
@@ -140,18 +145,24 @@ object ClipAnalyzer {
             if (pausedWhy == null) retryPush(ctx)
             // the day's fingerprints go to the backup folder once the list is empty (a few uploads a day, not one a clip)
             if (pausedWhy == null && half != null) try { Meaning.sendDays(ctx) } catch (_: Throwable) {}
+            // people: namings made on other phones come in, this phone's groups go to the backup folder
+            if (pausedWhy == null && finder != null) try { People.afterBatch(ctx) } catch (_: Throwable) {}
         } catch (t: Throwable) {
             Health.log(ctx, "AI: describing clips stopped ($t)")
             pausedWhy = "couldn't start (${t.javaClass.simpleName})"
         } finally {
             try { det?.close() } catch (_: Throwable) {}
             try { half?.close() } catch (_: Throwable) {}
+            try { finder?.close() } catch (_: Throwable) {}
             running = false
         }
     }
 
     /** Describes one clip. False when it had to stop part-way (it stays on the list). */
-    private fun describe(ctx: Context, det: AiEngine.Detector, half: Meaning.Half?, id: Long): Boolean {
+    /** A face seen on a person in one picture: how clear ([q] = how sure × size), and the face turned upright. */
+    private class Shot(val q: Float, val up: IntArray)
+
+    private fun describe(ctx: Context, det: AiEngine.Detector, half: Meaning.Half?, finder: Faces.Finder?, id: Long): Boolean {
         val clip = ClipStore.get(ctx, id) ?: return true   // deleted meanwhile
         tries[id] = (tries[id] ?: 0) + 1
         val t0 = SystemClock.elapsedRealtime()
@@ -168,6 +179,11 @@ object ClipAnalyzer {
         val prints = ArrayList<ByteArray>()
         var closeUp: android.graphics.Bitmap? = null
         var closeUpH = 0f
+        // faces: each followed person's clearest faces (at most three), from any moment of the clip
+        val shots = HashMap<Tracker.Track, ArrayList<Shot>>()
+        var px: IntArray? = null
+        // faces need a larger picture than the detector (a face is small in it)
+        val side = if (finder != null) 1280 else 640
         val r = MediaMetadataRetriever()
         try {
             r.setDataSource(ctx, clip.uri)
@@ -178,7 +194,7 @@ object ClipAnalyzer {
                 if (pausedWhy != null) return false
                 val tMs = ((i + 0.5) * dur / n).toLong()
                 // the nearest whole picture in the file (cheap to read), already turned upright and scaled down
-                val bmp = try { r.getScaledFrameAtTime(tMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 640, 640) } catch (_: Throwable) { null } ?: continue
+                val bmp = try { r.getScaledFrameAtTime(tMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, side, side) } catch (_: Throwable) { null } ?: continue
                 frames++
                 val found = det.detectBitmap(bmp, kinds)
                 val people = found.filter { it[5].toInt() == ClipFacts.PERSON }
@@ -195,6 +211,22 @@ object ClipAnalyzer {
                     } catch (_: Throwable) {}
                 }
                 val tr = tracker.add(tMs / 1000f, people)
+                if (finder != null && people.isNotEmpty()) try {
+                    val bw = bmp.width; val bh = bmp.height
+                    val buf = px?.takeIf { it.size == bw * bh } ?: IntArray(bw * bh).also { px = it }
+                    bmp.getPixels(buf, 0, bw, 0, 0, bw, bh)
+                    for (j in people.indices) {
+                        val b = people[j]
+                        val w = b[2] - b[0]; val h = b[3] - b[1]
+                        // the head is in the upper half of a person's box
+                        val f = finder.find(buf, bw, bh, ((b[0] - w * 0.1f) * bw).toInt(), (b[1] * bh).toInt(), ((b[2] + w * 0.1f) * bw).toInt(), ((b[1] + h * 0.5f) * bh).toInt()) ?: continue
+                        if (minOf(f.w, f.h) < 24f) continue   // too small to tell anyone apart
+                        val list = shots.getOrPut(tr[j]) { ArrayList() }
+                        list.add(Shot(f.score * minOf(f.w, f.h), Faces.upright(buf, bw, bh, f.pts)))
+                        list.sortByDescending { it.q }
+                        while (list.size > 3) list.removeAt(list.size - 1)
+                    }
+                } catch (_: Throwable) {}
                 for (j in people.indices) {
                     val b = people[j]; val k = tr[j]
                     val w = b[2] - b[0]; val h = b[3] - b[1]
@@ -233,6 +265,16 @@ object ClipAnalyzer {
                 ClipFacts.winner(p.top)?.let { words += "$it top" }
                 ClipFacts.winner(p.bottom)?.let { words += "$it bottom" }
             }
+        }
+        // who it was: each person's faces against the people known so far (a clear new face starts a new person)
+        if (finder != null) for (p in people) {
+            val s = shots[p] ?: continue
+            try {
+                val bmp = android.graphics.Bitmap.createBitmap(s[0].up, Faces.FACE, Faces.FACE, android.graphics.Bitmap.Config.ARGB_8888)
+                val jpg = java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray()
+                bmp.recycle()
+                People.assign(ctx, s.map { finder.print(it.up) }, jpg, s[0].q)?.let { words += "@$it" }
+            } catch (_: Throwable) {}
         }
         for ((kind, count) in seen) {
             val a = firstAt[kind]!!; val b = lastAt[kind]!!
@@ -276,6 +318,21 @@ object ClipAnalyzer {
         }
     }
 
+    /** Settings › "Delete all face data": groups, pictures and names (here and in the backup folder), and the face tags on this phone's clips. */
+    fun deleteFaces(ctx: Context, done: () -> Unit) {
+        val app = ctx.applicationContext
+        Thread {
+            try {
+                People.deleteAll(app)
+                for (c in ClipStore.list(app)) {
+                    val t = TagStore.tagsOf(app, null, c).filter { People.isFaceTag(it) }.toSet()
+                    if (t.isNotEmpty()) TagStore.change(app, null, listOf(c), emptySet(), t)
+                }
+            } catch (_: Throwable) {}
+            android.os.Handler(android.os.Looper.getMainLooper()).post(done)
+        }.start()
+    }
+
     /** Lines for Diagnostics. */
     fun report(ctx: Context, line: (String, Any?) -> Unit) {
         if (waiting < 0) load(ctx.applicationContext)
@@ -284,5 +341,7 @@ object ClipAnalyzer {
         line("Described since start", done)
         line("Last clip", if (done == 0) "none yet" else "%.0f s for %d pictures · %s".format(lastSecs, lastFrames, lastLine))
         line("Tags waiting for the folder", synchronized(this) { pendingPush?.size ?: 0 })
+        if (com.motioncam.Prefs(ctx).aiFaces) line("Faces", "${People.localCount(ctx)} people known (${People.localSamples(ctx)} samples) · " +
+            "${People.facesFound} faces since start, ${People.matched} matched someone known")
     }
 }

@@ -441,14 +441,23 @@ open class SettingsActivity : Activity() {
                 sf.toggle("Person-aware focus (AI, experimental)", prefs.aiFocus) { prefs.aiFocus = it; pro(); build() }
                 if (prefs.aiFocus) {
                     sf.note("While monitoring, the lens rests at the usual distance instead of autofocus (no hunting against glass). " +
-                        "When motion starts a clip, people are looked for a few times a second and the lens is set to their distance. " +
-                        "It runs only during clips, slows down when the phone warms and stops well before the heat pause. " +
+                        "The usual distance is learned from saved clips: each new one is looked through afterwards (camera open, charging, cool), " +
+                        "and you can teach it from clips you pick (Clips › select › More › Learn focus from these). After moving the camera, " +
+                        "start over and let it learn from clips of the new place. During a clip, someone who stays a few seconds also gets " +
+                        "the lens set to their own distance. " +
                         com.motioncam.ai.AiEngine.settingsNote(this))
                     fun chip(label: String, click: () -> Unit) = holder.addView(Ui.chip(this, label).apply { setOnClickListener { click() } },
                         LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
-                    chip("Forget learned focus") {
-                        com.motioncam.ai.FocusPilot.forget(this); pro()
-                        android.widget.Toast.makeText(this, "Forgotten: the lens rests at your manual focus distance again", android.widget.Toast.LENGTH_SHORT).show(); build()
+                    chip("Learn from the last 20 clips") {
+                        com.motioncam.ai.ClipAnalyzer.describeRecent(this, 20, all = true) { n ->
+                            android.widget.Toast.makeText(this, "$n clips will be looked through (while the camera is open and charging)", android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    chip("Start over (camera moved)") {
+                        android.app.AlertDialog.Builder(this).setTitle("Start learning again?")
+                            .setMessage("What was learned about the usual distance and the lens is forgotten. The lens rests at your manual focus distance until ${com.motioncam.ai.FocusPilot.USUAL_MIN} clips of the new place have been looked through (new ones by themselves, or ones you pick).")
+                            .setPositiveButton("Start over") { _, _ -> com.motioncam.ai.FocusPilot.forget(this); pro(); build() }
+                            .setNegativeButton("Cancel", null).show()
                     }
                     chip("Test this phone's speed again") {
                         com.motioncam.ai.AiEngine.retest(this)

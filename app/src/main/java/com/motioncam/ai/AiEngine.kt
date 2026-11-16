@@ -65,6 +65,7 @@ object AiEngine {
     private var clipFrames = 0
     private var clipPersons = 0
     private var clipMeasured = 0
+    private var clipTop = 0f
     /** What happened in the last clip, in words (Settings and Diagnostics). */
     @Volatile var lastClip = ""; private set
     @Volatile private var loadMs = 0L
@@ -92,7 +93,7 @@ object AiEngine {
         }
         h.removeCallbacks(unloadTask)   // only the pending unload: a frame being handed over must still run
         h.post {
-            try { clipFrames = 0; clipPersons = 0; clipMeasured = 0; FocusPilot.clipStart(); ensureLoaded(app) } catch (t: Throwable) { disabledWhy = "couldn't start (${t.javaClass.simpleName})"; Health.log(app, "AI: couldn't start: $t") }
+            try { clipFrames = 0; clipPersons = 0; clipMeasured = 0; clipTop = 0f; FocusPilot.clipStart(); ensureLoaded(app) } catch (t: Throwable) { disabledWhy = "couldn't start (${t.javaClass.simpleName})"; Health.log(app, "AI: couldn't start: $t") }
         }
     }
 
@@ -107,7 +108,8 @@ object AiEngine {
             val e = FocusPilot.lastEst
             lastClip = when {
                 clipFrames > 0 -> "$clipFrames pictures looked at, $clipPersons with a person, $clipMeasured measured" +
-                    (if (clipMeasured > 0 && !e.isNaN()) " (last: " + (if (e < 0.05f) "far" else "%.1f m".format(1 / e)) + " by ${FocusPilot.lastHow})" else "")
+                    (if (clipMeasured > 0 && !e.isNaN()) " (last: " + (if (e < 0.05f) "far" else "%.1f m".format(1 / e)) + " by ${FocusPilot.lastHow})" else "") +
+                    (if (clipPersons == 0) " (closest to a person: %.0f%% sure, %.0f%% needed)".format(clipTop * 100, MIN_SCORE * 100) else "")
                 disabledWhy != null -> "nothing looked at: off on this phone ($disabledWhy)"
                 AiGovernor.level == AiGovernor.OFF -> "nothing looked at: paused for heat (${AiGovernor.why})"
                 !loaded -> "nothing looked at: the clip ended before the models were ready"
@@ -169,6 +171,7 @@ object AiEngine {
         val t1 = SystemClock.elapsedRealtime()
         msDetAvg = if (frames == 0L) (t1 - t0).toFloat() else msDetAvg * 0.9f + (t1 - t0) * 0.1f
         frames++; clipFrames++
+        if (det.topScore > clipTop) clipTop = det.topScore
         // the nearest person: the tallest box
         var best: FloatArray? = null
         for (b in boxes) if (best == null || b[3] - b[1] > best[3] - best[1]) best = b
@@ -335,7 +338,7 @@ object AiEngine {
         val speed = if (b.isEmpty()) "This phone's speed is tested with the first clip after turning this on."
             else "Runs on this phone's ${backendText(b)}: about %.0f ms a frame.".format(s.getFloat("msSmall", 0f) + s.getFloat("msPose", 0f))
         val u = FocusPilot.usual(ctx)
-        val learned = if (u.isNaN()) "Learning the usual distance: ${FocusPilot.clipsLearned(ctx)} of ${FocusPilot.USUAL_MIN} clips with a person. Until then the lens rests at your manual focus distance."
+        val learned = if (u.isNaN()) "Learning the usual distance: ${FocusPilot.clipsLearned(ctx)} of ${FocusPilot.USUAL_MIN} clips with a person (saved clips are looked through while charging). Until then the lens rests at your manual focus distance."
             else "Usual distance: " + (if (u < 0.1f) "far (∞)" else "%.1f m".format(1 / u)) + " (from ${FocusPilot.clipsLearned(ctx)} clips)."
         val last = lastClip.ifEmpty { s.getString("lastClip", "") ?: "" }
         return "$speed $learned" + (if (last.isEmpty()) "" else " Last clip: $last.")
@@ -414,6 +417,8 @@ object AiEngine {
         private val boxes: FloatBuffer
         private val anchors: FloatArray
         private val outputs = HashMap<Int, Any>()
+        /** The strongest sign of a person in the last picture looked at (0..1; [MIN_SCORE] counts as one). */
+        var topScore = 0f; private set
 
         init {
             var si = -1; var bi = -1
@@ -468,8 +473,10 @@ object AiEngine {
             AiImage.sample(f, rotation, 0f, 0f, 1f, 1f, n, rgb)
             infer()
             val found = ArrayList<FloatArray>()
+            var top = 0f
             for (i in 0 until count) {
                 val s = scores.get(i * classes + PERSON)
+                if (s > top) top = s
                 if (s < MIN_SCORE) continue
                 val ay = anchors[i * 4]; val ax = anchors[i * 4 + 1]; val ah = anchors[i * 4 + 2]; val aw = anchors[i * 4 + 3]
                 val yc = boxes.get(i * 4) * ah + ay; val xc = boxes.get(i * 4 + 1) * aw + ax
@@ -477,6 +484,7 @@ object AiEngine {
                 found.add(floatArrayOf(((xc - w / 2) / n).coerceIn(0f, 1f), ((yc - h / 2) / n).coerceIn(0f, 1f),
                     ((xc + w / 2) / n).coerceIn(0f, 1f), ((yc + h / 2) / n).coerceIn(0f, 1f), s))
             }
+            topScore = top
             found.sortByDescending { it[4] }
             val keep = ArrayList<FloatArray>()
             for (b in found) {
@@ -537,7 +545,7 @@ object AiEngine {
     }
 
     /** Body points of one person: 33 points (nose, eyes, ears, shoulders, hips, knees, ankles…) from a square cut-out. */
-    private class Pose(ctx: Context) {
+    internal class Pose(ctx: Context) {
         private val net = Net(ctx, "pose.tflite", "cpu", 2)
         private val n: Int = net.tfl.getInputTensor(0).shape()[1]
         private val rgb = ByteArray(n * n * 3)
@@ -587,6 +595,29 @@ object AiEngine {
             val u0 = cx - side / 2 / pw; val u1 = cx + side / 2 / pw
             val v0 = cy - side / 2 / ph; val v1 = cy + side / 2 / ph
             AiImage.sample(f, rotation, u0, v0, u1, v1, n, rgb)
+            return points(u0, v0, u1, v1)
+        }
+
+        /** The same for a saved clip's picture ([px]: [w] × [h] pixels, already upright). */
+        fun runPixels(px: IntArray, w: Int, h: Int, box: FloatArray): Boolean {
+            val cx = (box[0] + box[2]) / 2; val cy = (box[1] + box[3]) / 2
+            val side = maxOf((box[2] - box[0]) * w, (box[3] - box[1]) * h) * 1.25f
+            val u0 = cx - side / 2 / w; val u1 = cx + side / 2 / w
+            val v0 = cy - side / 2 / h; val v1 = cy + side / 2 / h
+            var o = 0
+            for (oy in 0 until n) {
+                val fy = (v0 + (oy + 0.5f) / n * (v1 - v0)) * h
+                for (ox in 0 until n) {
+                    val fx = (u0 + (ox + 0.5f) / n * (u1 - u0)) * w
+                    val c = if (fx < 0f || fy < 0f || fx >= w || fy >= h) 0 else px[fy.toInt() * w + fx.toInt()]
+                    rgb[o] = (c shr 16).toByte(); rgb[o + 1] = (c shr 8).toByte(); rgb[o + 2] = c.toByte()
+                    o += 3
+                }
+            }
+            return points(u0, v0, u1, v1)
+        }
+
+        private fun points(u0: Float, v0: Float, u1: Float, v1: Float): Boolean {
             infer()
             lmBuf.rewind(); presBuf.rewind()
             val lm = lmBuf.asFloatBuffer()

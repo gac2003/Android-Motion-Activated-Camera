@@ -45,6 +45,7 @@ object ClipAnalyzer {
     @Volatile private var lastFrames = 0
     @Volatile private var lastWarmAt = 0L
     @Volatile private var lastLine = ""
+    @Volatile private var learned = 0
 
     @Synchronized
     private fun load(ctx: Context) {
@@ -63,7 +64,8 @@ object ClipAnalyzer {
 
     /** A clip was saved and kept: it waits to be described (when the setting is on). */
     fun onClipSaved(ctx: Context, clipId: Long) {
-        if (!com.motioncam.Prefs(ctx).aiDescribe) return
+        val p = com.motioncam.Prefs(ctx)
+        if (!p.aiDescribe && !p.aiFocus) return   // person-aware focus learns from saved clips too
         enqueue(ctx.applicationContext, listOf(clipId))
     }
 
@@ -76,13 +78,36 @@ object ClipAnalyzer {
         save(ctx)
     }
 
-    /** Settings › "Describe the last 20 clips": those without a description yet join the list (newest last). */
-    fun describeRecent(ctx: Context, count: Int, doneCb: (Int) -> Unit) {
+    /** How large things appear in a clip's video (see CameraEngine.videoGeom), kept when it is saved (the newest 300). */
+    @Synchronized
+    fun geometry(ctx: Context, clipId: Long, g: FloatArray?) {
+        if (g == null || g.size < 2) return
+        val p = com.motioncam.Prefs(ctx)
+        if (!p.aiDescribe && !p.aiFocus) return
+        val s = sp(ctx)
+        val all = (s.getString("geom", "") ?: "").split(',').filter { it.isNotEmpty() && !it.startsWith("$clipId:") }.takeLast(299)
+        s.edit().putString("geom", (all + "$clipId:${g[0]}:${g[1]}").joinToString(",")).apply()
+    }
+
+    private fun geometryOf(ctx: Context, clipId: Long): FloatArray? {
+        val e = (sp(ctx).getString("geom", "") ?: "").split(',').lastOrNull { it.startsWith("$clipId:") }?.split(':') ?: return null
+        val a = e.getOrNull(1)?.toFloatOrNull() ?: return null; val b = e.getOrNull(2)?.toFloatOrNull() ?: return null
+        return floatArrayOf(a, b)
+    }
+
+    /** Clips picked by hand (Clips › select › More › "Learn focus from these") join the list. */
+    fun learnFrom(ctx: Context, ids: List<Long>) = enqueue(ctx.applicationContext, ids)
+
+    /**
+     * Settings › "Describe the last 20 clips" / "Learn from the last 20 clips": they join the list (newest last);
+     * with [all] false only those without a description yet.
+     */
+    fun describeRecent(ctx: Context, count: Int, all: Boolean = false, doneCb: (Int) -> Unit) {
         val app = ctx.applicationContext
         Thread {
             val ids = try {
                 ClipStore.list(app).sortedByDescending { it.startMs }.take(count)
-                    .filter { c -> TagStore.tagsOf(app, null, c).none { ClipFacts.isAi(it) } }.map { it.id }.reversed()
+                    .filter { c -> all || TagStore.tagsOf(app, null, c).none { ClipFacts.isAi(it) } }.map { it.id }.reversed()
             } catch (_: Exception) { emptyList() }
             enqueue(app, ids)
             android.os.Handler(android.os.Looper.getMainLooper()).post { doneCb(ids.size) }
@@ -123,18 +148,23 @@ object ClipAnalyzer {
         var det: AiEngine.Detector? = null
         var half: Meaning.Half? = null
         var finder: Faces.Finder? = null
+        var pose: AiEngine.Pose? = null
+        val prefs = com.motioncam.Prefs(ctx)
+        val describeOn = prefs.aiDescribe
         try {
             det = AiEngine.Detector(ctx, "det_l_q.tflite", "cpu", 2)
             // search by meaning: the picture half of that model too (when turned on)
-            if (com.motioncam.Prefs(ctx).aiMeaning) half = try { Meaning.pictureHalf(ctx) } catch (t: Throwable) { Health.log(ctx, "AI: search by meaning couldn't start ($t)"); null }
+            // person-aware focus: body points, to measure how far away the people in a clip were
+            if (prefs.aiFocus) pose = try { AiEngine.Pose(ctx) } catch (t: Throwable) { Health.log(ctx, "AI: body points couldn't start ($t)"); null }
+            if (describeOn && prefs.aiMeaning) half = try { Meaning.pictureHalf(ctx) } catch (t: Throwable) { Health.log(ctx, "AI: search by meaning couldn't start ($t)"); null }
             // faces: the face finder and the fingerprint model (when turned on)
-            if (com.motioncam.Prefs(ctx).aiFaces) finder = try {
+            if (describeOn && prefs.aiFaces) finder = try {
                 Faces.Finder(ctx.assets.open("ai/face_d.onnx").use { it.readBytes() }, ctx.assets.open("ai/face_p.onnx").use { it.readBytes() }, 2)
             } catch (t: Throwable) { Health.log(ctx, "AI: faces couldn't start ($t)"); null }
             Diagnostics.count("AI clip descriptions: runs")
             while (pausedWhy == null) {
                 val id = synchronized(this) { queue!!.firstOrNull() } ?: break
-                val finished = try { describe(ctx, det, half, finder, id) } catch (t: Throwable) { Health.log(ctx, "AI: a clip couldn't be described ($t)"); true }
+                val finished = try { describe(ctx, det, half, finder, pose, describeOn, id) } catch (t: Throwable) { Health.log(ctx, "AI: a clip couldn't be described ($t)"); true }
                 synchronized(this) {
                     if (finished || (tries[id] ?: 0) >= 3) { queue!!.remove(id); tries.remove(id); if (!finished) dropped++ }
                     save(ctx)
@@ -154,6 +184,7 @@ object ClipAnalyzer {
             try { det?.close() } catch (_: Throwable) {}
             try { half?.close() } catch (_: Throwable) {}
             try { finder?.close() } catch (_: Throwable) {}
+            try { pose?.close() } catch (_: Throwable) {}
             running = false
         }
     }
@@ -162,7 +193,8 @@ object ClipAnalyzer {
     /** A face seen on a person in one picture: how clear ([q] = how sure × size), and the face turned upright. */
     private class Shot(val q: Float, val up: IntArray)
 
-    private fun describe(ctx: Context, det: AiEngine.Detector, half: Meaning.Half?, finder: Faces.Finder?, id: Long): Boolean {
+    private fun describe(ctx: Context, det: AiEngine.Detector, half: Meaning.Half?, finder: Faces.Finder?, pose: AiEngine.Pose?,
+                         describeOn: Boolean, id: Long): Boolean {
         val clip = ClipStore.get(ctx, id) ?: return true   // deleted meanwhile
         tries[id] = (tries[id] ?: 0) + 1
         val t0 = SystemClock.elapsedRealtime()
@@ -182,6 +214,9 @@ object ClipAnalyzer {
         // faces: each followed person's clearest faces (at most three), from any moment of the clip
         val shots = HashMap<Tracker.Track, ArrayList<Shot>>()
         var px: IntArray? = null
+        // person-aware focus: how far away the nearest person was in each picture (diopters), with the clip's own lens
+        val dists = ArrayList<Float>()
+        var geom = geometryOf(ctx, id) ?: com.motioncam.EngineHost.peek()?.videoGeom()
         // faces need a larger picture than the detector (a face is small in it)
         val side = if (finder != null) 1280 else 640
         val r = MediaMetadataRetriever()
@@ -211,6 +246,17 @@ object ClipAnalyzer {
                     } catch (_: Throwable) {}
                 }
                 val tr = tracker.add(tMs / 1000f, people)
+                if (pose != null && people.isNotEmpty()) try {
+                    val bw = bmp.width; val bh = bmp.height
+                    // no lens known for this clip (an old clip, camera closed): a typical phone main camera
+                    val g = geom ?: (if (bw >= bh) floatArrayOf(0.75f, 0.75f * bw / bh) else floatArrayOf(0.75f * bh / bw, 0.75f)).also { geom = it }
+                    val buf = px?.takeIf { it.size == bw * bh } ?: IntArray(bw * bh).also { px = it }
+                    bmp.getPixels(buf, 0, bw, 0, 0, bw, bh)
+                    val big = people.maxByOrNull { it[3] - it[1] }!!
+                    val ok = pose.runPixels(buf, bw, bh, big)
+                    val est = FocusPilot.estimate(if (ok) pose.u else null, if (ok) pose.v else null, if (ok) pose.vis else null, big[1], big[3], g[0], g[1]).first
+                    if (!est.isNaN()) dists.add(est)
+                } catch (_: Throwable) {}
                 if (finder != null && people.isNotEmpty()) try {
                     val bw = bmp.width; val bh = bmp.height
                     val buf = px?.takeIf { it.size == bw * bh } ?: IntArray(bw * bh).also { px = it }
@@ -253,6 +299,17 @@ object ClipAnalyzer {
             try { Meaning.keep(ctx, clip.name, prints) } catch (_: Throwable) {}
         }
         if (frames == 0) return true   // unreadable: nothing to say
+        // the usual distance learns from this clip: the middle of where its people were
+        if (dists.isNotEmpty()) try {
+            dists.sort()
+            FocusPilot.learnClip(ctx, clip.name, clip.startMs, dists[dists.size / 2])
+            learned++
+        } catch (_: Throwable) {}
+        if (!describeOn) {   // only learning focus on this phone: no tags
+            done++; lastFrames = frames; lastSecs = (SystemClock.elapsedRealtime() - t0) / 1000f
+            lastLine = if (dists.isEmpty()) "no person to measure" else "people about %.1f m away".format(1f / dists[dists.size / 2].coerceAtLeast(0.02f))
+            return true
+        }
 
         val words = ArrayList<String>()
         val people = tracker.people()
@@ -338,7 +395,7 @@ object ClipAnalyzer {
         if (waiting < 0) load(ctx.applicationContext)
         line("Clips waiting", "$waiting (at most $MAX_QUEUE; $dropped dropped)")
         line("Working now", if (running) "yes" else "no" + (pausedWhy?.let { " · $it" } ?: ""))
-        line("Described since start", done)
+        line("Looked through since start", "$done ($learned taught the usual focus distance)")
         line("Last clip", if (done == 0) "none yet" else "%.0f s for %d pictures · %s".format(lastSecs, lastFrames, lastLine))
         line("Tags waiting for the folder", synchronized(this) { pendingPush?.size ?: 0 })
         if (com.motioncam.Prefs(ctx).aiFaces) line("Faces", "${People.localCount(ctx)} people known (${People.localSamples(ctx)} samples) · " +

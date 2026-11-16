@@ -611,6 +611,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             ClipStore.finish(ctx, pc, ok, recordStartedWall)
             if (ok) {
                 val id = android.content.ContentUris.parseId(pc.uri)
+                com.motioncam.ai.ClipAnalyzer.geometry(ctx, id, videoGeom())
                 val preRoll = pre?.preRollMs ?: 0L
                 savePeak(id, preRoll + (peakElapsed - recordStartedElapsed), preRoll)
                 if (held != null) held.first(id, held.second) else com.motioncam.cloud.CloudSync.onClipSaved(ctx, id)
@@ -636,6 +637,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             ClipStore.finish(ctx, it, ok, recordStartedWall)
             if (ok) {
                 val id = android.content.ContentUris.parseId(it.uri)
+                com.motioncam.ai.ClipAnalyzer.geometry(ctx, id, videoGeom())
                 savePeak(id, peakElapsed - recordStartedElapsed)
                 if (held != null) held.first(id, held.second) else com.motioncam.cloud.CloudSync.onClipSaved(ctx, id)
             }
@@ -915,6 +917,30 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         return com.motioncam.ai.AiEngine.Info(rot, if (turned) fy else fx, if (turned) fx else fy, c.minFocusDiopter, now)
     }
 
+    /**
+     * How large things appear in the recorded video, upright (the lens's focal length in picture widths and heights),
+     * with the lens, zoom and crop in use now; null while the camera isn't open. Kept with each clip so a clip looked
+     * through later is measured with the lens it was recorded with.
+     */
+    fun videoGeom(): FloatArray? {
+        val c = caps ?: return null
+        val rot = recordRotation()
+        val z = if (c.canZoom) prefs.zoom.coerceIn(c.zoomMin, c.zoomMax) else 1f
+        val w = recordSize.width; val hh = recordSize.height
+        val aS = w.toFloat() / hh
+        var fx: Float; var fy: Float
+        if (c.focalMm > 0f && c.sensorWmm > 0f && c.sensorHmm > 0f) {
+            val aP = c.sensorWmm / c.sensorHmm
+            val fracW = if (aS >= aP) 1f else aS / aP
+            val fracH = if (aS >= aP) aP / aS else 1f
+            fx = c.focalMm * z / (c.sensorWmm * fracW); fy = c.focalMm * z / (c.sensorHmm * fracH)
+        } else { fx = 0.75f * z; fy = fx * aS }
+        // a cropped recording shows only part of the picture: things look larger in it
+        fx *= w.toFloat() / encodeSize.width.coerceAtLeast(1); fy *= hh.toFloat() / encodeSize.height.coerceAtLeast(1)
+        val turned = rot == 90 || rot == 270
+        return floatArrayOf(if (turned) fy else fx, if (turned) fx else fy)
+    }
+
     private var rowBuf = ByteArray(0)
     private var packBuf = ByteArray(0)
 
@@ -1046,7 +1072,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         // AI heat rules: read only while its models are in memory (during clips and a few minutes after)
         if (prefs.aiFocus && (aiInClip || com.motioncam.ai.AiEngine.loaded)) com.motioncam.ai.AiGovernor.sample(ctx, bat.tempC, thermalStatus(), prefs.maxTempC)
         // describing saved clips: may it run now? (asks Android's heat level only while clips are waiting)
-        if (prefs.aiDescribe && com.motioncam.ai.ClipAnalyzer.waiting != 0) com.motioncam.ai.ClipAnalyzer.tick(ctx, true, prefs.aiChargingOnly,
+        if ((prefs.aiDescribe || prefs.aiFocus) && com.motioncam.ai.ClipAnalyzer.waiting != 0) com.motioncam.ai.ClipAnalyzer.tick(ctx, true, prefs.aiChargingOnly,
             bat.charging, bat.tempC, thermalStatus(), prefs.maxTempC, mode == Mode.RECORDING)
         else if (com.motioncam.ai.ClipAnalyzer.running) com.motioncam.ai.ClipAnalyzer.tick(ctx, false, true, false, 0f, 0, 0, false)
 

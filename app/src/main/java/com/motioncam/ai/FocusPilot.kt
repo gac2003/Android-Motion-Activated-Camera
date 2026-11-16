@@ -27,14 +27,16 @@ object FocusPilot {
     private const val LOST_MS = 2000L
     private const val BIN = 0.25f
     private const val BINS = 17
-    const val USUAL_MIN = 20
+    const val USUAL_MIN = 10
     private const val USUAL_KEEP = 200
+    private const val USUAL_RECENT = 60        // the usual distance follows the newest clips (a camera that was moved)
 
     // ---- what was learned (kept in a small preferences file)
     private var loaded = false
     private val offSum = FloatArray(BINS)
     private val offN = IntArray(BINS)
-    private val usual = ArrayList<Float>()
+    private val usual = ArrayList<Float>()          // one distance per clip (diopters, as estimated), oldest first
+    private val usualKeys = ArrayList<String>()     // which clip each is from (its name), or "live:<time>" for one seen live
     private var dirty = false
 
     // ---- this clip
@@ -68,7 +70,11 @@ object FocusPilot {
                 val p = e.split(':')
                 if (i < BINS && p.size == 2) { offSum[i] = p[0].toFloatOrNull() ?: 0f; offN[i] = p[1].toIntOrNull() ?: 0 }
             }
-            s.getString("usual", "")!!.split(',').mapNotNull { it.toFloatOrNull() }.forEach { usual += it }
+            for (e in s.getString("usual2", "")!!.split(',')) {
+                val p = e.split('|')
+                val v = p.getOrNull(1)?.toFloatOrNull() ?: continue
+                usualKeys += p[0]; usual += v
+            }
         } catch (_: Exception) {}
     }
 
@@ -79,7 +85,7 @@ object FocusPilot {
         try {
             sp(ctx).edit()
                 .putString("offsets", (0 until BINS).joinToString(",") { "${offSum[it]}:${offN[it]}" })
-                .putString("usual", usual.joinToString(","))
+                .putString("usual2", usual.indices.joinToString(",") { "${usualKeys[it]}|${usual[it]}" })
                 .apply()
         } catch (_: Exception) {}
     }
@@ -88,7 +94,7 @@ object FocusPilot {
     @Synchronized
     fun forget(ctx: Context) {
         load(ctx)
-        offSum.fill(0f); offN.fill(0); usual.clear()
+        offSum.fill(0f); offN.fill(0); usual.clear(); usualKeys.clear()
         dirty = false
         try { sp(ctx).edit().clear().apply() } catch (_: Exception) {}
     }
@@ -98,7 +104,33 @@ object FocusPilot {
     fun usual(ctx: Context): Float {
         load(ctx)
         if (usual.size < USUAL_MIN) return Float.NaN
-        return usual.sorted()[usual.size / 2]
+        val recent = usual.takeLast(USUAL_RECENT).sorted()
+        return recent[recent.size / 2]
+    }
+
+    @Synchronized
+    private fun addSample(key: String, diopter: Float) {
+        val i = usualKeys.indexOf(key)
+        if (i >= 0) { usualKeys.removeAt(i); usual.removeAt(i) }
+        usualKeys += key; usual += diopter
+        while (usual.size > USUAL_KEEP) { usual.removeAt(0); usualKeys.removeAt(0) }
+        dirty = true
+    }
+
+    /**
+     * A saved clip was looked through afterwards: the distance of the people in it ([diopter], as estimated) counts
+     * towards the usual distance. Replaces what was learned live during that same clip (it started at [startMs]),
+     * and an earlier look at the same clip.
+     */
+    @Synchronized
+    fun learnClip(ctx: Context, clipName: String, startMs: Long, diopter: Float) {
+        load(ctx)
+        for (i in usualKeys.indices.reversed()) {
+            val t = usualKeys[i].removePrefix("live:").takeIf { usualKeys[i].startsWith("live:") }?.toLongOrNull() ?: continue
+            if (Math.abs(t - startMs) < 180_000L) { usualKeys.removeAt(i); usual.removeAt(i) }
+        }
+        addSample(clipName, diopter)
+        save(ctx)
     }
 
     @Synchronized fun clipsLearned(ctx: Context): Int { load(ctx); return usual.size }
@@ -107,7 +139,7 @@ object FocusPilot {
     /** Resting focus (diopters): the usual distance once learned, else [manual] (your manual focus setting). */
     fun resting(ctx: Context, manual: Float, maxD: Float): Float {
         val u = usual(ctx)
-        return (if (u.isNaN()) manual else u).coerceIn(0f, maxD)
+        return (if (u.isNaN()) manual else corrected(u)).coerceIn(0f, maxD)
     }
 
     private fun bin(est: Float) = (est / BIN).toInt().coerceIn(0, BINS - 1)
@@ -154,9 +186,7 @@ object FocusPilot {
         phase = 0
         if (clipN >= 1) synchronized(this) {
             load(ctx)
-            usual += clipSum / clipN
-            while (usual.size > USUAL_KEEP) usual.removeAt(0)
-            dirty = true
+            addSample("live:" + System.currentTimeMillis(), clipSum / clipN)
         }
         clipSum = 0f; clipN = 0
         save(ctx)
@@ -220,7 +250,7 @@ object FocusPilot {
             }
         }
         val t = target
-        if (!t.isNaN()) { clipSum += t; clipN++ }
+        clipSum += est; clipN++
         return t != before && !(t.isNaN() && before.isNaN())
     }
 

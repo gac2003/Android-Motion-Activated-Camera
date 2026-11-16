@@ -39,7 +39,7 @@ object AiEngine {
     class Info(val rotation: Int, val fu: Float, val fv: Float, val maxDiopter: Float, val takenAt: Long)
 
     private const val UNLOAD_AFTER_MS = 3 * 60_000L
-    private const val BENCH_VERSION = 1
+    private const val BENCH_VERSION = 2
     private const val PERSON = 0
     private const val MIN_SCORE = 0.45f
 
@@ -54,7 +54,6 @@ object AiEngine {
 
     // ---- models (AI thread only)
     private var small: Detector? = null
-    private var large: Detector? = null
     private var pose: Pose? = null
 
     // ---- state for Settings / Diagnostics
@@ -62,7 +61,12 @@ object AiEngine {
     @Volatile var backend = ""; private set
     @Volatile var disabledWhy: String? = null; private set
     @Volatile private var intervalMs = 250L
-    @Volatile private var useLarge = false
+    // the clip being recorded: frames looked at, with a person, with a measured person (AI thread)
+    private var clipFrames = 0
+    private var clipPersons = 0
+    private var clipMeasured = 0
+    /** What happened in the last clip, in words (Settings and Diagnostics). */
+    @Volatile var lastClip = ""; private set
     @Volatile private var loadMs = 0L
     @Volatile private var frames = 0L
     @Volatile private var persons = 0L
@@ -88,7 +92,7 @@ object AiEngine {
         }
         h.removeCallbacks(unloadTask)   // only the pending unload: a frame being handed over must still run
         h.post {
-            try { FocusPilot.clipStart(); ensureLoaded(app) } catch (t: Throwable) { disabledWhy = "couldn't start (${t.javaClass.simpleName})"; Health.log(app, "AI: couldn't start: $t") }
+            try { clipFrames = 0; clipPersons = 0; clipMeasured = 0; FocusPilot.clipStart(); ensureLoaded(app) } catch (t: Throwable) { disabledWhy = "couldn't start (${t.javaClass.simpleName})"; Health.log(app, "AI: couldn't start: $t") }
         }
     }
 
@@ -98,7 +102,21 @@ object AiEngine {
         val app = ctx.applicationContext
         inClip = false
         val h = handler ?: return
-        h.post { try { FocusPilot.clipEnd(app) } catch (_: Throwable) {}; onFocusChanged?.invoke() }
+        h.post {
+            // what the AI did in this clip, in words: the answer to "is it working?" without guessing
+            val e = FocusPilot.lastEst
+            lastClip = when {
+                clipFrames > 0 -> "$clipFrames pictures looked at, $clipPersons with a person, $clipMeasured measured" +
+                    (if (clipMeasured > 0 && !e.isNaN()) " (last: " + (if (e < 0.05f) "far" else "%.1f m".format(1 / e)) + " by ${FocusPilot.lastHow})" else "")
+                disabledWhy != null -> "nothing looked at: off on this phone ($disabledWhy)"
+                AiGovernor.level == AiGovernor.OFF -> "nothing looked at: paused for heat (${AiGovernor.why})"
+                !loaded -> "nothing looked at: the clip ended before the models were ready"
+                else -> "nothing looked at"
+            }
+            try { sp(app).edit().putString("lastClip", lastClip).apply() } catch (_: Throwable) {}
+            try { FocusPilot.clipEnd(app) } catch (_: Throwable) {}
+            onFocusChanged?.invoke()
+        }
         h.removeCallbacks(unloadTask)
         h.postDelayed(unloadTask, UNLOAD_AFTER_MS)   // once; cancelled by the next clip
     }
@@ -144,13 +162,13 @@ object AiEngine {
     // ================================================================== AI thread
 
     private fun process(f: Frame, info: Info) {
-        val det = (if (useLarge && AiGovernor.level == AiGovernor.FULL) large else null) ?: small ?: return
+        val det = small ?: return
         if (!inClip) return
         val t0 = SystemClock.elapsedRealtime()
         val boxes = det.detect(f, info.rotation)
         val t1 = SystemClock.elapsedRealtime()
         msDetAvg = if (frames == 0L) (t1 - t0).toFloat() else msDetAvg * 0.9f + (t1 - t0) * 0.1f
-        frames++
+        frames++; clipFrames++
         // the nearest person: the tallest box
         var best: FloatArray? = null
         for (b in boxes) if (best == null || b[3] - b[1] > best[3] - best[1]) best = b
@@ -159,7 +177,7 @@ object AiEngine {
             if (FocusPilot.target.isNaN()) onFocusChanged?.invoke()
             return
         }
-        persons++
+        persons++; clipPersons++
         val p = pose
         var ok = false
         if (p != null) {
@@ -169,6 +187,7 @@ object AiEngine {
         }
         val (est, how) = FocusPilot.estimate(if (ok) p!!.u else null, if (ok) p!!.v else null, if (ok) p!!.vis else null, best[1], best[3], info.fu, info.fv)
         if (est.isNaN()) return
+        clipMeasured++
         // sharpness inside the person: the chest when the body points are known, else the middle of the box
         var u0 = best[0] + (best[2] - best[0]) * 0.25f; var u1 = best[2] - (best[2] - best[0]) * 0.25f
         var v0 = best[1] + (best[3] - best[1]) * 0.15f; var v1 = best[1] + (best[3] - best[1]) * 0.6f
@@ -196,23 +215,22 @@ object AiEngine {
         val key = "$BENCH_VERSION|${Build.FINGERPRINT}"
         if (s.getString("benchKey", "") != key || (s.getString("backend", "") ?: "") in bad || s.getString("backend", "").isNullOrEmpty()) benchmark(ctx, bad, key)
         val b = s.getString("backend", "") ?: ""
-        val msSmall = s.getFloat("msSmall", 9999f); val msLarge = s.getFloat("msLarge", 9999f); val msPose = s.getFloat("msPose", 9999f)
+        val msSmall = s.getFloat("msSmall", 9999f); val msPose = s.getFloat("msPose", 9999f)
         if (b.isEmpty() || msSmall + msPose > 400f) {
             disabledWhy = if (b.isEmpty()) "the detector couldn't be run on this phone" else "this phone is too slow for it (%.0f ms a frame)".format(msSmall + msPose)
             Health.log(ctx, "AI: off on this phone: $disabledWhy")
             return
         }
-        // the larger detector where the phone is fast enough; fewer frames a second where it's slow
-        useLarge = msLarge + msPose <= 110f
-        val per = (if (useLarge) msLarge else msSmall) + msPose
+        // live focus uses the small detector (it loads and answers fastest; the large one describes clips afterwards);
+        // fewer frames a second where the phone is slow
+        val per = msSmall + msPose
         intervalMs = if (per <= 150f) 250L else if (per <= 300f) 500L else 1000L
         val t0 = SystemClock.elapsedRealtime()
         s.edit().putString("trying", b).commit()
         try {
             small = Detector(ctx, if (b == "gpu") "det_s_f.tflite" else "det_s_q.tflite", b)
-            if (useLarge) large = Detector(ctx, if (b == "gpu") "det_l_f.tflite" else "det_l_q.tflite", b)
             pose = Pose(ctx)
-            small!!.warm(); large?.warm(); pose!!.warm()
+            small!!.warm(); pose!!.warm()
         } catch (t: Throwable) {
             closeModels()
             // it worked in the timing run but not now: time everything again next clip
@@ -227,44 +245,59 @@ object AiEngine {
         Diagnostics.count("AI models loaded")
     }
 
-    /** Times the small detector on each way that works here, then the large one and the body points on the winner. */
+    private fun overlap(a: FloatArray, b: FloatArray): Float {
+        val ix = (minOf(a[2], b[2]) - maxOf(a[0], b[0])).coerceAtLeast(0f); val iy = (minOf(a[3], b[3]) - maxOf(a[1], b[1])).coerceAtLeast(0f)
+        val union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - ix * iy
+        return if (union <= 0f) 0f else ix * iy / union
+    }
+
+    /**
+     * Times the detector on each way that works here (processor, graphics chip, AI chip) and the body points, and
+     * checks each way on a test picture of a person: a chip that answers fast but wrong (it happens) is not used.
+     */
     private fun benchmark(ctx: Context, bad: Set<String>, key: String) {
         val s = sp(ctx)
         var best = ""; var bestMs = Float.MAX_VALUE
         val notes = ArrayList<String>()
+        val test = try { ctx.assets.open("ai/test.jpg").use { android.graphics.BitmapFactory.decodeStream(it) } } catch (_: Throwable) { null }
+        var ref: FloatArray? = null
         for (b in listOf("cpu", "gpu", "nnapi")) {
             if (b in bad) { notes += "$b: not used (it stopped MotionCam before)"; continue }
             s.edit().putString("trying", b).commit()
+            var wrong = false
             val ms = try {
                 val d = Detector(ctx, if (b == "gpu") "det_s_f.tflite" else "det_s_q.tflite", b)
-                try { d.time() } finally { d.close() }
+                try {
+                    val t = d.time()
+                    if (test != null) {
+                        val found = d.detectBitmap(test, intArrayOf(PERSON)).firstOrNull()
+                        if (b == "cpu") ref = found
+                        else { val r = ref; if (r != null && (found == null || overlap(found, r) < 0.5f)) wrong = true }
+                    }
+                    t
+                } finally { d.close() }
             } catch (t: Throwable) { notes += "$b: doesn't work here"; -1f }
             s.edit().putString("trying", "").commit()
-            if (ms > 0) { notes += "$b: %.0f ms".format(ms); if (ms < bestMs) { bestMs = ms; best = b } }
+            if (wrong) notes += "$b: %.0f ms but wrong results, not used".format(ms)
+            else if (ms > 0) { notes += "$b: %.0f ms".format(ms); if (ms < bestMs) { bestMs = ms; best = b } }
         }
-        var msLarge = 9999f; var msPose = 9999f
+        try { test?.recycle() } catch (_: Throwable) {}
+        var msPose = 9999f
         if (best.isNotEmpty()) {
-            s.edit().putString("trying", best).commit()
-            try {
-                val d = Detector(ctx, if (best == "gpu") "det_l_f.tflite" else "det_l_q.tflite", best)
-                try { msLarge = d.time() } finally { d.close() }
-            } catch (_: Throwable) {}
             try {
                 val p = Pose(ctx)
                 try { msPose = p.time() } finally { p.close() }
-            } catch (_: Throwable) {}
-            s.edit().putString("trying", "").commit()
+            } catch (t: Throwable) { notes += "body points: don't work here ($t)" }
         }
-        s.edit().putString("benchKey", key).putString("backend", best).putFloat("msSmall", bestMs).putFloat("msLarge", msLarge)
+        s.edit().putString("benchKey", key).putString("backend", best).putFloat("msSmall", bestMs)
             .putFloat("msPose", msPose).putString("benchNotes", notes.joinToString(" · ")).commit()
-        Health.log(ctx, "AI speed test: " + notes.joinToString(", ") + (if (best.isNotEmpty()) " → $best; large detector %.0f ms, body points %.0f ms".format(msLarge, msPose) else " → nothing works"))
+        Health.log(ctx, "AI speed test: " + notes.joinToString(", ") + (if (best.isNotEmpty()) " → $best; body points %.0f ms".format(msPose) else " → nothing works"))
     }
 
     private fun closeModels() {
         try { small?.close() } catch (_: Throwable) {}
-        try { large?.close() } catch (_: Throwable) {}
         try { pose?.close() } catch (_: Throwable) {}
-        small = null; large = null; pose = null
+        small = null; pose = null
     }
 
     private val unloadTask = Runnable { unload() }
@@ -300,12 +333,12 @@ object AiEngine {
         disabledWhy?.let { return "Off on this phone: $it." }
         val b = s.getString("backend", "") ?: ""
         val speed = if (b.isEmpty()) "This phone's speed is tested with the first clip after turning this on."
-            else "Runs on this phone's ${backendText(b)}: about %.0f ms a frame.".format(
-                (if (s.getFloat("msLarge", 9999f) + s.getFloat("msPose", 9999f) <= 110f) s.getFloat("msLarge", 0f) else s.getFloat("msSmall", 0f)) + s.getFloat("msPose", 0f))
+            else "Runs on this phone's ${backendText(b)}: about %.0f ms a frame.".format(s.getFloat("msSmall", 0f) + s.getFloat("msPose", 0f))
         val u = FocusPilot.usual(ctx)
         val learned = if (u.isNaN()) "Learning the usual distance: ${FocusPilot.clipsLearned(ctx)} of ${FocusPilot.USUAL_MIN} clips with a person. Until then the lens rests at your manual focus distance."
             else "Usual distance: " + (if (u < 0.1f) "far (∞)" else "%.1f m".format(1 / u)) + " (from ${FocusPilot.clipsLearned(ctx)} clips)."
-        return "$speed $learned"
+        val last = lastClip.ifEmpty { s.getString("lastClip", "") ?: "" }
+        return "$speed $learned" + (if (last.isEmpty()) "" else " Last clip: $last.")
     }
 
     /** Lines for Diagnostics. */
@@ -314,7 +347,8 @@ object AiEngine {
         line("Models in memory", if (loaded) "yes (loaded in $loadMs ms)" else "no")
         line("Runs on", backendText(s.getString("backend", "") ?: "") + (disabledWhy?.let { " · off: $it" } ?: ""))
         line("Speed test", s.getString("benchNotes", "")?.ifEmpty { "not run yet" })
-        line("Detector / body points", if (frames == 0L) "no frames yet" else "%.0f ms / %.0f ms a frame (%s detector)".format(msDetAvg, msPoseAvg, if (useLarge) "large" else "small"))
+        line("Detector / body points", if (frames == 0L) "no frames yet" else "%.0f ms / %.0f ms a frame".format(msDetAvg, msPoseAvg))
+        line("Last clip", lastClip.ifEmpty { s.getString("lastClip", "") ?: "" }.ifEmpty { "none yet" })
         line("Frames looked at", "$frames ($persons with a person, $skippedBusy missed while busy)")
         line("Frames a second (target)", "%.1f".format(1000f / intervalMs))
         line("Heat", AiGovernor.levelText() + " · half for ${AiGovernor.reducedMs / 60_000} min, off for ${AiGovernor.offMs / 60_000} min")

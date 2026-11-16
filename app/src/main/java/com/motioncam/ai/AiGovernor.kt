@@ -8,9 +8,9 @@ import android.os.SystemClock
  * Heat rules for on-device AI: AI is the first thing to give up when the phone warms, long before the camera's own
  * heat pause, and it comes back only after the phone has stayed cool for a while (so it doesn't flap).
  *
- *  - half the frames (and the small detector): Android's heat level "light", within 5 °C of your temperature limit,
- *    or little thermal headroom left;
- *  - off: Android's heat level "moderate" or worse, within 3 °C of your limit, or almost no headroom;
+ *  - half the frames: Android's heat level "light", within 5 °C of your temperature limit, or almost no thermal
+ *    headroom left;
+ *  - off: Android's heat level "moderate" or worse, or within 3 °C of your limit;
  *  - back to half 5 minutes after the last "off" reading, back to full 2 minutes after the last "half" reading.
  *
  * Fed by the camera engine's once-a-second housekeeping, only while the AI model is in memory.
@@ -46,13 +46,12 @@ object AiGovernor {
         val hot = when {
             thermal >= PowerManager.THERMAL_STATUS_MODERATE -> { reason = "Android reports the phone as warm"; true }
             limitC > 0 && tempC >= limitC - 3 -> { reason = "battery %.0f °C, close to your limit of %d °C".format(tempC, limitC); true }
-            !hr.isNaN() && hr >= 0.85f -> { reason = "little room left before the phone is hot"; true }
             else -> false
         }
         val warm = hot || when {
             thermal >= PowerManager.THERMAL_STATUS_LIGHT -> { reason = "Android reports the phone as slightly warm"; true }
             limitC > 0 && tempC >= limitC - 5 -> { reason = "battery %.0f °C, nearing your limit of %d °C".format(tempC, limitC); true }
-            !hr.isNaN() && hr >= 0.7f -> { reason = "the phone is warming up"; true }
+            !hr.isNaN() && hr >= 0.9f -> { reason = "little room left before the phone is hot"; true }
             else -> false
         }
         if (hot) lastHotAt = now

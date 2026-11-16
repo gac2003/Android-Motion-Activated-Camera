@@ -152,7 +152,7 @@ object FocusPilot {
     fun clipEnd(ctx: Context) {
         target = Float.NaN
         phase = 0
-        if (clipN >= 3) synchronized(this) {
+        if (clipN >= 1) synchronized(this) {
             load(ctx)
             usual += clipSum / clipN
             while (usual.size > USUAL_KEEP) usual.removeAt(0)

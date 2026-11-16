@@ -17,6 +17,12 @@ class AlertSettingsActivity : Activity() {
     private lateinit var p: Prefs
     private var resumedOnce = false
 
+    /** The cameras push according to these settings: they get them as soon as you leave this screen. */
+    override fun onPause() {
+        super.onPause()
+        try { Live.publishDevice(this, force = true) } catch (_: Exception) {}
+    }
+
     override fun onResume() {
         super.onResume()
         if (resumedOnce) render()   // back from Android's channel settings

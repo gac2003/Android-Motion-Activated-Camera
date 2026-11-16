@@ -145,6 +145,7 @@ object Live {
         .put("canCamera", Prefs(ctx).liveCamera)
         .put("pushes", Push.canSend)
         .put("remoteStart", Push.remoteStartReady(ctx))
+        .put("alerts", Push.alertPrefs(ctx))
         .put("app", try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName } catch (_: Exception) { "" })
         .put("sync", syncHealth(ctx))
 
@@ -180,7 +181,9 @@ object Live {
                 /** Its push address (to alert it while MotionCam is closed), and whether it sends pushes as a camera. */
                 var push: String? = null, var pushes: Boolean = false,
                 /** It allows being started remotely by push (Remote start). */
-                var remoteStart: Boolean = false)
+                var remoteStart: Boolean = false,
+                /** What it wants to be alerted about (its alert settings), so cameras only push what it will show. */
+                var alerts: JSONObject? = null)
     class Cam(val id: String) {
         var status: JSONObject? = null
         var statusAt = 0L
@@ -238,6 +241,7 @@ object Live {
                             p.sync = o.optJSONObject("sync") ?: JSONObject()
                             p.pushes = o.optBoolean("pushes")
                             p.remoteStart = o.optBoolean("remoteStart")
+                            p.alerts = o.optJSONObject("alerts")
                         } catch (_: Exception) {}
                     }
                     if (id == Device.id(ctx)) { if (p.kicked) main.post { removedByOtherPhone(ctx) }; continue }
@@ -246,9 +250,10 @@ object Live {
                 }
                 phones.keys.retainAll(seenIds)
                 // every camera alerts this phone by push: no need for the 15-minute check
+                // the network's cameras send pushes (their build has the key): no 15-minute check needed. Not just the
+                // cameras running right now: with none monitoring at that moment the check used to switch back on.
                 val me = Device.id(ctx)
-                val camsNow = phones.values.filter { it.id != me && it.camera }
-                Push.setCovered(ctx, camsNow.isNotEmpty() && camsNow.all { it.pushes })
+                Push.setCovered(ctx, phones.values.any { it.id != me && it.pushes })
                 devicesLoaded = true
                 changed()
             }

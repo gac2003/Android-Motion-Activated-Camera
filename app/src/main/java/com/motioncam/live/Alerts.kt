@@ -51,6 +51,9 @@ object Alerts {
     // ------------------------------------------------------------------ mute / quiet hours
 
     private fun muteSp(ctx: Context) = ctx.getSharedPreferences("alerts_mute", Context.MODE_PRIVATE)
+
+    /** Cameras muted on this phone right now (camera id → until), for the cameras' push filtering. */
+    fun mutes(ctx: Context): Map<String, Long> = muteSp(ctx).all.mapNotNull { (k, v) -> (v as? Long)?.takeIf { it > System.currentTimeMillis() }?.let { k to it } }.toMap()
     /** 0 = not muted; Long.MAX_VALUE = until turned back on. */
     fun mutedUntil(ctx: Context, cam: String) = muteSp(ctx).getLong(cam, 0).takeIf { it > System.currentTimeMillis() } ?: 0L
     fun mute(ctx: Context, cam: String, minutes: Int) =

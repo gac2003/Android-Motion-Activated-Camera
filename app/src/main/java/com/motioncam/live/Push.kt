@@ -205,28 +205,80 @@ object Push {
     }
 
     /** A camera event was written ([key], at server time [t]): pushed to the other phones when worth it. */
+    /** This phone's alert settings, published for the cameras: they push only what this phone will show. */
+    fun alertPrefs(ctx: Context): JSONObject {
+        val p = com.motioncam.Prefs(ctx)
+        return JSONObject()
+            // "inside MotionCam only" shows nothing while it's closed: no pushes needed at all
+            .put("on", p.alertsOn && !p.alertsInApp)
+            .put("motion", p.alertMotion).put("gap", p.alertMotionGapSec)
+            .put("clip", p.alertClip).put("pic", p.alertPicture)
+            .put("hot", p.alertHot).put("power", p.alertCharger).put("mon", p.alertMonitoring)
+            .put("mute", JSONObject(Alerts.mutes(ctx)))
+    }
+
+    /** When each phone last got each kind (token|type), and phones whose motion alert still waits for its clip. */
+    private val lastTo = HashMap<String, Long>()
+    private val clipFor = HashSet<String>()
+
+    /**
+     * Should this phone (its alert settings [a]) get a push for [type] now, and at high priority? A phone that would
+     * drop it anyway (alerts off, kind off, muted, or within its "at most one motion alert every…") isn't woken for
+     * nothing. A clip only goes to a phone that alerts on clips, or to add its picture to that phone's last motion
+     * alert (then at normal priority: it updates an alert already shown).
+     */
+    @Synchronized
+    private fun wants(a: JSONObject?, tok: String, me: String, type: String, now: Long): Pair<Boolean, Boolean> {
+        if (a == null) return true to true   // an older version: everything, as before
+        if (!a.optBoolean("on", true)) return false to false
+        if ((a.optJSONObject("mute")?.optLong(me) ?: 0L) > now) return false to false
+        return when (type) {
+            "motion" -> {
+                if (!a.optBoolean("motion", true)) return false to false
+                val gap = a.optInt("gap", 300).coerceAtLeast(1) * 1000L
+                if (now - (lastTo["$tok|motion"] ?: 0L) < gap) return false to false
+                lastTo["$tok|motion"] = now
+                clipFor += tok
+                true to true
+            }
+            "clip" -> {
+                val wantClip = a.optBoolean("clip", false)
+                val forMotion = clipFor.remove(tok)
+                (wantClip || forMotion) to wantClip
+            }
+            "hot" -> a.optBoolean("hot", true) to true
+            "unplugged" -> a.optBoolean("power", true) to true
+            else -> a.optBoolean("mon", true) to true   // monitoring stopped / shut off
+        }
+    }
+
     fun onEvent(ctx: Context, type: String, d: JSONObject, key: String?, t: Long, to: List<String>? = null) {
         if (!canSend || type !in PUSHED) return
         val me = Device.id(ctx)
-        val tokens = to ?: Live.phones.values.filter { it.id != me && !it.push.isNullOrEmpty() }.mapNotNull { it.push }.distinct()
-        if (tokens.isEmpty() || !allow(type, System.currentTimeMillis())) return
+        val now = System.currentTimeMillis()
+        // (token, high priority): only the phones that will show it
+        val targets: List<Pair<String, Boolean>> = to?.map { it to true }
+            ?: Live.phones.values.filter { it.id != me && !it.push.isNullOrEmpty() }.distinctBy { it.push }
+                .mapNotNull { p -> wants(p.alerts, p.push!!, me, type, now).takeIf { it.first }?.let { p.push!! to it.second } }
+        if (targets.isEmpty()) { com.motioncam.Diagnostics.count("pushes skipped (no phone wants them)"); return }
+        if (!allow(type, now)) return
         val app = ctx.applicationContext
         appCtx = app
         val sealed = LiveNet.seal(app, d.toString())
         val name = Device.name(app)
         Thread {
             val access = try { accessToken() } catch (_: Exception) { null } ?: run { pushFailed("Couldn't get a push access token from Google (check the push key)"); return@Thread }
-            for (tok in tokens) try { send(access, tok, me, name, type, sealed, key, t) } catch (_: Exception) {}
+            for ((tok, high) in targets) try { send(access, tok, me, name, type, sealed, key, t, high) } catch (_: Exception) {}
         }.start()
     }
 
-    private fun send(access: String, token: String, cam: String, name: String, type: String, sealed: String, key: String?, t: Long) {
+    private fun send(access: String, token: String, cam: String, name: String, type: String, sealed: String, key: String?, t: Long, high: Boolean = true) {
         val data = JSONObject().put("c", cam).put("n", name).put("t", t.toString()).put("e", sealed)
         if (key != null) data.put("k", key)
         val msg = JSONObject().put("message", JSONObject()
             .put("token", token)
             .put("data", data)
-            .put("android", JSONObject().put("priority", "HIGH")
+            .put("android", JSONObject().put("priority", if (high) "HIGH" else "NORMAL")
                 .put("ttl", if (type == "motion" || type == "clip") "3600s" else "86400s")
                 .put("collapse_key", "$cam-$type")))
         val c = URL("https://fcm.googleapis.com/v1/projects/${LiveConfig.PROJECT_ID}/messages:send").openConnection() as HttpURLConnection

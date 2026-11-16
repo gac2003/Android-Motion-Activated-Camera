@@ -154,7 +154,8 @@ object TransferQueue {
 
     /** Starts the background service when there is work (call when the app opens, too). */
     fun start(ctx: Context) {
-        val work = synchronized(lock) { load(ctx); batches.any { it.active } }
+        // only for work that can run now (a paused transfer doesn't need the service started on every app open)
+        val work = synchronized(lock) { load(ctx); batches.any { b -> b.active && !b.paused && b.items.any { it.state == WAIT || it.state == RUN } } }
         if (!work) return
         try { ctx.startForegroundService(Intent(ctx, TransferService::class.java)) } catch (_: Exception) {}
     }

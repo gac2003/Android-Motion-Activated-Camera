@@ -86,9 +86,40 @@ object Alerts {
     private fun camName(cam: String) = Live.phones[cam]?.name?.ifEmpty { null } ?: "Camera"
     private fun nid(cam: String, kind: String) = (cam + kind).hashCode() and 0x7fffffff
 
+    /** Clip alerts kept per camera and kind: a new round of motion (or a new clip) adds one, the oldest beyond this goes. */
+    const val KEEP_PER_CAM = 5
+
+    /**
+     * Which notification an alert is: each round of motion (from its start time) and each clip has its own, so the
+     * last [KEEP_PER_CAM] stay with their pictures; other kinds (and missed-alert summaries) one per camera.
+     */
+    private fun alertId(cam: String, kind: String, clip: JSONObject?, st: MotionState?): Int = when {
+        kind == "motion" && st != null && st.since > 0 -> nid(cam, "motion@${st.since}")
+        kind == "clip" && clip != null -> nid(cam, "clip@" + clip.optString("name"))
+        else -> nid(cam, kind)
+    }
+
+    /** Before a new [kind] alert: this camera's older ones beyond [KEEP_PER_CAM] - 1 are removed (oldest first). */
+    private fun trim(ctx: Context, cam: String, kind: String, newId: Int) {
+        try {
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            nm.activeNotifications.filter { it.id != newId && it.notification?.extras?.let { x -> x.getString(X_CAM) == cam && x.getString(X_KIND) == kind } == true }
+                .sortedByDescending { it.postTime }.drop(KEEP_PER_CAM - 1).forEach { nm.cancel(it.id) }
+        } catch (_: Exception) {}
+    }
+
+    /** All of a camera's alerts (muting it). */
+    fun cancelAll(ctx: Context, cam: String) {
+        try {
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            nm.activeNotifications.filter { it.notification?.extras?.getString(X_CAM) == cam }.forEach { nm.cancel(it.id) }
+            for (k in listOf("motion", "clip", "hot", "power", "monitor", "battery", "conn")) nm.cancel(nid(cam, k))
+        } catch (_: Exception) {}
+    }
+
     private fun post(ctx: Context, cam: String, kind: String, channel: String, title: String, text: String, silent: Boolean, update: Boolean = false,
                      clip: JSONObject? = null, at: Long = System.currentTimeMillis(), picture: android.graphics.Bitmap? = null,
-                     st: MotionState? = null) {
+                     st: MotionState? = null, id: Int? = null) {
         // where it shows (Settings › Alerts): "inside MotionCam only" or, by default, a card while MotionCam is on screen
         // instead of a notification; "always" also notifies while it's open, with or without the card
         val p0 = Prefs(ctx)
@@ -100,8 +131,11 @@ object Alerts {
         if (open && !p0.alertsNoCard && !update) AlertInbox.banner(cam, title, text)
         try {
             channels(ctx)
+            val nidHere = id ?: alertId(cam, kind, clip, st)
+            if (!update && (kind == "motion" || kind == "clip")) trim(ctx, cam, kind, nidHere)
             // tapping opens the clip when the alert is about one (motion once its clip is saved, new clip), else the camera
-            val open = if (clip != null) PendingIntent.getActivity(ctx, nid(cam, "clip_$kind"),
+            // (each kept alert its own clip: its own request code)
+            val open = if (clip != null) PendingIntent.getActivity(ctx, nid(cam, "clip_${kind}_$nidHere"),
                     OpenClipActivity.intent(ctx, cam, clip.toString()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
                 else PendingIntent.getActivity(ctx, nid(cam, "open"),
@@ -120,12 +154,11 @@ object Alerts {
                     } else setStyle(Notification.BigTextStyle().bigText(text))
                 }
                 .setContentIntent(open).setAutoCancel(true)
-                .setGroup("cam_$cam")
                 .setOnlyAlertOnce(update)          // updating an alert never rings again
                 .setWhen(at).setShowWhen(true)
                 // what this alert is about, so it can still be updated after MotionCam was closed (its picture arriving late)
                 .addExtras(android.os.Bundle().apply {
-                    putString(X_KIND, kind)
+                    putString(X_KIND, kind); putString(X_CAM, cam)
                     if (clip != null) { putString(X_CLIP, clip.optString("name")); putString(X_REF, clip.toString()) }
                     if (st != null) { putInt(X_COUNT, st.count); putLong(X_SINCE, st.since); putLong(X_LAST, st.lastAlert) }
                 })
@@ -136,22 +169,24 @@ object Alerts {
                 }
                 .addAction(mute(60, "Mute 1 h")).addAction(mute(8 * 60, "Mute 8 h"))
                 .build()
-            ctx.getSystemService(NotificationManager::class.java).notify(nid(cam, kind), n)
+            ctx.getSystemService(NotificationManager::class.java).notify(nidHere, n)
         } catch (_: Exception) {}
     }
 
     private const val X_KIND = "mc_kind"
+    private const val X_CAM = "mc_cam"
     private const val X_CLIP = "mc_clip"
     private const val X_REF = "mc_ref"
     private const val X_COUNT = "mc_count"
     private const val X_SINCE = "mc_since"
     private const val X_LAST = "mc_last"
 
-    /** The camera's motion alert as it is still shown, when MotionCam was closed (and forgot it) since it was posted. */
+    /** The camera's latest motion alert as still shown, when MotionCam was closed (and forgot it) since it was posted. */
     private fun restoreMotion(ctx: Context, cam: String): MotionState? = try {
         ctx.getSystemService(NotificationManager::class.java).activeNotifications
-            .firstOrNull { it.id == nid(cam, "motion") }?.notification?.extras
-            ?.takeIf { it.getString(X_KIND) == "motion" && it.containsKey(X_SINCE) }
+            .mapNotNull { it.notification?.extras }
+            .filter { it.getString(X_CAM) == cam && it.getString(X_KIND) == "motion" && it.containsKey(X_SINCE) }
+            .maxByOrNull { it.getLong(X_SINCE) }
             ?.let { MotionState(lastAlert = it.getLong(X_LAST), count = it.getInt(X_COUNT, 1), since = it.getLong(X_SINCE)) }
     } catch (_: Exception) { null }
 
@@ -167,14 +202,14 @@ object Alerts {
             val ex = n.extras ?: continue
             if (ex.getString(X_CLIP) != name) continue
             val kind = ex.getString(X_KIND) ?: continue
-            if (sbn.id != nid(cam, kind)) continue
+            if (ex.getString(X_CAM) != cam) continue
             val ref = ex.getString(X_REF)?.let { try { JSONObject(it) } catch (_: Exception) { null } }
             val st = if (kind == "motion") (motion[cam]?.takeIf { it.clip?.optString("name") == name }?.also { it.pic = pic }
                 ?: MotionState(lastAlert = ex.getLong(X_LAST), count = ex.getInt(X_COUNT, 1), since = ex.getLong(X_SINCE), clip = ref))
                 else null
             post(ctx, cam, kind, if (kind == "motion") CH_MOTION else CH_CLIP, ex.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: continue,
                 ex.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: continue, silent = true, update = true, clip = ref, at = n.`when`,
-                picture = pic, st = st?.takeIf { ex.containsKey(X_SINCE) })
+                picture = pic, st = st?.takeIf { ex.containsKey(X_SINCE) }, id = sbn.id)
         }
     }
 
@@ -426,7 +461,6 @@ class AlertActionReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, i: Intent) {
         val cam = i.getStringExtra(Alerts.EXTRA_CAM) ?: return
         Alerts.mute(ctx, cam, i.getIntExtra("min", 60))
-        val nm = ctx.getSystemService(NotificationManager::class.java)
-        for (k in listOf("motion", "clip", "hot", "power", "monitor", "battery", "conn")) nm.cancel((cam + k).hashCode() and 0x7fffffff)
+        Alerts.cancelAll(ctx, cam)
     }
 }

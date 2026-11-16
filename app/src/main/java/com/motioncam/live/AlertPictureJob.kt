@@ -19,8 +19,7 @@ import org.json.JSONObject
  *  - at most [MAX_TRIES] tries per picture, Android's growing pauses in between (30 s, 1 min, 2 min…), and only
  *    while the database couldn't be reached (an answer without a picture ends it: nothing to wait for);
  *  - a picture is given up [KEEP_MS] after its alert, or as soon as no alert shown is about its clip any more (swiped
- *    away, opened, or replaced by a newer clip's alert: each camera has one motion and one clip alert, so only its
- *    latest clip is ever waited for): then nothing is fetched at all;
+ *    away, opened, or removed as older than a camera's last [Alerts.KEEP_PER_CAM]): then nothing is fetched at all;
  *  - connects only for the fetch, and disconnects again unless MotionCam is using the connection.
  */
 class AlertPictureJob : JobService() {
@@ -28,7 +27,7 @@ class AlertPictureJob : JobService() {
         const val ID = 4209
         private const val MAX_TRIES = 4
         private const val KEEP_MS = 30 * 60_000L
-        private const val MAX_PENDING = 10
+        private const val MAX_PENDING = 15
 
         private fun sp(ctx: Context) = ctx.getSharedPreferences("alert_pictures", Context.MODE_PRIVATE)
 
@@ -43,11 +42,12 @@ class AlertPictureJob : JobService() {
             val a = pending(ctx)
             val out = JSONArray()
             for (i in 0 until a.length()) a.optJSONObject(i)?.let {
-                // a newer clip from the same camera replaces its alerts (one motion and one clip alert per camera), so
-                // that camera's older pictures have nowhere to go any more: dropped
-                if (now - it.optLong("at") < KEEP_MS && it.optString("c") != cam) out.put(it)
+                // fresh ones, and only as many per camera as it keeps alerts (older alerts are removed, so are their pictures)
+                if (now - it.optLong("at") < KEEP_MS && !(it.optString("c") == cam && it.optString("n") == name)) out.put(it)
             }
             out.put(JSONObject().put("c", cam).put("n", name).put("at", now).put("tries", 0))
+            val mine = (0 until out.length()).filter { out.optJSONObject(it)?.optString("c") == cam }
+            for (i in mine.dropLast(Alerts.KEEP_PER_CAM).reversed()) out.remove(i)
             while (out.length() > MAX_PENDING) out.remove(0)
             save(ctx, out)
             val js = ctx.getSystemService(JobScheduler::class.java) ?: return

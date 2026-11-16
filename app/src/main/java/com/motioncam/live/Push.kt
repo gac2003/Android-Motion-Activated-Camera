@@ -129,12 +129,17 @@ object Push {
         // was put on hold with the screen off, so the picture often never came); a picture that doesn't come in time
         // is fetched once more later ([AlertPictureJob]).
         if (type == "clip" && com.motioncam.Prefs(ctx).alertPicture) {
-            main.removeCallbacks(offlineAgain)
-            try { LiveNet.db(ctx)?.goOnline() } catch (_: Exception) {}
+            // the picture came with the push (cameras on this version): shown at once, nothing to connect for
+            val inline = data["p"]?.let { ClipThumbStore.openInline(ctx, cam, it, data["pp"] == "1") }
+            if (inline != null) com.motioncam.Diagnostics.count("alert pictures in the push")
+            else {
+                main.removeCallbacks(offlineAgain)
+                try { LiveNet.db(ctx)?.goOnline() } catch (_: Exception) {}
+            }
             val done = java.util.concurrent.CountDownLatch(1)
-            main.post { Alerts.onEvent(ctx, cam, t, d, key) { done.countDown() } }
+            main.post { Alerts.onEvent(ctx, cam, t, d, key, inline) { done.countDown() } }
             try { done.await(Alerts.PIC_WAIT_MS + 1500, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Exception) {}
-            main.removeCallbacks(offlineAgain); main.postDelayed(offlineAgain, 1500)
+            if (inline == null) { main.removeCallbacks(offlineAgain); main.postDelayed(offlineAgain, 1500) }
             return
         }
         main.post { Alerts.onEvent(ctx, cam, t, d, key) }
@@ -283,10 +288,10 @@ object Push {
         if (!canSend || type !in PUSHED) return
         val me = Device.id(ctx)
         val now = System.currentTimeMillis()
-        // (token, high priority): only the phones that will show it
-        val targets: List<Pair<String, Boolean>> = to?.map { it to true }
+        // (token, high priority, wants pictures): only the phones that will show it
+        val targets: List<Triple<String, Boolean, Boolean>> = to?.map { Triple(it, true, false) }
             ?: Live.phones.values.filter { it.id != me && !it.push.isNullOrEmpty() }.distinctBy { it.push }
-                .mapNotNull { p -> wants(p.alerts, p.push!!, me, type, now).takeIf { it.first }?.let { p.push!! to it.second } }
+                .mapNotNull { p -> wants(p.alerts, p.push!!, me, type, now).takeIf { it.first }?.let { Triple(p.push!!, it.second, p.alerts?.optBoolean("pic", true) ?: true) } }
         if (targets.isEmpty()) { com.motioncam.Diagnostics.count("pushes skipped (no phone wants them)"); return }
         if (!allow(type, now)) return
         val app = ctx.applicationContext
@@ -295,13 +300,24 @@ object Push {
         val name = Device.name(app)
         Thread {
             val access = try { accessToken() } catch (_: Exception) { null } ?: run { pushFailed("Couldn't get a push access token from Google (check the push key)"); return@Thread }
-            for ((tok, high) in targets) try { send(access, tok, me, name, type, sealed, key, t, high) } catch (_: Exception) {}
+            // a clip's picture rides along in the push (small, ~2-3 KB) for the phones that show pictures: a locked
+            // phone can show it without connecting (the connection it would need is often not allowed while it sleeps)
+            val pic = if (type != "clip" || targets.none { it.third }) null else try {
+                val base = JSONObject().put("c", me).put("n", name).put("t", t.toString()).put("e", sealed).put("k", key ?: "").put("pp", "1").toString().length
+                ClipThumbStore.inline(app, d.optString("name"), PUSH_BUDGET - base - 8)
+            } catch (_: Exception) { null }
+            for ((tok, high, wantsPic) in targets) try { send(access, tok, me, name, type, sealed, key, t, high, if (wantsPic) pic else null, CameraLink.pinFor(app) != null) } catch (_: Exception) {}
         }.start()
     }
 
-    private fun send(access: String, token: String, cam: String, name: String, type: String, sealed: String, key: String?, t: Long, high: Boolean = true) {
+    /** What a push's data may take (Google's limit is 4 KB): the clip picture gets what the rest leaves. */
+    private const val PUSH_BUDGET = 3800
+
+    private fun send(access: String, token: String, cam: String, name: String, type: String, sealed: String, key: String?, t: Long, high: Boolean = true,
+                     pic: String? = null, pinned: Boolean = false) {
         val data = JSONObject().put("c", cam).put("n", name).put("t", t.toString()).put("e", sealed)
         if (key != null) data.put("k", key)
+        if (pic != null) { data.put("p", pic); if (pinned) data.put("pp", "1") }
         val msg = JSONObject().put("message", JSONObject()
             .put("token", token)
             .put("data", data)

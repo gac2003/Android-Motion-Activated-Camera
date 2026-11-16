@@ -239,13 +239,14 @@ object Alerts {
     private val handled = LinkedHashSet<String>()
 
     /** [done]: called once handling is over (a clip alert: after its picture was fetched or given up on). */
-    fun onEvent(ctx: Context, cam: String, t: Long, d: JSONObject, key: String? = null, done: (() -> Unit)? = null) {
+    fun onEvent(ctx: Context, cam: String, t: Long, d: JSONObject, key: String? = null, inlinePic: android.graphics.Bitmap? = null,
+                done: (() -> Unit)? = null) {
         var later = false
-        try { later = handle(ctx, cam, t, d, key, done) } finally { if (!later) done?.invoke() }
+        try { later = handle(ctx, cam, t, d, key, inlinePic, done) } finally { if (!later) done?.invoke() }
     }
 
     /** True when [done] is left to the picture fetch (it then calls it). */
-    private fun handle(ctx: Context, cam: String, t: Long, d: JSONObject, key: String?, done: (() -> Unit)?): Boolean {
+    private fun handle(ctx: Context, cam: String, t: Long, d: JSONObject, key: String?, inlinePic: android.graphics.Bitmap?, done: (() -> Unit)?): Boolean {
         if (key != null) synchronized(handled) {
             if (!handled.add("$cam/$key")) return false
             while (handled.size > 300) handled.remove(handled.first())
@@ -279,8 +280,9 @@ object Alerts {
                 // the clip's picture (fetched in the background, a few KB; waits for one still on its way), then the alerts
                 Thread {
                     val reached = java.util.concurrent.atomic.AtomicBoolean(false)
-                    val pic = try {
-                        if (!p.alertPicture) null else ref?.let { ClipThumbStore.get(app, cam, it.optString("name"), PIC_WAIT_MS, forAlert = true, reached = reached) }
+                    // the picture that came with the push, else fetched
+                    val pic = if (!p.alertPicture) null else inlinePic ?: try {
+                        ref?.let { ClipThumbStore.get(app, cam, it.optString("name"), PIC_WAIT_MS, forAlert = true, reached = reached) }
                     } catch (_: Exception) { null }
                     main.post {
                         try {

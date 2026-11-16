@@ -37,11 +37,49 @@ object ClipThumbStore {
 
     // ------------------------------------------------------------------ camera side
 
+    /** The last few clips' pictures at push size (the push carries a small copy: see [inline]). */
+    private val forPush = object : LinkedHashMap<String, Bitmap>() {
+        override fun removeEldestEntry(e: MutableMap.MutableEntry<String, Bitmap>?) = size > 4
+    }
+
+    /**
+     * [name]'s picture as small as needed to fit in a push ([budget] characters once sealed; tries smaller sizes and
+     * lower quality until it fits), sealed like the stored one, or null (none, or it won't fit). Locked with the PIN
+     * when the stored pictures are. A locked phone shows it without connecting at all.
+     */
+    fun inline(ctx: Context, name: String, budget: Int): String? {
+        val bmp = synchronized(forPush) { forPush[name] } ?: return null
+        val pin = CameraLink.pinFor(ctx)
+        for (w in intArrayOf(192, 160, 128, 96)) {
+            val sc = if (bmp.width > w) Bitmap.createScaledBitmap(bmp, w, (bmp.height * w / bmp.width).coerceAtLeast(1), true) else bmp
+            for (q in intArrayOf(50, 38)) {
+                val out = java.io.ByteArrayOutputStream()
+                sc.compress(Bitmap.CompressFormat.JPEG, q, out)
+                val body = if (pin != null) CameraLink.pinSeal(CameraLink.me(ctx), pin, out.toByteArray()) else out.toByteArray()
+                val sealed = LiveNet.sealBytes(ctx, body)
+                if (sealed.length <= budget) return sealed
+            }
+        }
+        return null
+    }
+
+    /** A picture that came inside the push ([inline]), or null (none, or locked with a PIN this phone doesn't know). */
+    fun openInline(ctx: Context, cam: String, sealed: String?, pinned: Boolean): Bitmap? = try {
+        var bytes = LiveNet.openBytes(ctx, sealed)
+        if (bytes != null && pinned) bytes = com.motioncam.cloud.SecretStore.get(ctx, "live.pin.$cam")?.let { CameraLink.pinOpen(cam, it, bytes!!) }
+        bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size, opts) }
+    } catch (_: Exception) { null }
+
     /** Uploads [bmp] as [name]'s picture and drops pictures older than a week (network; background thread). */
     fun publish(ctx: Context, name: String, bmp: Bitmap) {
         val out = java.io.ByteArrayOutputStream()
         val w = 240
         val sc = if (bmp.width > w) Bitmap.createScaledBitmap(bmp, w, (bmp.height * w / bmp.width).coerceAtLeast(1), true) else bmp
+        try {
+            val pw = 192
+            val small = if (sc.width > pw) Bitmap.createScaledBitmap(sc, pw, (sc.height * pw / sc.width).coerceAtLeast(1), true) else sc
+            synchronized(forPush) { forPush[name] = small }
+        } catch (_: Exception) {}
         sc.compress(Bitmap.CompressFormat.JPEG, 60, out)
         val pin = CameraLink.pinFor(ctx)
         val body = if (pin != null) CameraLink.pinSeal(CameraLink.me(ctx), pin, out.toByteArray()) else out.toByteArray()

@@ -35,6 +35,7 @@ class MotionCamApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Health.install(this)
+        Leftovers.clean(this)   // once: what the removed AI builds left on this phone
         Recorder.resume(this)   // a diagnostics recording under way carries on
         // worth logging on a camera phone (an unexpected restart matters there); a viewer phone starts often (each push)
         if (Health.wanted(this) || Prefs(this).liveCamera) Health.log(this, "MotionCam started" + if (Health.wanted(this)) " (monitoring was on)" else "")

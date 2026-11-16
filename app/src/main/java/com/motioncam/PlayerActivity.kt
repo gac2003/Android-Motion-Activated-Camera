@@ -1070,10 +1070,7 @@ class PlayerActivity : Activity() {
         val pos = if (holdMs >= 0) holdMs.toInt() else curPos()
         strip.setPosition(pos.toLong())
         stamp.text = stampFmt.format(Date(clips[i].startMs + pos))
-        val allTags = com.motioncam.ai.People.resolve(this, remote?.id, TagStore.tagsOf(this, remote?.id, clips[i]))
-        // your own tags, then what the AI saw in the clip
-        val tags = listOf(allTags.filter { !com.motioncam.ai.ClipFacts.isAi(it) }.joinToString("  ") { "#$it" },
-            com.motioncam.ai.ClipFacts.line(allTags).let { if (it.isEmpty()) "" else "Seen: $it" }).filter { it.isNotEmpty() }.joinToString("   ")
+        val tags = TagStore.tagsOf(this, remote?.id, clips[i]).joinToString("  ") { "#$it" }
         if (tagLine.text.toString() != tags) { tagLine.text = tags; tagLine.visibility = if (tags.isEmpty()) View.GONE else View.VISIBLE }
         val c = clips[i]
         // full screen: the time is in the play pill, the clip count stays in the corner

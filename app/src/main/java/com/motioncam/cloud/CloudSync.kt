@@ -215,7 +215,6 @@ object CloudSync {
 
     /** Called when a clip has been saved: queue it for every enabled destination. */
     fun onClipSaved(ctx: Context, clipId: Long) {
-        try { com.motioncam.ai.ClipAnalyzer.onClipSaved(ctx, clipId) } catch (_: Exception) {}   // described later (AI, if turned on)
         com.motioncam.live.CameraLink.clipSaved(ctx, clipId)   // viewing phones' alerts can then open this clip
         val kinds = enabledKinds(ctx)
         if (kinds.isEmpty()) return
@@ -581,6 +580,11 @@ object CloudSync {
                 if (waitReason(ctx) != null) { watchNetwork(ctx); break }   // kick (below) leaves it to Android's job
                 val job = claim(ctx, k)
                 if (job == null) {
+                    // once, after an upload: what the removed AI builds left in this folder
+                    if (leftoversDue(ctx, k)) {
+                        if (p == null) p = try { provider(ctx, cfg) } catch (e: Exception) { break }
+                        cleanLeftovers(ctx, cfg, p!!)
+                    }
                     // nothing to upload: add thumbnails for clips backed up before thumbnails existed
                     if (!thumbsDue(ctx, k)) break
                     if (p == null) p = try { provider(ctx, cfg) } catch (e: Exception) { break }
@@ -829,82 +833,6 @@ object CloudSync {
      * length is part of the name. Best effort: returns false if it could not be done now.
      */
     /** A clip's tags go into the folder with it, so they show (and can be searched) on every phone viewing it. */
-    /**
-     * Adds [tags] to a clip in the backup folders it is already in (a clip not uploaded yet takes its tags along when
-     * it is). Network; false when a folder couldn't be reached now (no internet, waiting for Wi-Fi).
-     */
-    fun pushTags(ctx: Context, clip: Clip, tags: Set<String>): Boolean {
-        if (tags.isEmpty()) return true
-        var ok = true
-        for (k in enabledKinds(ctx)) {
-            val cfg = CloudConfig(ctx, k)
-            val folder = cfg.folderId ?: continue
-            val there = synchronized(lock) { load(ctx); index!!.any { it.kind == k && it.clipId == clip.id } }
-            if (!there) continue
-            if (waitReason(ctx) != null) { ok = false; continue }
-            try {
-                providerFor(ctx, k).use { p -> com.motioncam.TagStore.writeTo(ctx, p, folder, mapOf(clip.name to tags)) }
-                com.motioncam.live.Live.nudge(ctx, cfg.kind, folder, "tags")
-            } catch (_: Exception) { ok = false }
-        }
-        return ok
-    }
-
-    /**
-     * Puts a small file of clip fingerprints (search by meaning) into the ".ai" subfolder of every backup folder,
-     * replacing the one of the same name. Network; false when a folder couldn't be reached now.
-     */
-    fun pushMeaning(ctx: Context, name: String, bytes: ByteArray): Boolean {
-        var ok = true
-        for (k in enabledKinds(ctx)) {
-            val cfg = CloudConfig(ctx, k)
-            val folder = cfg.folderId ?: continue
-            if (cfg.blocked != null || waitReason(ctx) != null) { ok = false; continue }
-            try {
-                providerFor(ctx, k).use { p ->
-                    val ai = p.listFolders(folder).firstOrNull { it.name == com.motioncam.ai.Meaning.FOLDER } ?: p.createFolder(folder, com.motioncam.ai.Meaning.FOLDER)
-                    for (old in p.list(ai.id)) if (old.name == name) p.delete(ai.id, old)
-                    p.upload(ai.id, name, bytesSource(bytes), null, {}, {})
-                }
-            } catch (_: Exception) { ok = false }
-        }
-        return ok
-    }
-
-    /** The names of the files in the backup folders' ".ai" subfolder (people's namings are file names), or null when unreachable. Network. */
-    fun aiFileNames(ctx: Context): List<String>? {
-        val out = ArrayList<String>()
-        var any = false
-        for (k in enabledKinds(ctx)) {
-            val cfg = CloudConfig(ctx, k)
-            val folder = cfg.folderId ?: continue
-            if (cfg.blocked != null || waitReason(ctx) != null) continue
-            try {
-                providerFor(ctx, k).use { p ->
-                    p.listFolders(folder).firstOrNull { it.name == com.motioncam.ai.Meaning.FOLDER }?.let { ai -> out += p.list(ai.id).map { it.name } }
-                    any = true
-                }
-            } catch (_: Exception) {}
-        }
-        return if (any) out else null
-    }
-
-    /** Takes this phone's face groups ([bundle]) and all namings out of the backup folders. Network, best effort. */
-    fun clearFaces(ctx: Context, bundle: String) {
-        for (k in enabledKinds(ctx)) {
-            val folder = CloudConfig(ctx, k).folderId ?: continue
-            try {
-                providerFor(ctx, k).use { p ->
-                    val ai = p.listFolders(folder).firstOrNull { it.name == com.motioncam.ai.Meaning.FOLDER } ?: return@use
-                    for (f in p.list(ai.id)) if (f.name == bundle || f.name.startsWith("n~")) try { p.delete(ai.id, f) } catch (_: Exception) {}
-                }
-            } catch (_: Exception) {}
-        }
-    }
-
-    /** The names of the clips this phone has in its backup folders. */
-    fun indexNames(ctx: Context): Set<String> = synchronized(lock) { load(ctx); index!!.map { it.name }.toSet() }
-
     private fun uploadTags(ctx: Context, p: CloudProvider, folder: String, clip: Clip) {
         val t = com.motioncam.TagStore.tagsOf(ctx, null, clip)
         if (t.isEmpty()) return
@@ -938,6 +866,34 @@ object CloudSync {
      */
     private fun recordsHere(ctx: Context): Boolean =
         com.motioncam.CameraService.instance != null || System.currentTimeMillis() - Prefs(ctx).lastMonitoredAt < 14 * 86_400_000L
+
+    /**
+     * The removed on-device AI builds (1.1.78 – 1.1.85) put automatic tags ("✦ …") and a ".ai" folder of small files
+     * into the backup folder. The phone that records removes them once, when it is uploading anyway (no extra
+     * wake-up for it); tried at most 3 times per folder. The empty ".ai" folder itself stays (harmless).
+     */
+    private fun leftoversDue(ctx: Context, k: Dest): Boolean {
+        if (!recordsHere(ctx)) return false
+        val sp = ctx.getSharedPreferences("cloud_${k.key}", Context.MODE_PRIVATE)
+        return !sp.getBoolean("aiLeftDone", false) && sp.getInt("aiLeftTries", 0) < 3
+    }
+
+    private fun cleanLeftovers(ctx: Context, cfg: CloudConfig, p: CloudProvider) {
+        val sp = ctx.getSharedPreferences("cloud_${cfg.dest.key}", Context.MODE_PRIVATE)
+        sp.edit().putInt("aiLeftTries", sp.getInt("aiLeftTries", 0) + 1).apply()
+        try {
+            val folder = cfg.folderId ?: return
+            val subs = p.listFolders(folder)
+            subs.firstOrNull { it.name == ".ai" }?.let { ai -> for (f in p.list(ai.id)) p.delete(ai.id, f) }
+            subs.firstOrNull { it.name == TagFiles.ROOT }?.let { tags ->
+                for (f in p.list(tags.id)) {
+                    val parts = f.name.split("~")
+                    if (parts.size >= 4 && MarkStore.unb64(parts[1]).startsWith(com.motioncam.Leftovers.MARK)) p.delete(tags.id, f)
+                }
+            }
+            sp.edit().putBoolean("aiLeftDone", true).apply()
+        } catch (_: Exception) {}   // unreachable now: another try with a later upload
+    }
 
     private fun thumbsDue(ctx: Context, k: Dest): Boolean {
         if (!Prefs(ctx).cloudThumbs || !recordsHere(ctx)) return false

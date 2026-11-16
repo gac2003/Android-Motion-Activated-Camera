@@ -31,6 +31,7 @@ class TagFiles(private val p: CloudProvider, private val folder: String, private
             if (parts.size < 4 || !parts[0].startsWith("MC_")) continue
             val tag = MarkStore.unb64(parts[1]).trim()
             if (tag.isEmpty()) continue
+            if (tag.startsWith(com.motioncam.Leftovers.MARK)) continue   // automatic tags of the removed AI builds: never shown
             out += Entry(parts[0] + ".mp4", tag, f)
         }
         entries = out

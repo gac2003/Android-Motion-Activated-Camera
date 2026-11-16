@@ -161,7 +161,6 @@ object TagStore {
             }
             saveRemote(ctx, src.id)
         }
-        if (map.values.any { ts -> ts.any { com.motioncam.ai.People.isFaceTag(it) } }) try { com.motioncam.ai.People.syncNames(ctx, src) } catch (_: Exception) {}
         changed(src.id)
         if (sent > 0) com.motioncam.live.Live.nudge(ctx, src.kind, src.folderId, "tags")
     }

@@ -90,22 +90,6 @@ class Prefs(ctx: Context) {
         get() = sp.getLong("shutterNs", 16_666_667L)
         set(v) = sp.edit().putLong("shutterNs", v).apply()
     var focusAuto: Boolean get() = b("focusAuto", true); set(v) = put("focusAuto", v)
-    /** Person-aware focus (on-device AI, only while a clip records). Off until turned on. */
-    var aiFocus: Boolean get() = b("aiFocus", false); set(v) = put("aiFocus", v)
-    /** Person-aware focus: models stay in memory while monitoring, so the lens can move the moment someone appears. */
-    var aiFast: Boolean get() = b("aiFast", true); set(v) = put("aiFast", v)
-    /** Describe saved clips (people, colours, objects) so Search can find them. Off until turned on. */
-    var aiDescribe: Boolean get() = b("aiDescribe", false); set(v) = put("aiDescribe", v)
-    /** Search by meaning: fingerprints of clips' pictures (a recording phone) and the words box in Search (any phone). */
-    var aiMeaning: Boolean get() = b("aiMeaning", false); set(v) = put("aiMeaning", v)
-    /** Recognise faces in described clips: groups of similar faces that can be named. */
-    var aiFaces: Boolean get() = b("aiFaces", false); set(v) = put("aiFaces", v)
-    /** AI stops at this battery temperature (0 = 3 °C below the camera's own pause temperature). */
-    var aiMaxTempC: Int get() = i("aiMaxTempC", 0); set(v) = put("aiMaxTempC", v)
-    /** The temperature the AI really stops at: its own setting, else just under the camera's pause, else 43 °C. */
-    val aiTempLimit: Int get() = aiMaxTempC.takeIf { it > 0 } ?: if (maxTempC > 0) maxTempC - 3 else 43
-    /** Describing clips only while the phone is charging. */
-    var aiChargingOnly: Boolean get() = b("aiChargingOnly", true); set(v) = put("aiChargingOnly", v)
     /** 0 = nearest focus, 1 = infinity. */
     var focusPos: Float get() = f("focusPos", 1f); set(v) = put("focusPos", v)
     var wbAuto: Boolean get() = b("wbAuto", true); set(v) = put("wbAuto", v)

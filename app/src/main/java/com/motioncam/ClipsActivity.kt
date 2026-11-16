@@ -261,7 +261,6 @@ open class ClipsActivity : Activity() {
                 pm.menu.add(0, 4, 53, "Protect in cloud")
                 pm.menu.add(0, 5, 54, "Remove cloud protection")
             }
-            if (remote == null && Prefs(this).aiFocus) pm.menu.add(0, 13, 55, "Learn focus from these (AI)")
             if (pm.menu.size() == 0) pm.menu.add(0, 0, 0, "No more actions").isEnabled = false
             pm.setOnMenuItemClickListener {
                 when (it.itemId) {
@@ -277,12 +276,6 @@ open class ClipsActivity : Activity() {
                     9 -> FileReveal.show(this, selectedClips().singleOrNull())
                     10 -> addSelectedTo()
                     11 -> TagSheet.show(this, sourceId, selectedClips(), clips) { exitSelection() }
-                    13 -> {
-                        val ids = selectedClips().map { c -> c.id }
-                        com.motioncam.ai.ClipAnalyzer.learnFrom(this, ids)
-                        Toast.makeText(this, "${ids.size} clip${if (ids.size == 1) "" else "s"} will be looked through for the usual focus distance (while the camera is open and charging; at most ${com.motioncam.ai.ClipAnalyzer.MAX_QUEUE} wait)", Toast.LENGTH_LONG).show()
-                        exitSelection()
-                    }
                     12 -> remote?.let { r -> MoveSheet.show(this, r, selectedClips().filter { it.id !in missingIds }) { exitSelection(); reload() } }
                 }
                 true
@@ -802,7 +795,7 @@ open class ClipsActivity : Activity() {
             if (!filter.active) return all
         }
         val src = sourceId
-        return all.filter { c -> filter.matches(c, com.motioncam.ai.People.resolve(this, src, TagStore.tagsOf(this, src, c))) { id -> cols[id]?.contains(c.id) == true } }
+        return all.filter { c -> filter.matches(c, TagStore.tagsOf(this, src, c)) { id -> cols[id]?.contains(c.id) == true } }
     }
 
     /** A search that was open when the phone was turned: reopened with its choices once the clips are back. */
@@ -826,7 +819,7 @@ open class ClipsActivity : Activity() {
             remote != null -> remote!!.name
             else -> "Clips on this phone"
         }
-        SearchSheet.show(this, where, start, all, { com.motioncam.ai.People.resolve(this, sourceId, TagStore.tagsOf(this, sourceId, it)) }, colInfos(), sourceId) { f ->
+        SearchSheet.show(this, where, start, all, { TagStore.tagsOf(this, sourceId, it) }, colInfos()) { f ->
             setFilter(f)
             list.setSelection(0)
         }

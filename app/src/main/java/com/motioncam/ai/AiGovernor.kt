@@ -8,9 +8,8 @@ import android.os.SystemClock
  * Heat rules for on-device AI: AI is the first thing to give up when the phone warms, long before the camera's own
  * heat pause, and it comes back only after the phone has stayed cool for a while (so it doesn't flap).
  *
- *  - half the frames: Android's heat level "light", within 5 °C of your temperature limit, or almost no thermal
- *    headroom left;
- *  - off: Android's heat level "moderate" or worse, or within 3 °C of your limit;
+ *  - half the frames: within 2 °C of the AI temperature limit (Settings; by default 3 °C under the camera's own pause);
+ *  - off: at the AI temperature limit, or when Android itself reports the phone as severely hot;
  *  - back to half 5 minutes after the last "off" reading, back to full 2 minutes after the last "half" reading.
  *
  * Fed by the camera engine's once-a-second housekeeping, only while the AI model is in memory.
@@ -29,29 +28,20 @@ object AiGovernor {
     private var lastHotAt = 0L
     private var lastWarmAt = 0L
     private var lastSample = 0L
-    private var lastHeadroomAt = 0L
-    private var headroom = Float.NaN
 
-    /** One reading: battery temperature, Android's heat level, your temperature limit (0 = none). */
+    /** One reading: battery temperature, Android's heat level, the AI temperature limit. */
     @Synchronized
     fun sample(ctx: Context, tempC: Float, thermal: Int, limitC: Int) {
         val now = SystemClock.elapsedRealtime()
-        // how much room is left before Android calls the phone "severely" hot (1.0); asked at most every 10 s
-        if (now - lastHeadroomAt > 10_000L) {
-            lastHeadroomAt = now
-            headroom = try { (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).getThermalHeadroom(10) } catch (_: Throwable) { Float.NaN }
-        }
-        val hr = headroom
         var reason = ""
+        // your AI temperature limit decides; Android's own signal only at "severe" (one step before the camera's own pause)
         val hot = when {
-            thermal >= PowerManager.THERMAL_STATUS_MODERATE -> { reason = "Android reports the phone as warm"; true }
-            limitC > 0 && tempC >= limitC - 3 -> { reason = "battery %.0f °C, close to your limit of %d °C".format(tempC, limitC); true }
+            thermal >= PowerManager.THERMAL_STATUS_SEVERE -> { reason = "Android reports the phone as very hot (battery %.0f °C)".format(tempC); true }
+            limitC > 0 && tempC >= limitC -> { reason = "battery %.0f °C, the AI limit is %d °C".format(tempC, limitC); true }
             else -> false
         }
         val warm = hot || when {
-            thermal >= PowerManager.THERMAL_STATUS_LIGHT -> { reason = "Android reports the phone as slightly warm"; true }
-            limitC > 0 && tempC >= limitC - 5 -> { reason = "battery %.0f °C, nearing your limit of %d °C".format(tempC, limitC); true }
-            !hr.isNaN() && hr >= 0.9f -> { reason = "little room left before the phone is hot"; true }
+            limitC > 0 && tempC >= limitC - 2 -> { reason = "battery %.0f °C, nearing the AI limit of %d °C".format(tempC, limitC); true }
             else -> false
         }
         if (hot) lastHotAt = now

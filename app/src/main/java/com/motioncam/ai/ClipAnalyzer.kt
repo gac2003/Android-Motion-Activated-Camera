@@ -121,13 +121,16 @@ object ClipAnalyzer {
     fun tick(ctx: Context, on: Boolean, chargingOnly: Boolean, charging: Boolean, tempC: Float, thermal: Int, limitC: Int, recording: Boolean) {
         if (waiting < 0) load(ctx.applicationContext)
         val now = SystemClock.elapsedRealtime()
-        val warm = thermal >= PowerManager.THERMAL_STATUS_LIGHT || (limitC > 0 && tempC >= limitC - 6)
+        // your AI temperature limit decides; Android's own signal only at "severe" (one step before the camera's own pause)
+        val severe = thermal >= PowerManager.THERMAL_STATUS_SEVERE
+        val warm = severe || (limitC > 0 && tempC >= limitC)
         if (warm) lastWarmAt = now
         val why = when {
             !on -> "turned off"
             recording -> "a clip is recording"
             chargingOnly && !charging -> "waiting for the charger"
-            warm -> "the phone is warm"
+            severe -> "Android reports the phone as very hot (battery %.0f °C)".format(tempC)
+            warm -> "battery %.0f °C, the AI limit is %d °C".format(tempC, limitC)
             lastWarmAt > 0 && now - lastWarmAt < COOL_MS -> "cooling down"
             else -> null
         }

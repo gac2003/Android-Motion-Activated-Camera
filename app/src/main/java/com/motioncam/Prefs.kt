@@ -98,6 +98,10 @@ class Prefs(ctx: Context) {
     var aiMeaning: Boolean get() = b("aiMeaning", false); set(v) = put("aiMeaning", v)
     /** Recognise faces in described clips: groups of similar faces that can be named. */
     var aiFaces: Boolean get() = b("aiFaces", false); set(v) = put("aiFaces", v)
+    /** AI stops at this battery temperature (0 = 3 °C below the camera's own pause temperature). */
+    var aiMaxTempC: Int get() = i("aiMaxTempC", 0); set(v) = put("aiMaxTempC", v)
+    /** The temperature the AI really stops at: its own setting, else just under the camera's pause, else 43 °C. */
+    val aiTempLimit: Int get() = aiMaxTempC.takeIf { it > 0 } ?: if (maxTempC > 0) maxTempC - 3 else 43
     /** Describing clips only while the phone is charging. */
     var aiChargingOnly: Boolean get() = b("aiChargingOnly", true); set(v) = put("aiChargingOnly", v)
     /** 0 = nearest focus, 1 = infinity. */

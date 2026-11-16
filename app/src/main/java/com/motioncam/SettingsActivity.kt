@@ -499,6 +499,13 @@ open class SettingsActivity : Activity() {
                 "\"Describe clips\" must be on too: a few pictures of each new clip are then also kept as a small fingerprint (about 2 KB a clip, " +
                 "sent to the backup folder once a batch is done). A phone that only watches turns this on to get the box; nothing runs there until you search." +
                 (if (!prefs.aiDescribe) " Describe clips is off on this phone, so it makes no fingerprints itself." else ""))
+            // one temperature for all the AI: it stops there, well before the camera's own pause
+            if (prefs.aiFocus || prefs.aiDescribe) {
+                sf.number("Pause the AI when battery temperature reaches", "°C", 0, 60, prefs.aiMaxTempC,
+                    offLabel = "3 °C under the camera's pause (${prefs.aiTempLimit} °C)", minActive = 30) { prefs.aiMaxTempC = it }
+                sf.note("Above this the AI waits (the camera keeps recording) and carries on 5 minutes after it has cooled. " +
+                    "Keep it below the camera's own pause temperature (Settings › Protection), so the AI is always the first to stop.")
+            }
             // white balance: automatic, or the camera's presets
             val presets = ProCaps.wbPresets
             sf.toggle("White balance: automatic", prefs.wbAuto) { prefs.wbAuto = it; pro(); build() }

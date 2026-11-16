@@ -1070,10 +1070,10 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         val now = SystemClock.elapsedRealtime()
         val bat = batteryInfo()
         // AI heat rules: read only while its models are in memory (during clips and a few minutes after)
-        if (prefs.aiFocus && (aiInClip || com.motioncam.ai.AiEngine.loaded)) com.motioncam.ai.AiGovernor.sample(ctx, bat.tempC, thermalStatus(), prefs.maxTempC)
+        if (prefs.aiFocus && (aiInClip || com.motioncam.ai.AiEngine.loaded)) com.motioncam.ai.AiGovernor.sample(ctx, bat.tempC, thermalStatus(), prefs.aiTempLimit)
         // describing saved clips: may it run now? (asks Android's heat level only while clips are waiting)
         if ((prefs.aiDescribe || prefs.aiFocus) && com.motioncam.ai.ClipAnalyzer.waiting != 0) com.motioncam.ai.ClipAnalyzer.tick(ctx, true, prefs.aiChargingOnly,
-            bat.charging, bat.tempC, thermalStatus(), prefs.maxTempC, mode == Mode.RECORDING)
+            bat.charging, bat.tempC, thermalStatus(), prefs.aiTempLimit, mode == Mode.RECORDING)
         else if (com.motioncam.ai.ClipAnalyzer.running) com.motioncam.ai.ClipAnalyzer.tick(ctx, false, true, false, 0f, 0, 0, false)
 
         if (monitoring) {

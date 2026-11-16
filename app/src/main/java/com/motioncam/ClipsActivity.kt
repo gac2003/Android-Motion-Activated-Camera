@@ -819,7 +819,7 @@ open class ClipsActivity : Activity() {
             remote != null -> remote!!.name
             else -> "Clips on this phone"
         }
-        SearchSheet.show(this, where, start, all, { TagStore.tagsOf(this, sourceId, it) }, colInfos()) { f ->
+        SearchSheet.show(this, where, start, all, { TagStore.tagsOf(this, sourceId, it) }, colInfos(), sourceId) { f ->
             setFilter(f)
             list.setSelection(0)
         }

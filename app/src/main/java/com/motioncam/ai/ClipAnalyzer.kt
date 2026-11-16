@@ -121,12 +121,15 @@ object ClipAnalyzer {
 
     private fun work(ctx: Context) {
         var det: AiEngine.Detector? = null
+        var half: Meaning.Half? = null
         try {
             det = AiEngine.Detector(ctx, "det_l_q.tflite", "cpu", 2)
+            // search by meaning: the picture half of that model too (when turned on)
+            if (com.motioncam.Prefs(ctx).aiMeaning) half = try { Meaning.pictureHalf(ctx) } catch (t: Throwable) { Health.log(ctx, "AI: search by meaning couldn't start ($t)"); null }
             Diagnostics.count("AI clip descriptions: runs")
             while (pausedWhy == null) {
                 val id = synchronized(this) { queue!!.firstOrNull() } ?: break
-                val finished = try { describe(ctx, det, id) } catch (t: Throwable) { Health.log(ctx, "AI: a clip couldn't be described ($t)"); true }
+                val finished = try { describe(ctx, det, half, id) } catch (t: Throwable) { Health.log(ctx, "AI: a clip couldn't be described ($t)"); true }
                 synchronized(this) {
                     if (finished || (tries[id] ?: 0) >= 3) { queue!!.remove(id); tries.remove(id); if (!finished) dropped++ }
                     save(ctx)
@@ -135,17 +138,20 @@ object ClipAnalyzer {
             }
             // tags that couldn't reach a backup folder earlier (no internet): one more try
             if (pausedWhy == null) retryPush(ctx)
+            // the day's fingerprints go to the backup folder once the list is empty (a few uploads a day, not one a clip)
+            if (pausedWhy == null && half != null) try { Meaning.sendDays(ctx) } catch (_: Throwable) {}
         } catch (t: Throwable) {
             Health.log(ctx, "AI: describing clips stopped ($t)")
             pausedWhy = "couldn't start (${t.javaClass.simpleName})"
         } finally {
             try { det?.close() } catch (_: Throwable) {}
+            try { half?.close() } catch (_: Throwable) {}
             running = false
         }
     }
 
     /** Describes one clip. False when it had to stop part-way (it stays on the list). */
-    private fun describe(ctx: Context, det: AiEngine.Detector, id: Long): Boolean {
+    private fun describe(ctx: Context, det: AiEngine.Detector, half: Meaning.Half?, id: Long): Boolean {
         val clip = ClipStore.get(ctx, id) ?: return true   // deleted meanwhile
         tries[id] = (tries[id] ?: 0) + 1
         val t0 = SystemClock.elapsedRealtime()
@@ -158,11 +164,16 @@ object ClipAnalyzer {
         val seen = HashMap<Int, Int>(); val firstAt = HashMap<Int, FloatArray>(); val lastAt = HashMap<Int, FloatArray>()
         var frames = 0
         var colourful = 0f
+        // search by meaning: fingerprints of three moments of the whole picture, and a close-up of the clearest person
+        val prints = ArrayList<ByteArray>()
+        var closeUp: android.graphics.Bitmap? = null
+        var closeUpH = 0f
         val r = MediaMetadataRetriever()
         try {
             r.setDataSource(ctx, clip.uri)
             val dur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.takeIf { it > 0 } ?: clip.durationMs.coerceAtLeast(1000L)
             val n = (dur / 1000L).toInt().coerceIn(1, MAX_FRAMES)
+            val moments = setOf(n / 6, n / 2, (5 * n) / 6)
             for (i in 0 until n) {
                 if (pausedWhy != null) return false
                 val tMs = ((i + 0.5) * dur / n).toLong()
@@ -171,6 +182,18 @@ object ClipAnalyzer {
                 frames++
                 val found = det.detectBitmap(bmp, kinds)
                 val people = found.filter { it[5].toInt() == ClipFacts.PERSON }
+                if (half != null) {
+                    if (i in moments) try { prints.add(Meaning.fingerprint(half, bmp)) } catch (_: Throwable) {}
+                    val big = people.maxByOrNull { it[3] - it[1] }
+                    if (big != null && big[3] - big[1] > closeUpH) try {
+                        // a square around the person, a little larger than their box, inside the picture
+                        val side = (maxOf((big[2] - big[0]) * bmp.width, (big[3] - big[1]) * bmp.height) * 1.2f).toInt().coerceIn(16, minOf(bmp.width, bmp.height))
+                        val x = (((big[0] + big[2]) / 2 * bmp.width).toInt() - side / 2).coerceIn(0, bmp.width - side)
+                        val y = (((big[1] + big[3]) / 2 * bmp.height).toInt() - side / 2).coerceIn(0, bmp.height - side)
+                        val cut = android.graphics.Bitmap.createBitmap(bmp, x, y, side, side)
+                        if (cut !== bmp) { closeUp?.recycle(); closeUp = cut; closeUpH = big[3] - big[1] }
+                    } catch (_: Throwable) {}
+                }
                 val tr = tracker.add(tMs / 1000f, people)
                 for (j in people.indices) {
                     val b = people[j]; val k = tr[j]
@@ -189,7 +212,14 @@ object ClipAnalyzer {
                 bmp.recycle()
                 try { Thread.sleep(100) } catch (_: InterruptedException) {}   // unhurried: this is never urgent
             }
-        } finally { try { r.release() } catch (_: Throwable) {} }
+        } finally {
+            try { r.release() } catch (_: Throwable) {}
+            if (pausedWhy != null) { closeUp?.recycle(); closeUp = null }
+        }
+        if (half != null) {
+            closeUp?.let { c -> try { prints.add(Meaning.fingerprint(half, c)) } catch (_: Throwable) {}; c.recycle() }
+            try { Meaning.keep(ctx, clip.name, prints) } catch (_: Throwable) {}
+        }
         if (frames == 0) return true   // unreadable: nothing to say
 
         val words = ArrayList<String>()

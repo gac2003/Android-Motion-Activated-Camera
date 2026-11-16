@@ -94,6 +94,8 @@ class Prefs(ctx: Context) {
     var aiFocus: Boolean get() = b("aiFocus", false); set(v) = put("aiFocus", v)
     /** Describe saved clips (people, colours, objects) so Search can find them. Off until turned on. */
     var aiDescribe: Boolean get() = b("aiDescribe", false); set(v) = put("aiDescribe", v)
+    /** Search by meaning: fingerprints of clips' pictures (a recording phone) and the words box in Search (any phone). */
+    var aiMeaning: Boolean get() = b("aiMeaning", false); set(v) = put("aiMeaning", v)
     /** Describing clips only while the phone is charging. */
     var aiChargingOnly: Boolean get() = b("aiChargingOnly", true); set(v) = put("aiChargingOnly", v)
     /** 0 = nearest focus, 1 = infinity. */

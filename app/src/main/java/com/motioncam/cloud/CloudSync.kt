@@ -850,6 +850,27 @@ object CloudSync {
         return ok
     }
 
+    /**
+     * Puts a small file of clip fingerprints (search by meaning) into the ".ai" subfolder of every backup folder,
+     * replacing the one of the same name. Network; false when a folder couldn't be reached now.
+     */
+    fun pushMeaning(ctx: Context, name: String, bytes: ByteArray): Boolean {
+        var ok = true
+        for (k in enabledKinds(ctx)) {
+            val cfg = CloudConfig(ctx, k)
+            val folder = cfg.folderId ?: continue
+            if (cfg.blocked != null || waitReason(ctx) != null) { ok = false; continue }
+            try {
+                providerFor(ctx, k).use { p ->
+                    val ai = p.listFolders(folder).firstOrNull { it.name == com.motioncam.ai.Meaning.FOLDER } ?: p.createFolder(folder, com.motioncam.ai.Meaning.FOLDER)
+                    for (old in p.list(ai.id)) if (old.name == name) p.delete(ai.id, old)
+                    p.upload(ai.id, name, bytesSource(bytes), null, {}, {})
+                }
+            } catch (_: Exception) { ok = false }
+        }
+        return ok
+    }
+
     private fun uploadTags(ctx: Context, p: CloudProvider, folder: String, clip: Clip) {
         val t = com.motioncam.TagStore.tagsOf(ctx, null, clip)
         if (t.isEmpty()) return

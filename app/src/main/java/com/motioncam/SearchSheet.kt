@@ -36,14 +36,15 @@ class SearchSheet private constructor(
     private val clips: List<Clip>,
     private val tagMap: Map<Long, Set<String>>,
     private val cols: List<ColInfo>,
+    private val scope: String?,
     private val onApply: (ClipFilter) -> Unit,
 ) {
     class ColInfo(val id: String, val name: String, val ids: Set<Long>)
 
     companion object {
         fun show(a: Activity, where: String, start: ClipFilter, clips: List<Clip>, tagsOf: (Clip) -> Set<String>,
-                 cols: List<ColInfo>, onApply: (ClipFilter) -> Unit) {
-            SearchSheet(a, where, start.copy(), clips, clips.associate { it.id to tagsOf(it) }, cols, onApply).open()
+                 cols: List<ColInfo>, scope: String? = null, onApply: (ClipFilter) -> Unit) {
+            SearchSheet(a, where, start.copy(), clips, clips.associate { it.id to tagsOf(it) }, cols, scope, onApply).open()
         }
 
         /** The sheet open now (to keep it, with its unsaved choices, when the phone is turned). */
@@ -97,6 +98,7 @@ class SearchSheet private constructor(
         root.addView(top)
 
         val body = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(d(16), 0, d(16), d(24)) }
+        meaningSection(body)
         dateSection(body)
         tagSection(body, false)
         tagSection(body, true)
@@ -120,7 +122,7 @@ class SearchSheet private constructor(
             setTypeface(typeface, Typeface.BOLD)
             background = GradientDrawable().apply { cornerRadius = d(26).toFloat(); setColor(Ui.ACCENT) }
             isClickable = true
-            setOnClickListener { onApply(f); dialog.dismiss() }
+            setOnClickListener { applyNow() }
         }
         bottom.addView(showBtn, if (land) LinearLayout.LayoutParams(-2, -2).also { showBtn.minWidth = d(220) } else LinearLayout.LayoutParams(-1, -2))
         root.addView(bottom)
@@ -135,6 +137,8 @@ class SearchSheet private constructor(
         for (r in repaints) r()
         val n = clips.count { c -> f.matches(c, tagMap[c.id] ?: emptySet()) { id -> colById[id]?.ids?.contains(c.id) == true } }
         showBtn.text = when {
+            searching -> "Searching…"
+            f.hasMeaning && f.meaningFor != f.meaning -> "Search"
             !f.active -> "Show all ${clips.size} clip${if (clips.size == 1) "" else "s"}"
             n == 0 -> "No clips match"
             else -> "Show $n clip${if (n == 1) "" else "s"}"
@@ -311,6 +315,78 @@ class SearchSheet private constructor(
         if (f.datePreset == null && fr != null && fr == t && day != fr) {
             if (day < fr) { f.from = day; f.to = fr } else f.to = day
         } else { f.datePreset = null; f.from = day; f.to = day }
+    }
+
+    // ------------------------------------------------------------------ search by meaning (AI)
+
+    private var searching = false
+    private var meaningNote: TextView? = null
+
+    /** A box for words ("red hat", "person with a package"); only with the setting on (Settings › Camera). */
+    private fun meaningSection(body: LinearLayout) {
+        if (!Prefs(a).aiMeaning) return
+        header(body, "What's in the clip (AI)")
+        val box = EditText(a).apply {
+            hint = "red hat, person with a package, dog…"
+            setText(f.meaning)
+            setTextColor(Color.WHITE); setHintTextColor(0xFF6A6F76.toInt()); isSingleLine = true
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
+            setPadding(d(12), d(10), d(12), d(10))
+            background = GradientDrawable().apply { cornerRadius = d(12).toFloat(); setColor(0xFF1E2126.toInt()) }
+        }
+        body.addView(box, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = d(6) })
+        box.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, af: Int) {}
+            override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                val t = s?.toString()?.trim() ?: ""
+                if (t != f.meaning) { f.meaning = t; changed() }
+            }
+        })
+        val note = Ui.label(a, "", 12f, Ui.GREY).apply { setPadding(0, 0, 0, d(4)) }
+        body.addView(note)
+        meaningNote = note
+        repaints += {
+            if (box.text.toString().trim() != f.meaning) box.setText(f.meaning)   // after Clear all
+            if (!searching) note.text = when {
+                !f.hasMeaning -> "Finds clips by what their pictures show. Only clips this was turned on for when they were recorded."
+                f.meaningFor == f.meaning -> "${f.meaningNames.size} clip${if (f.meaningNames.size == 1) "" else "s"} fit best"
+                else -> ""
+            }
+        }
+    }
+
+    /** Show: with new words in the box, the clips are looked through first (a moment; a remote folder needs internet). */
+    private fun applyNow() {
+        if (searching) return
+        if (!f.hasMeaning || f.meaningFor == f.meaning) {
+            if (!f.hasMeaning) { f.meaningFor = ""; f.meaningNames.clear() }
+            onApply(f); dialog.dismiss(); return
+        }
+        searching = true
+        val words = f.meaning
+        meaningNote?.text = "Looking through the clips…"
+        changed()
+        val app = a.applicationContext
+        Thread {
+            val found = try { com.motioncam.ai.Meaning.search(app, scope, clips, words) } catch (t: Throwable) { null }
+            a.runOnUiThread {
+                searching = false
+                if (showing !== this) return@runOnUiThread   // closed meanwhile
+                if (found == null || f.meaning != words) {
+                    meaningNote?.text = if (found == null) "Couldn't search just now (the AI model didn't start)" else ""
+                    changed(); return@runOnUiThread
+                }
+                f.meaningFor = words
+                f.meaningNames.clear(); f.meaningNames.addAll(found.names)
+                if (found.known == 0) {
+                    changed()
+                    meaningNote?.text = "No clips here have been looked at by the AI yet (it works on new clips of a camera with \"Search by meaning\" on)"
+                    return@runOnUiThread
+                }
+                onApply(f); dialog.dismiss()
+            }
+        }.start()
     }
 
     // ------------------------------------------------------------------ tags and collections

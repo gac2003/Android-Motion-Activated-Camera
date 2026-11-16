@@ -35,20 +35,26 @@ class ClipFilter {
     var minMb: Int? = null
     var maxMb: Int? = null
     var matchAny = false
+    /** Search by meaning (AI): the words, and the clips (by name, best first) found for [meaningFor] = those words. */
+    var meaning = ""
+    var meaningFor = ""
+    val meaningNames = LinkedHashSet<String>()
 
+    val hasMeaning get() = meaning.isNotEmpty()
     val hasDate get() = datePreset != null || from != null || to != null
     val hasTags get() = tagsIn.isNotEmpty() || tagsOut.isNotEmpty()
     val hasCols get() = colsIn.isNotEmpty() || colsOut.isNotEmpty()
     val hasLength get() = minSec != null || maxSec != null
     val hasSize get() = minMb != null || maxMb != null
     /** How many kinds of filters are on (shown on the Search tile). */
-    val count get() = listOf(hasDate, hasTags, hasCols, hasLength, hasSize).count { it }
+    val count get() = listOf(hasDate, hasTags, hasCols, hasLength, hasSize, hasMeaning).count { it }
     val active get() = count > 0
 
     fun clear() {
         datePreset = null; from = null; to = null
         tagsIn.clear(); tagsOut.clear(); colsIn.clear(); colsOut.clear()
         minSec = null; maxSec = null; minMb = null; maxMb = null
+        meaning = ""; meaningFor = ""; meaningNames.clear()
     }
 
     fun copy(): ClipFilter = fromJson(toJson())
@@ -87,6 +93,7 @@ class ClipFilter {
             val mb = c.size / 1_000_000.0
             checks += (minMb == null || mb >= minMb!!) && (maxMb == null || mb <= maxMb!!)
         }
+        if (hasMeaning) checks += c.name in meaningNames
         if (checks.isEmpty()) return true
         return if (matchAny) checks.any { it } else checks.all { it }
     }
@@ -98,6 +105,7 @@ class ClipFilter {
 
     fun parts(colName: (String) -> String?): List<Part> {
         val out = ArrayList<Part>()
+        if (hasMeaning) out += Part("Like \"$meaning\"", { it.meaning = ""; it.meaningFor = ""; it.meaningNames.clear() })
         if (hasDate) out += Part(dateText(), { it.datePreset = null; it.from = null; it.to = null })
         if (tagsIn.isNotEmpty()) out += Part("Tags: " + tagsIn.joinToString(if (tagsAll) " and " else " or "), { it.tagsIn.clear() })
         if (tagsOut.isNotEmpty()) out += Part("Not tagged " + tagsOut.joinToString(" or "), { it.tagsOut.clear() })
@@ -137,6 +145,7 @@ class ClipFilter {
         minSec?.let { put("minSec", it) }; maxSec?.let { put("maxSec", it) }
         minMb?.let { put("minMb", it) }; maxMb?.let { put("maxMb", it) }
         put("any", matchAny)
+        if (meaning.isNotEmpty()) { put("meaning", meaning); put("meaningFor", meaningFor); put("meaningNames", JSONArray(meaningNames.toList())) }
     }
 
     companion object {
@@ -153,6 +162,7 @@ class ClipFilter {
             fun int(k: String) = if (o.has(k)) o.getInt(k) else null
             minSec = int("minSec"); maxSec = int("maxSec"); minMb = int("minMb"); maxMb = int("maxMb")
             matchAny = o.optBoolean("any")
+            meaning = o.optString("meaning"); meaningFor = o.optString("meaningFor"); meaningNames += strs("meaningNames")
         }
 
         /** The saved filter of a view ("local", a remote folder id, plus "/collection" inside a collection). */

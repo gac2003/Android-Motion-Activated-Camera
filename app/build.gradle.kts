@@ -112,4 +112,6 @@ dependencies {
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
     implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
+    // search by meaning: the image-text model runs on this second runtime (its published form)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.2")
 }

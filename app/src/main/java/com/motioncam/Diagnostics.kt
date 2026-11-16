@@ -88,6 +88,7 @@ object Diagnostics {
         head("AI (describing clips)")
         if (!p.aiDescribe) line("Setting", "off (nothing loaded, nothing runs)")
         else try { com.motioncam.ai.ClipAnalyzer.report(ctx) { k, v -> line(k, v) } } catch (_: Exception) {}
+        line("Search by meaning", if (!p.aiMeaning) "off" else try { "${com.motioncam.ai.Meaning.localCount(ctx)} clips with fingerprints here · ${com.motioncam.ai.Meaning.daysToSend(ctx)} day files waiting for the folder" } catch (_: Exception) { "?" })
 
         head("Phone")
         val bat = ctx.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))

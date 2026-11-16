@@ -470,6 +470,12 @@ open class SettingsActivity : Activity() {
                     }
                 } }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@SettingsActivity, 8) })
             }
+            // search by meaning (on-device AI): off unless turned on
+            sf.toggle("Search by meaning (AI, experimental)", prefs.aiMeaning) { prefs.aiMeaning = it; build() }
+            if (prefs.aiMeaning) sf.note("Search gets a box for words (\"red hat\", \"person with a package\"). On a phone that records, " +
+                "\"Describe clips\" must be on too: a few pictures of each new clip are then also kept as a small fingerprint (about 2 KB a clip, " +
+                "sent to the backup folder once a batch is done). A phone that only watches turns this on to get the box; nothing runs there until you search." +
+                (if (!prefs.aiDescribe) " Describe clips is off on this phone, so it makes no fingerprints itself." else ""))
             // white balance: automatic, or the camera's presets
             val presets = ProCaps.wbPresets
             sf.toggle("White balance: automatic", prefs.wbAuto) { prefs.wbAuto = it; pro(); build() }

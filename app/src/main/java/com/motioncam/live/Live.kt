@@ -70,6 +70,8 @@ object Live {
     val catchUpsRunning = java.util.concurrent.atomic.AtomicInteger(0)
     private var presenceFor: String? = null
     private var listening = false
+    /** The live connection is on (this phone announced itself and hasn't gone offline since). */
+    fun connected() = presenceFor != null
 
     /** Registers this phone and keeps it marked online while connected (offline is set by the server on disconnect). */
     @Synchronized
@@ -427,17 +429,23 @@ object Live {
         // a phone viewing this folder: refresh what changed right away instead of on the next timer
         for (src in com.motioncam.remote.RemoteSources.all(ctx)) {
             if (folderKey(src.kind, src.folderId) != key) continue
-            com.motioncam.remote.SharedSync.schedule(ctx, src.id, 0)
-            if (what == "clips") refreshSoon(ctx, "r:" + src.id) { com.motioncam.remote.RemoteRepo.refresh(ctx, src) }
+            // new or deleted clips (a busy camera says so every 10 s): the folder is listed and its collections, marks
+            // and tags are read at most once a minute; a change to collections / marks / tags themselves syncs at once
+            if (what == "clips") refreshSoon(ctx, "r:" + src.id) {
+                com.motioncam.remote.SharedSync.schedule(ctx, src.id, 0)
+                com.motioncam.remote.RemoteRepo.refresh(ctx, src)
+            } else com.motioncam.remote.SharedSync.schedule(ctx, src.id, 0)
         }
         // the camera phone itself: protections / collections affect its clean-up
         for (k in com.motioncam.cloud.Dest.all(ctx)) {
             val f = CloudConfig(ctx, k).folderId ?: continue
             if (folderKey(k.kind, f) != key) continue
             if (what == "settings") { com.motioncam.cloud.SharedFolderSettings.changedElsewhere(ctx, k); continue }
-            com.motioncam.cloud.MarkSync.schedule(ctx, com.motioncam.cloud.MarkSync.backupKey(k))
             // clips deleted from the cloud on another phone: forget them as "backed up" so they can be uploaded again
-            if (what == "clips") refreshSoon(ctx, "c:" + k.key) { com.motioncam.cloud.CloudSync.reconcile(ctx, k) }
+            if (what == "clips") refreshSoon(ctx, "c:" + k.key) {
+                com.motioncam.cloud.MarkSync.schedule(ctx, com.motioncam.cloud.MarkSync.backupKey(k))
+                com.motioncam.cloud.CloudSync.reconcile(ctx, k)
+            } else com.motioncam.cloud.MarkSync.schedule(ctx, com.motioncam.cloud.MarkSync.backupKey(k))
         }
     }
 }

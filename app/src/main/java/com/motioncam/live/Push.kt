@@ -66,14 +66,31 @@ object Push {
     fun saveToken(ctx: Context, t: String) {
         if (token(ctx) == t) { publish(ctx); return }
         sp(ctx).edit().putString("token", t).apply()
-        publish(ctx)
+        if (Live.connected()) publish(ctx) else publishBriefly(ctx)
         AlertCheckJob.schedule(ctx)
     }
 
-    /** devices/<me>/push (when connected; [Live.refresh] publishes it on every connection too). */
+    /**
+     * devices/<me>/push, only while the live connection is on ([Live.refresh] publishes it on every connection). Not
+     * otherwise: MotionCam asks for its push address each time it starts (also when a push wakes it), and writing it
+     * then opened a live connection that nothing closed for as long as Android kept MotionCam in memory.
+     */
     fun publish(ctx: Context) {
         val t = token(ctx) ?: return
+        if (!Live.connected()) return
         try { Live.ref(ctx, "devices/${Device.id(ctx)}/push")?.setValue(LiveNet.seal(ctx, t)) } catch (_: Exception) {}
+    }
+
+    /** A new push address while MotionCam is closed (rare): the cameras must learn it, so connect for 10 s to write it. */
+    private fun publishBriefly(ctx: Context) {
+        val t = token(ctx) ?: return
+        if (!Live.enabled(ctx)) return
+        appCtx = ctx.applicationContext
+        try {
+            LiveNet.db(ctx)?.goOnline()
+            Live.ref(ctx, "devices/${Device.id(ctx)}/push")?.setValue(LiveNet.seal(ctx, t))
+        } catch (_: Exception) {}
+        main.removeCallbacks(offlineAgain); main.postDelayed(offlineAgain, 10_000)
     }
 
     /** Every camera in the network pushes, and this phone can receive: the 15-minute check isn't needed. */

@@ -449,7 +449,7 @@ object CloudSync {
     /** Called from the JobScheduler job: run the workers and report when idle. */
     fun runForJob(ctx: Context, finished: (Boolean) -> Unit) {
         jobCallback = finished
-        kick(ctx)
+        kick(ctx, fromJob = true)
         synchronized(lock) { if (lanes.values.sum() == 0) { jobCallback = null; finished(jobs?.any { !it.failed && !it.paused } == true) } }
     }
 
@@ -461,12 +461,23 @@ object CloudSync {
      * Starts upload lanes where there is work (up to 3 per cloud service, 2 per FTP/SFTP server).
      * Cheap; call whenever something may have changed.
      */
-    fun kick(ctx: Context) {
+    fun kick(ctx: Context, fromJob: Boolean = false) {
         val app = ctx.applicationContext
         if (Prefs(app).cloudPaused) return
         val now = System.currentTimeMillis()
         // folders backing up new clips, and any other folder with clips chosen for it by hand
         val all = targets(app).filter { CloudConfig(app, it).blocked == null }
+        // nothing can be uploaded right now (no internet, waiting for Wi-Fi or the charger): no upload threads at all.
+        // Android's job (which knows those conditions) and the network callback start them when it changes. Starting
+        // them anyway made each one stop at once and start the next: a loop that ran flat out until the internet was back.
+        if (waitReason(app) != null) {
+            val waiting = synchronized(lock) { load(app); jobs!!.any { j -> !j.failed && !j.paused && all.any { it == j.kind } } }
+            if (waiting) {
+                watchNetwork(app)
+                if (!fromJob && now - lastWaitJob > 60_000L) { lastWaitJob = now; scheduleJob(app, 0) }
+            }
+            return
+        }
         synchronized(lock) {
             load(app)
             val enabled = all.filter { k -> CloudConfig(app, k).enabled || jobs!!.any { it.kind == k } }
@@ -476,9 +487,12 @@ object CloudSync {
                 val pending = jobs!!.filter { it.kind == k && !it.failed && !it.paused && !it.running }
                 val due = pending.count { it.nextAt <= now }
                 pending.filter { it.nextAt > now }.minOfOrNull { it.nextAt }?.let { nextWake = minOf(nextWake, it) }
-                val retentionDue = retentionDue(app, k) || thumbsDue(app, k)
                 val active = lanes[k] ?: 0
-                val want = minOf(laneLimit(k), due + active).coerceAtLeast(if (retentionDue && active == 0) 1 else 0)
+                // clean-up / missing thumbnails alone start a thread at most every 10 minutes per folder (one that
+                // can't get anywhere, e.g. the server is down, must not be started again the moment it gives up)
+                val housekeeping = active == 0 && now - (lastHousekeeping[k] ?: 0L) > 10 * 60_000L && (retentionDue(app, k) || thumbsDue(app, k))
+                val want = minOf(laneLimit(k), due + active).coerceAtLeast(if (housekeeping) 1 else 0)
+                if (housekeeping && due == 0) lastHousekeeping[k] = now
                 for (i in active until want) {
                     lanes[k] = (lanes[k] ?: 0) + 1
                     Thread({ lane(app, k) }, "cloud-${k.key}-$i").apply { isDaemon = true }.start()
@@ -509,6 +523,9 @@ object CloudSync {
         (ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
 
     @Volatile private var lastNetState = -1
+    /** When Android's job was last asked to wait for the internet / Wi-Fi / charger (asked at most once a minute). */
+    @Volatile private var lastWaitJob = 0L
+    private val lastHousekeeping = HashMap<Dest, Long>()
 
     private fun watchNetwork(ctx: Context) {
         if (netCallbackRegistered) return
@@ -560,7 +577,7 @@ object CloudSync {
             val cfg = CloudConfig(ctx, k)
             if (retentionDue(ctx, k)) { p = provider(ctx, cfg); retention(ctx, cfg, p) }
             while (!stop) {
-                if (waitReason(ctx) != null) { watchNetwork(ctx); scheduleJob(ctx, 0); break }
+                if (waitReason(ctx) != null) { watchNetwork(ctx); break }   // kick (below) leaves it to Android's job
                 val job = claim(ctx, k)
                 if (job == null) {
                     // nothing to upload: add thumbnails for clips backed up before thumbnails existed

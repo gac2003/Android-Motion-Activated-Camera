@@ -862,6 +862,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     }
 
     private var rowBuf = ByteArray(0)
+    private var packBuf = ByteArray(0)
 
     /** Copies a YUV_420_888 camera image into a WebRTC I420 buffer (any row / pixel strides). */
     private fun toI420(img: Image, out: org.webrtc.JavaI420Buffer) {
@@ -874,7 +875,13 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
                 val n = minOf(rs, sb.remaining())
                 sb.get(row, 0, n)
                 dst.position(y * dstStride)
-                if (ps == 1) dst.put(row, 0, pw) else for (x in 0 until pw) dst.put(row[x * ps])
+                if (ps == 1) dst.put(row, 0, pw) else {
+                    // interleaved colour planes: pick every ps-th byte into a row, then one copy (not a call per pixel)
+                    val pk = packBuf.takeIf { it.size >= pw } ?: ByteArray(pw).also { packBuf = it }
+                    var i = 0
+                    for (x in 0 until pw) { pk[x] = row[i]; i += ps }
+                    dst.put(pk, 0, pw)
+                }
             }
         }
         val p = img.planes
@@ -959,6 +966,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             val bmp = YuvTools.render(f, if (prefs.streamHd || hq) 1 else 2, recordRotation(), base = true, peaking = false)
             val bos = ByteArrayOutputStream(64 * 1024)
             bmp.compress(Bitmap.CompressFormat.JPEG, if (hq) 90 else if (prefs.streamHd) 65 else 72, bos)
+            bmp.recycle()   // 5 a second while someone watches: freed now, not whenever memory gets collected
             FrameHub.publishJpeg(bos.toByteArray())
         }
     }

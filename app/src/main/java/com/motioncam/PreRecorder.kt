@@ -221,7 +221,8 @@ class PreRecorder(
         // keep from the newest key frame that is at least preMs old
         val cutoff = p.ptsUs - preMs * 1000L
         var keep = 0
-        for ((i, pk) in vq.withIndex()) { if (pk.ptsUs > cutoff) break; if (pk.key) keep = i }
+        var i = 0
+        while (i < vq.size) { val pk = vq[i]; if (pk.ptsUs > cutoff) break; if (pk.key) keep = i; i++ }
         repeat(keep) { vq.removeFirst() }
         while (vq.size > 400) vq.removeFirst()   // hard memory cap
         val first = vq.firstOrNull()?.ptsUs ?: return@synchronized

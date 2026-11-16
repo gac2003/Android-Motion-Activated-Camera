@@ -117,6 +117,11 @@ object Health {
         if (!com.motioncam.live.Live.enabled(ctx) || !Prefs(ctx).liveCamera) return
         try { com.motioncam.live.LiveNet.db(ctx)?.goOnline() } catch (_: Exception) {}
         try { com.motioncam.live.CameraLink.eventDirect(ctx, "safety_stop", text) } catch (_: Exception) {}
+        // sent from a process that isn't otherwise connected (the watchdog): disconnect again once it's out
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (!com.motioncam.live.Live.viewerActive && !com.motioncam.live.Live.cameraActive)
+                try { com.motioncam.live.LiveNet.db(ctx)?.goOffline() } catch (_: Exception) {}
+        }, 13_000)
     }
 }
 

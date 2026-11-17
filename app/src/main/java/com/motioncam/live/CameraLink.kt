@@ -74,7 +74,7 @@ object CameraLink {
 
     private val SETTING_KEYS = setOf("camera", "resHeight", "fps", "hevc", "bitrateMbps", "audio", "preRecordMs", "stopDelaySec",
         "maxClipMin", "sensitivity", "lightFilter", "minAreaPct", "minMotionMs", "exposureAuto", "evIndex", "iso", "shutterNs",
-        "focusAuto", "focusPos", "wbAuto", "wbKelvin", "zoom")
+        "focusAuto", "focusPos", "wbAuto", "wbKelvin", "zoom", "thumbArea")
     private val publishSoon = Runnable { app?.let { if (running) try { publishStatus(it) } catch (_: Exception) {} } }
     private val prefsL = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (running && key in SETTING_KEYS) {
@@ -94,7 +94,7 @@ object CameraLink {
         "maxClipMin" to "clip length", "sensitivity" to "sensitivity", "lightFilter" to "light filter", "minAreaPct" to "minimum area",
         "minMotionMs" to "minimum motion time", "exposureAuto" to "exposure mode", "evIndex" to "exposure compensation", "iso" to "ISO",
         "shutterNs" to "shutter speed", "focusAuto" to "focus mode", "focusPos" to "focus distance", "wbAuto" to "white balance mode",
-        "wbKelvin" to "white balance", "zoom" to "zoom")
+        "wbKelvin" to "white balance", "zoom" to "zoom", "thumbArea" to "clip picture area")
     private val reportLocal = Runnable {
         val c = app ?: return@Runnable
         if (!running || localKeys.isEmpty()) return@Runnable
@@ -394,7 +394,7 @@ object CameraLink {
         .put("sensitivity", p.sensitivity).put("lightFilter", p.lightFilter).put("minAreaPct", p.minAreaPct.toDouble())
         .put("minMotionMs", p.minMotionMs).put("exposureAuto", p.exposureAuto).put("evIndex", p.evIndex).put("iso", p.iso)
         .put("shutterNs", p.shutterNs).put("focusAuto", p.focusAuto).put("focusPos", p.focusPos.toDouble())
-        .put("wbAuto", p.wbAuto).put("wbKelvin", p.wbKelvin).put("zoom", p.zoom.toDouble()).put("crop", p.crop)
+        .put("wbAuto", p.wbAuto).put("wbKelvin", p.wbKelvin).put("zoom", p.zoom.toDouble()).put("crop", p.crop).put("thumbArea", p.thumbArea)
 
     /** What the remote controls may offer (lenses, ranges). */
     private fun caps(ctx: Context): JSONObject? {

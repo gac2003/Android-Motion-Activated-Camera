@@ -15,6 +15,16 @@ object Zones {
     fun format(cells: BooleanArray): String =
         if (cells.all { it }) "" else String(CharArray(CELLS) { if (cells[it]) '1' else '0' })
 
+    /** A painted area (the clip-picture tool): only the cells marked; nothing marked = "" (the default). */
+    fun parseArea(s: String): BooleanArray {
+        val out = BooleanArray(CELLS)
+        if (s.length == CELLS) for (i in 0 until CELLS) out[i] = s[i] == '1'
+        return out
+    }
+
+    fun formatArea(cells: BooleanArray): String =
+        if (cells.none { it }) "" else String(CharArray(CELLS) { if (cells[it]) '1' else '0' })
+
     /** Expands cells to the detector's block grid (each cell = 2x2 blocks). */
     fun blockMask(cells: BooleanArray): BooleanArray {
         val out = BooleanArray(MotionDetector.N)

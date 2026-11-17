@@ -10,6 +10,8 @@ object FrameHub {
     @Volatile var peaking = false
     /** UI wants the zone/motion view (ZONES control open). */
     @Volatile var showMotion = false
+    /** UI wants the clip-picture area shown (THUMB control open). */
+    @Volatile var showThumb = false
 
     /**
      * Smooth live video (WebRTC) wants frames: (width, height, fill an I420 buffer, rotation, timestamp ns). Called

@@ -61,6 +61,11 @@ class Prefs(ctx: Context) {
                 if ("CROP" !in v.split(",")) v = if (v.isBlank()) ALL_CHIPS.joinToString(",") else "$v,CROP"
                 sp.edit().putBoolean("chipCropSeen", true).putString("chipLayout", v).apply()
             }
+            // and so did THUMB (where people should be in a clip's picture)
+            if (!b("chipThumbSeen", false)) {
+                if ("THUMB" !in v.split(",")) v = if (v.isBlank()) ALL_CHIPS.joinToString(",") else "$v,THUMB"
+                sp.edit().putBoolean("chipThumbSeen", true).putString("chipLayout", v).apply()
+            }
             return v
         }
         set(v) = put("chipLayout", v)
@@ -109,6 +114,11 @@ class Prefs(ctx: Context) {
     var maxClipMin: Int get() = i("maxClipMin", 10); set(v) = put("maxClipMin", v)
     /** Detection zones, 16x9 cells as '1'/'0'. Empty = whole frame. */
     var zones: String get() = s("zones", ""); set(v) = put("zones", v)
+    /**
+     * Where people should be in a clip's picture (the THUMB tool): 16x9 cells as '1'/'0' like [zones]. Empty = the
+     * middle of the picture counts most.
+     */
+    var thumbArea: String get() = s("thumbArea", ""); set(v) = put("thumbArea", v)
     /** CROP: the part of the picture recorded, "l,t,r,b" (see [Crop]). Empty = the whole picture. */
     var crop: String get() = s("crop", ""); set(v) = put("crop", v)
     /** CROP's shape on screen (index into [Crop.SHAPES]). */
@@ -213,11 +223,11 @@ class Prefs(ctx: Context) {
     }
 
     companion object {
-        val ALL_CHIPS = listOf("LENS", "FORMAT", "EV", "ISO", "SPEED", "FOCUS", "WB", "ZOOM", "ZONES", "CROP")
+        val ALL_CHIPS = listOf("LENS", "FORMAT", "EV", "ISO", "SPEED", "FOCUS", "WB", "ZOOM", "ZONES", "CROP", "THUMB")
 
         val PREVIEW_KEYS = listOf("previewOn", "peaking", "lowPowerIdle", "use24h")
         val RECORDING_KEYS = listOf("resHeight", "fps", "hevc", "bitrateMbps", "audio", "rotation", "preRecordMs", "discardShortOnStop", "discardShortMs", "crop", "cropShape")
-        val MOTION_KEYS = listOf("sensitivity", "lightFilter", "minAreaPct", "minMotionMs", "stopDelaySec", "maxClipMin", "zones")
+        val MOTION_KEYS = listOf("sensitivity", "lightFilter", "minAreaPct", "minMotionMs", "stopDelaySec", "maxClipMin", "zones", "thumbArea")
         val STORAGE_KEYS = listOf("maxStorageGb", "keepDays", "autoDeleteLow")
         val PROTECTION_KEYS = listOf("minBattery", "maxTempC")
         val REMOTE_KEYS = listOf("serverOn", "streamHd", "port")

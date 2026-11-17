@@ -539,6 +539,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
 
     private fun startRecording(preRoll: Boolean = true) {
         if (!monitoring || mode != Mode.WATCHING) return
+        synchronized(candLock) { candN = 0 }   // candidates for this clip's picture start afresh
         val pr = pre
         if (pr != null) {
             val p = try { ClipStore.create(ctx) } catch (e: Exception) { message = "Cannot create clip: ${e.message}"; publish(); return }
@@ -592,6 +593,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
     }
 
     private fun stopRecording(rearm: Boolean) {
+        pickThumbMoment()?.let { peakElapsed = it }   // the best moment for the clip's picture
         val pc = preClip
         if (pc != null) {
             preClip = null
@@ -636,6 +638,130 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         if (rebuildPending) rebuildSession()
         if (rearm && monitoring) h.post { arm() }
         maybeCleanup(force = false)
+    }
+
+    // ================================================================== choosing a clip's picture
+    //
+    // The picture of a clip is taken at the moment a person is best in view. During a clip, every motion check (4 a
+    // second) gives a candidate with a score:
+    //   - how large the area is that differs from the empty scene (brightness or colour; see MotionDetector.thumb),
+    //   - weighted by where it is: the area painted with the THUMB tool, or the middle of the picture by default,
+    //   - less when it touches the left or right edge (someone only just entering or leaving).
+    // When the clip ends, moments near the middle of the motion count a little more, and among the best ones the
+    // sharpest is taken. Without candidates (nothing found), the moment of the largest motion is used, as before.
+
+    private val candLock = Any()
+    private val candT = LongArray(1600)
+    private val candScore = FloatArray(1600)
+    private val candSharp = FloatArray(1600)
+    private var candN = 0
+    private var lastColourAt = 0L
+    private var thumbSrc: String? = null
+    private var thumbCrop: android.graphics.RectF? = null
+    private var thumbHasCrop = false
+    private val thumbWeights = FloatArray(MotionDetector.N)
+    private var thumbMaskSrc: String? = null
+    private var thumbMask: BooleanArray = ALL_BLOCKS
+
+    /** For the THUMB tool's view: the painted area (everything when nothing is painted). */
+    private fun thumbOverlayMask(): BooleanArray {
+        val a = prefs.thumbArea
+        if (a != thumbMaskSrc) { thumbMaskSrc = a; thumbMask = if (a.isEmpty()) ALL_BLOCKS else Zones.blockMask(Zones.parseArea(a)) }
+        return thumbMask
+    }
+
+    /** How much each block counts: 1 in the painted area and 0.2 outside it, or highest in the middle by default. */
+    private fun thumbWeightsNow(cr: android.graphics.RectF?): FloatArray {
+        val a = prefs.thumbArea
+        if (a == thumbSrc && cr === thumbCrop && thumbHasCrop == (cr != null)) return thumbWeights
+        thumbSrc = a; thumbCrop = cr; thumbHasCrop = cr != null
+        val gw = MotionDetector.GW; val gh = MotionDetector.GH
+        if (a.isNotEmpty()) {
+            val mask = Zones.blockMask(Zones.parseArea(a))
+            for (i in 0 until MotionDetector.N) thumbWeights[i] = if (mask[i]) 1f else 0.2f
+            return thumbWeights
+        }
+        // the middle of what is recorded (the CROP area when there is one)
+        var minX = 0; var maxX = gw - 1; var minY = 0; var maxY = gh - 1
+        val cb = cr?.let { Crop.blockMask(it) }
+        if (cb != null && cb.any { it }) {
+            minX = gw; maxX = -1; minY = gh; maxY = -1
+            for (i in 0 until MotionDetector.N) if (cb[i]) {
+                val x = i % gw; val y = i / gw
+                if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y
+            }
+        }
+        val cx = (minX + maxX + 1) / 2f; val cy = (minY + maxY + 1) / 2f
+        val hw = ((maxX - minX + 1) / 2f).coerceAtLeast(0.5f); val hh = ((maxY - minY + 1) / 2f).coerceAtLeast(0.5f)
+        for (i in 0 until MotionDetector.N) {
+            val dx = ((i % gw) + 0.5f - cx) / hw; val dy = ((i / gw) + 0.5f - cy) / hh
+            thumbWeights[i] = (1f - 0.6f * ((dx * dx + dy * dy) / 2f).coerceAtMost(1f))
+        }
+        return thumbWeights
+    }
+
+    /** Analysis thread, during a clip: this moment's score for being the clip's picture. */
+    private fun thumbCandidate(f: Frame, now: Long, cr: android.graphics.RectF?) {
+        val size = detector.thumb(f, prefs.sensitivity, zoneBlocks)
+        if (size <= 0) return
+        val w = thumbWeightsNow(cr)
+        var score = 0f
+        for (i in 0 until size) score += w[detector.softMember(i)]
+        // someone only just entering or leaving at the side (the sides as the picture is seen upright)
+        val rot = recordRotation()
+        val atSide = if (rot == 90 || rot == 270) detector.softMinY == 0 || detector.softMaxY == MotionDetector.GH - 1
+            else detector.softMinX == 0 || detector.softMaxX == MotionDetector.GW - 1
+        if (atSide) score *= 0.6f
+        // how sharp the area is (fine detail in its brightness): decides between moments that score alike
+        val x0 = (detector.softMinX * f.w / MotionDetector.GW).coerceIn(1, f.w - 2)
+        val x1 = ((detector.softMaxX + 1) * f.w / MotionDetector.GW - 1).coerceIn(1, f.w - 2)
+        val y0 = (detector.softMinY * f.h / MotionDetector.GH).coerceIn(1, f.h - 2)
+        val y1 = ((detector.softMaxY + 1) * f.h / MotionDetector.GH - 1).coerceIn(1, f.h - 2)
+        var sum = 0.0; var sum2 = 0.0; var bright = 0.0; var n = 0
+        var y = y0
+        while (y <= y1) {
+            val r = y * f.yRow
+            var x = x0
+            while (x <= x1) {
+                val c = f.y[r + x].toInt() and 0xFF
+                val l = 4 * c - (f.y[r + x - 1].toInt() and 0xFF) - (f.y[r + x + 1].toInt() and 0xFF) -
+                    (f.y[r - f.yRow + x].toInt() and 0xFF) - (f.y[r + f.yRow + x].toInt() and 0xFF)
+                sum += l; sum2 += l.toDouble() * l; bright += c; n++
+                x += 2
+            }
+            y += 2
+        }
+        val sharp = if (n < 16) 0f else ((sum2 / n - (sum / n) * (sum / n)) / (bright / n + 8.0)).toFloat()
+        synchronized(candLock) {
+            if (candN == candT.size) {   // a very long clip: every second candidate is kept
+                var k = 0
+                var i = 0
+                while (i < candN) { candT[k] = candT[i]; candScore[k] = candScore[i]; candSharp[k] = candSharp[i]; k++; i += 2 }
+                candN = k
+            }
+            candT[candN] = now; candScore[candN] = score; candSharp[candN] = sharp; candN++
+        }
+    }
+
+    /** The clip ended: the best moment for its picture (elapsed time), or null when there were no candidates. */
+    private fun pickThumbMoment(): Long? = synchronized(candLock) {
+        if (candN == 0) return null
+        val first = candT[0]; val last = candT[candN - 1]
+        val mid = (first + last) / 2f; val half = ((last - first) / 2f).coerceAtLeast(1f)
+        // the middle of the motion counts a little more than its start and end
+        var best = 0f
+        for (i in 0 until candN) {
+            val v = candScore[i] * (1f - 0.3f * (Math.abs(candT[i] - mid) / half).coerceAtMost(1f))
+            candScore[i] = v
+            if (v > best) best = v
+        }
+        if (best <= 0f) return null
+        // among the moments that score about as well, the sharpest
+        var pick = -1
+        for (i in 0 until candN) if (candScore[i] >= best * 0.85f && (pick < 0 || candSharp[i] > candSharp[pick])) pick = i
+        val t = candT[pick]
+        candN = 0
+        t
     }
 
     /** Remembers the peak-motion moment and makes the thumbnail right away (in the background). */
@@ -898,20 +1024,25 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
         val monitoringNow = m == Mode.WATCHING || m == Mode.RECORDING
         val sink = FrameHub.overlaySink
         val showMotion = sink != null && FrameHub.showMotion
+        val showThumb = sink != null && !showMotion && FrameHub.showThumb
         val peaking = sink != null && FrameHub.peaking
         // the hardware preview is only on screen if the session uses the UI's *current* surface
         val hw = hwPreview && sessionSt != null && sessionSt === previewSt
         val motionDue = (monitoringNow || showMotion) && now - lastMotionRun >= (if (m == Mode.RECORDING && !showMotion) 250 else 125)
         // the light meter: for this phone's EV display, and for viewers watching it live (their EV display)
         val meterDue = (sink != null || FrameHub.clients > 0) && now - lastMeter >= 250
-        val overlayWanted = sink != null && (!hw || peaking || showMotion)
+        val overlayWanted = sink != null && (!hw || peaking || showMotion || showThumb)
         val overlayDue = overlayWanted && now - lastOverlayRun >= (if (hw) 100 else 66)
         val jpegDue = FrameHub.clients > 0 && now - lastJpegRun >= 200
 
         if (sink != null && !overlayWanted && overlayShown) { overlayShown = false; sink(null) }
         if (!motionDue && !overlayDue && !jpegDue && !meterDue) return
 
-        val f = YuvTools.read(img, color = (overlayDue && !hw) || jpegDue, reuse = frameBuf)
+        // colour is also read for the clip's picture: every motion check during a clip, and every 2 s while watching
+        // (so the empty scene's colours are known when a clip starts)
+        val colourForThumb = motionDue && (m == Mode.RECORDING || (m == Mode.WATCHING && now - lastColourAt >= 2000L))
+        if (colourForThumb) lastColourAt = now
+        val f = YuvTools.read(img, color = (overlayDue && !hw) || jpegDue || colourForThumb, reuse = frameBuf)
         frameBuf = f
 
         if (meterDue) { lastMeter = now; liveMeterEv = YuvTools.meterEv(f) }
@@ -932,7 +1063,10 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
                     else -> BooleanArray(zb.size) { zb[it] && cb[it] }
                 }
             }
+            detector.learnColour = m != Mode.RECORDING
             val largest = detector.analyze(f, prefs.sensitivity, prefs.lightFilter, zoneBlocks)
+            // a clip is recording: this moment is a candidate for its picture
+            if (m == Mode.RECORDING) try { thumbCandidate(f, now, cr) } catch (_: Exception) {}
             motionBlocks = largest
             val need = max(1, ceil(prefs.minAreaPct / 100f * MotionDetector.N).toInt())
             val hit = largest >= need
@@ -946,6 +1080,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
                     if (m == Mode.WATCHING) {
                         peakBlocks = largest     // the frame that triggered the clip is the first candidate
                         peakElapsed = now
+                        detector.freeze()        // the scene as it was: what the clip's pictures are compared with
                         h.post { startRecording() }
                     }
                 }
@@ -955,7 +1090,7 @@ class CameraEngine(private val ctx: Context, private val prefs: Prefs) {
             lastOverlayRun = now
             val bmp = YuvTools.render(
                 f, 2, displayRotation(), base = !hw, peaking = peaking,
-                zones = if (showMotion) (zoneBlocks ?: ALL_BLOCKS) else null,
+                zones = if (showMotion) (zoneBlocks ?: ALL_BLOCKS) else if (showThumb) thumbOverlayMask() else null,
                 motion = if (showMotion) detector.changed else null,
             )
             overlayShown = true

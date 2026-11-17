@@ -249,6 +249,7 @@ class MainActivity : Activity() {
         FrameHub.overlaySink = null
         FrameHub.peaking = false
         FrameHub.showMotion = false
+        FrameHub.showThumb = false
         overlay.setImageDrawable(null)
         detach()
         StatusBus.remove(statusListener)
@@ -541,6 +542,7 @@ class MainActivity : Activity() {
     private fun updateFlags() {
         FrameHub.peaking = resumed && prefs.peaking && selected == "FOCUS"
         FrameHub.showMotion = resumed && selected == "ZONES"
+        FrameHub.showThumb = resumed && selected == "THUMB"
         if (::cropView.isInitialized) {
             val ed = selected == "CROP"
             if (cropView.editing && !ed) { ui.removeCallbacks(cropCommit); commitCrop() }
@@ -812,7 +814,7 @@ class MainActivity : Activity() {
     private var editor: View? = null
 
     private val chipNames = mapOf("LENS" to "Lens", "FORMAT" to "Format", "EV" to "EV / meter", "ISO" to "ISO",
-        "SPEED" to "Shutter", "FOCUS" to "Focus", "WB" to "White bal.", "ZOOM" to "Zoom", "ZONES" to "Zones", "CROP" to "Crop")
+        "SPEED" to "Shutter", "FOCUS" to "Focus", "WB" to "White bal.", "ZOOM" to "Zoom", "ZONES" to "Zones", "CROP" to "Crop", "THUMB" to "Clip picture")
 
     /**
      * Long-press a control button: Samsung-style editor. Touch and hold a button to drag it between the
@@ -1124,6 +1126,7 @@ class MainActivity : Activity() {
         else set("WB", "${ProCaps.wbPresets[ProCaps.nearestPreset(prefs.wbKelvin)].second}K", false)
         set("ZOOM", "%.1fx".format(prefs.zoom), false)
         set("ZONES", if (prefs.zones.isEmpty()) "all" else "custom", false)
+        set("THUMB", if (prefs.thumbArea.isEmpty()) "middle" else "custom", false)
         set("CROP", cropSize(Crop.parse(prefs.crop))?.let { Crop.label(it, imageRotation()) } ?: "off", false)
         if (selected != "CROP") { cropView.rotation = imageRotation(); cropView.set(Crop.parse(prefs.crop)) }
     }
@@ -1266,8 +1269,9 @@ class MainActivity : Activity() {
                 seek.max = MotionDetector.MAX_SENSITIVITY - 1
                 seek.progress = prefs.sensitivity - 1
             }
+            "THUMB" -> setAutoBtn("RESET", false)
         }
-        seek.visibility = if (selected == "CROP") View.INVISIBLE else View.VISIBLE
+        seek.visibility = if (selected == "CROP" || selected == "THUMB") View.INVISIBLE else View.VISIBLE
         if (selected == "CROP") autoBtn.visibility = View.GONE
         updating = false
         tickPanel()
@@ -1314,6 +1318,8 @@ class MainActivity : Activity() {
             } else text = ProCaps.wbPresets[ProCaps.nearestPreset(prefs.wbKelvin)].let { "${it.first} ${it.second}K" }
             "ZOOM" -> text = "Zoom %.1fx".format(prefs.zoom)
             "ZONES" -> text = "Sensitivity ${prefs.sensitivity} · drag on image to mask areas"
+            "THUMB" -> text = if (prefs.thumbArea.isEmpty()) "Clip pictures favour the middle · drag on image to mark where people should be"
+                else "Clip pictures favour the bright area · drag to change, RESET = the middle"
             "CROP" -> text = cropText()
             else -> text = ""
         }
@@ -1334,6 +1340,7 @@ class MainActivity : Activity() {
             "WB" -> if (prefs.wbAuto) seedManualWb() else prefs.wbAuto = true
             "ZOOM" -> prefs.zoom = 1f.coerceIn(c.zoomMin, c.zoomMax)
             "ZONES" -> prefs.zones = ""
+            "THUMB" -> prefs.thumbArea = ""
             "CROP" -> { ui.removeCallbacks(cropCommit); cropView.reset(); ui.removeCallbacks(cropCommit); commitCrop() }
         }
         engine?.applyPro()
@@ -1437,6 +1444,18 @@ class MainActivity : Activity() {
     // ------------------------------------------------------------------ zones editor
 
     private fun onOverlayTouch(v: View, ev: MotionEvent): Boolean {
+        if (selected == "THUMB") {
+            // the clip-picture area: the cells dragged over are marked (or unmarked, starting on a marked one)
+            if (v.width == 0 || v.height == 0) return true
+            val u = ev.x / v.width; val w = ev.y / v.height
+            if (u < 0f || u >= 1f || w < 0f || w >= 1f) return true
+            val (xn, yn) = Zones.unrotate(u, w, imageRotation())
+            val idx = (yn * Zones.CH).toInt().coerceIn(0, Zones.CH - 1) * Zones.CW + (xn * Zones.CW).toInt().coerceIn(0, Zones.CW - 1)
+            val cells = Zones.parseArea(prefs.thumbArea)
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) paintValue = !cells[idx]
+            if (cells[idx] != paintValue) { cells[idx] = paintValue; prefs.thumbArea = Zones.formatArea(cells); tickPanel(); refreshChips() }
+            return true
+        }
         if (selected != "ZONES") return false
         if (v.width == 0 || v.height == 0) return true
         val u = ev.x / v.width

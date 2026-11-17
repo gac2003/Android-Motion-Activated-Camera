@@ -174,6 +174,7 @@ class RemoteLiveActivity : Activity() {
         if (::image.isInitialized) image.visibility = View.VISIBLE
     }
     private lateinit var cropView: com.motioncam.CropView
+    private lateinit var areaView: com.motioncam.CellPaintView
     private lateinit var cropBar: View
 
     /** Leaves crop editing; [keep]: lines up the frame as it is now. */
@@ -222,7 +223,16 @@ class RemoteLiveActivity : Activity() {
         return "$shape ▾ · records ${com.motioncam.Crop.label(sz, s?.optInt("rotation") ?: 0)}" + if (pct > 0) " · ≈$pct% of the file size" else ""
     }
 
+    /** The THUMB tool's painted area follows the camera's setting (and what is lined up here), shown only while it is open. */
+    private fun syncAreaView() {
+        if (!::areaView.isInitialized) return
+        areaView.rotation = status()?.optInt("rotation") ?: 0
+        areaView.set(st().optString("thumbArea"))
+        areaView.visibility = if (selected == "THUMB") View.VISIBLE else View.GONE
+    }
+
     private fun syncCropView() {
+        syncAreaView()
         if (!::cropView.isInitialized) return
         cropView.rotation = status()?.optInt("rotation") ?: 0
         if (selected != "CROP" || !draft.has("crop")) cropView.set(com.motioncam.Crop.parse(st().optString("crop")))
@@ -436,6 +446,13 @@ class RemoteLiveActivity : Activity() {
             onHold = { h -> com.motioncam.CropView.fade(bottomBox, h) }
         }
         root.addView(cropView, FrameLayout.LayoutParams(-1, -1))
+        // THUMB: where people should be in a clip's picture, painted on this camera's picture
+        areaView = com.motioncam.CellPaintView(this).apply {
+            picture = { imageRect() }
+            visibility = View.GONE
+            onChange = { area -> stage(JSONObject().put("thumbArea", area), refresh = true) }
+        }
+        root.addView(areaView, FrameLayout.LayoutParams(-1, -1))
         msgTv = Ui.label(this, "Starting live view…", 14f).apply {
             gravity = Gravity.CENTER
             setPadding(d(16), d(10), d(16), d(10))
@@ -786,6 +803,8 @@ class RemoteLiveActivity : Activity() {
         if (st.optBoolean("wbAuto", true)) set("WB", lv.optInt("kelvin").takeIf { it > 0 }?.let { "${it}K" } ?: "AUTO", true)
         else set("WB", "${ProCaps.wbPresets[ProCaps.nearestPreset(st.optInt("wbKelvin", 5200))].second}K", false)
         set("ZOOM", "%.1fx".format(st.optDouble("zoom", 1.0)), false)
+        set("THUMB", if (st.optString("thumbArea").isEmpty()) "middle" else "custom", false)
+        syncAreaView()
         set("CROP", cropSize(com.motioncam.Crop.parse(st.optString("crop")))?.let { com.motioncam.Crop.label(it, status()?.optInt("rotation") ?: 0) } ?: "off", false)
         syncCropView()
         // values changed here but not sent yet: a dot on their control (Save sends them)
@@ -794,7 +813,7 @@ class RemoteLiveActivity : Activity() {
 
     private val CHIP_KEYS = mapOf("LENS" to listOf("camera"), "FORMAT" to listOf("resHeight", "fps"),
         "EV" to listOf("evIndex", "exposureAuto"), "ISO" to listOf("iso", "exposureAuto"), "SPEED" to listOf("shutterNs", "exposureAuto"),
-        "FOCUS" to listOf("focusPos", "focusAuto"), "WB" to listOf("wbKelvin", "wbAuto"), "ZOOM" to listOf("zoom"), "CROP" to listOf("crop"))
+        "FOCUS" to listOf("focusPos", "focusAuto"), "WB" to listOf("wbKelvin", "wbAuto"), "ZOOM" to listOf("zoom"), "CROP" to listOf("crop"), "THUMB" to listOf("thumbArea"))
 
     private fun lensLabel(st: JSONObject, c: JSONObject): String {
         val lenses = c.optJSONArray("lenses")
@@ -884,8 +903,9 @@ class RemoteLiveActivity : Activity() {
                 seek.progress = ((st.optDouble("zoom", 1.0) - zMin) / max(0.01, zMax - zMin) * 1000).roundToInt().coerceIn(0, 1000)
             }
             "CROP" -> setAutoBtn("", false, false)
+            "THUMB" -> setAutoBtn("RESET", false)
         }
-        seek.visibility = if (selected == "CROP") View.INVISIBLE else View.VISIBLE
+        seek.visibility = if (selected == "CROP" || selected == "THUMB") View.INVISIBLE else View.VISIBLE
         updating = false
         tickPanel(st)
     }
@@ -925,6 +945,8 @@ class RemoteLiveActivity : Activity() {
             } else ProCaps.wbPresets[ProCaps.nearestPreset(st.optInt("wbKelvin", 5200))].let { "${it.first} ${it.second}K" }
             "ZOOM" -> "Zoom %.1fx".format(st.optDouble("zoom", 1.0))
             "CROP" -> cropText()
+            "THUMB" -> if (st.optString("thumbArea").isEmpty()) "Clip pictures favour the middle · drag on the picture to mark where people should be"
+                else "Clip pictures favour the clear area · drag to change, RESET = the middle"
             else -> ""
         }
         if (valueTv.text != text) valueTv.text = text
@@ -991,6 +1013,7 @@ class RemoteLiveActivity : Activity() {
             } else a.put("wbAuto", true)
             "ZOOM" -> a.put("zoom", 1.0.coerceIn(zMin, zMax))
             "CROP" -> { cropView.reset(); configurePanel(); return }
+            "THUMB" -> a.put("thumbArea", "")
             else -> return
         }
         apply(a)

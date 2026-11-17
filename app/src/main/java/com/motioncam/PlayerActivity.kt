@@ -305,7 +305,12 @@ class PlayerActivity : Activity() {
         ui.post(ticker)
     }
 
+    private var watchedIndex = -1
+
     override fun onPause() {
+        // leaving the player: nothing is being watched, so a long clip's download stops where it is
+        watchedIndex = -1
+        try { com.motioncam.remote.StreamCache.watching(this, null) } catch (_: Exception) {}
         ui.removeCallbacks(ticker)
         if (playing) togglePlay()
         super.onPause()
@@ -649,7 +654,8 @@ class PlayerActivity : Activity() {
         val c = clips.getOrNull(index) ?: return false
         val e = com.motioncam.remote.RemoteRepo.entry(c.id) ?: return false
         val dl = com.motioncam.remote.StreamCache.start(this, e)
-        if (dl.error != null || System.currentTimeMillis() - dl.lastProgress > com.motioncam.remote.StreamCache.STALL_MS) return false
+        com.motioncam.remote.StreamCache.need(dl, dl.available + 1)   // it may have stopped where the player last read: carry on
+        if (dl.error != null || (dl.running && System.currentTimeMillis() - dl.lastProgress > com.motioncam.remote.StreamCache.STALL_MS)) return false
         val pos = try { slot.mp?.currentPosition ?: 0 } catch (_: Exception) { 0 }
         val pct = if (dl.size > 0) (dl.available * 100 / dl.size).toInt() else -1
         slowToast?.cancel()
@@ -1065,6 +1071,11 @@ class PlayerActivity : Activity() {
     private fun updatePosition() {
         val i = cur.index
         if (i !in clips.indices) return
+        // the clip on screen is the one worth downloading whole (a remote one); the one before stops where it is
+        if (i != watchedIndex) {
+            watchedIndex = i
+            try { com.motioncam.remote.StreamCache.watching(this, com.motioncam.remote.RemoteRepo.entry(clips[i].id)) } catch (_: Exception) {}
+        }
         // while a jump is still loading/seeking, keep showing where the user landed (no jitter)
         if (holdMs >= 0 && System.currentTimeMillis() - holdSince > 2500) holdMs = -1
         val pos = if (holdMs >= 0) holdMs.toInt() else curPos()

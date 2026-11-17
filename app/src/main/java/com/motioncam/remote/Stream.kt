@@ -19,11 +19,33 @@ import java.util.concurrent.Executors
  * server, save-to-phone) can use the bytes as soon as they arrive. Finished clips are kept (up to
  * [MAX_CACHE] for all remote folders together, least recently used removed first), so replaying,
  * scrubbing and filmstrip frames are instant and work offline.
+ *
+ * Only what is wanted is downloaded:
+ *  - a short clip (up to [SMALL]) is fetched whole at once, so going from clip to clip stays seamless;
+ *  - the clip being watched ([watching]) is fetched whole too, whatever its size;
+ *  - any other longer clip is fetched only as far as it is being read plus a few MB ahead: its start when the player
+ *    prepares it as the next clip. When nobody reads on (skipped, the player left), the download stops and keeps what
+ *    it has; it carries on from there when the clip is read or watched again;
+ *  - a clip that is almost complete (90 %, or under [TAIL] to go) is finished anyway, and so is one that is being
+ *    saved to the phone or copied.
  */
 object StreamCache {
     const val MAX_CACHE = 1_500_000_000L
 
-    class Download(val entry: RemoteRepo.Entry, val part: File, val done: File) {
+    /** Clips up to this size are downloaded whole straight away. */
+    const val SMALL = 10_000_000L
+    /** A longer clip starts with this much. */
+    private const val INITIAL = 4_000_000L
+    /** When a reader is within [LOW] of what is wanted, the download goes on to [HIGH] past the reader. */
+    private const val LOW = 2_000_000L
+    private const val HIGH = 8_000_000L
+    private const val TAIL = 2_000_000L
+
+    class Download(val ctx: Context, val entry: RemoteRepo.Entry, val part: File, val done: File) {
+        /** How many bytes of the clip are wanted for now (Long.MAX_VALUE = all of it). Guarded by [lock]. */
+        var want = Long.MAX_VALUE
+        /** A download thread is at work on it. Guarded by [lock]. */
+        @Volatile var running = false
         @Volatile var available = 0L
         @Volatile var complete = false
         @Volatile var error: Exception? = null
@@ -52,16 +74,61 @@ object StreamCache {
         synchronized(active) {
             active[key(e)]?.let { if (it.error == null) return it }
             val done = doneFile(app, e)
-            val dl = Download(e, File(done.path + ".part"), done)
+            val dl = Download(app, e, File(done.path + ".part"), done)
             if (completeFile(app, e) != null) {
                 dl.available = done.length(); dl.complete = true
                 done.setLastModified(System.currentTimeMillis())
                 return dl
             }
             active[key(e)] = dl
+            // a short clip (or one of unknown size) whole; a longer one its start, the rest as it is read
+            synchronized(dl.lock) {
+                dl.want = if (dl.size <= 0 || dl.size <= SMALL) Long.MAX_VALUE else INITIAL
+                dl.running = true
+            }
             pool.execute { run(app, dl) }
             return dl
         }
+    }
+
+    /**
+     * A reader is at byte [pos] of the clip (or wants all of it: Long.MAX_VALUE): the download goes on far enough
+     * ahead of it, starting again if it had stopped.
+     */
+    fun need(dl: Download, pos: Long) {
+        synchronized(dl.lock) {
+            if (dl.complete || dl.error != null) return
+            var w = dl.want
+            if (pos >= Long.MAX_VALUE - HIGH) w = Long.MAX_VALUE
+            else if (pos + LOW >= w) w = pos + HIGH
+            if (dl.size > 0 && w != Long.MAX_VALUE && dl.size - w < TAIL) w = Long.MAX_VALUE   // nearly all of it: finish
+            dl.want = w
+            if (!dl.running && dl.available < w) {
+                dl.running = true
+                dl.lastProgress = System.currentTimeMillis()
+                pool.execute { run(dl.ctx, dl) }
+            }
+        }
+    }
+
+    @Volatile private var watched: String? = null
+
+    /**
+     * The clip being watched now ([e]; null = none, the player closed or shows a clip on the phone): it is downloaded
+     * whole, so scrubbing and its filmstrip are quick. The one watched before stops where it is (unless nearly complete).
+     */
+    fun watching(ctx: Context, e: RemoteRepo.Entry?) {
+        val k = e?.let { key(it) }
+        val old = watched
+        if (old == k) return
+        watched = k
+        if (old != null) active[old]?.let { dl -> synchronized(dl.lock) { if (!dl.complete) dl.want = dl.available } }
+        if (e != null) need(start(ctx, e), Long.MAX_VALUE)
+    }
+
+    /** Enough for now: as far as wanted, unless the clip is nearly complete anyway. */
+    private fun enough(dl: Download): Boolean = synchronized(dl.lock) {
+        dl.available >= dl.want && !(dl.size > 0 && dl.available * 10 >= dl.size * 9)
     }
 
     /** A slow connection: the download only gives up after this long without receiving anything. */
@@ -73,6 +140,7 @@ object StreamCache {
             // like a video app on a slow connection: a dropped or timed-out download picks up where it stopped, as long
             // as it still gets somewhere (it only gives up after STALL_MS with nothing arriving)
             var tries = 0
+            var paused = false
             while (true) {
                 val offset = if (dl.part.exists()) dl.part.length() else 0L   // resume a partial download
                 dl.available = offset
@@ -88,6 +156,7 @@ object StreamCache {
                                     if (n < 0) break
                                     out.write(buf, 0, n)
                                     synchronized(dl.lock) { dl.available += n; dl.lastProgress = System.currentTimeMillis(); dl.lock.notifyAll() }
+                                    if (enough(dl)) { paused = true; break }   // nobody is reading on: stop here, keep what's in
                                 }
                             }
                         }
@@ -100,14 +169,22 @@ object StreamCache {
                     Thread.sleep(minOf(2_000L * tries, 15_000L))
                 }
             }
+            if (paused) {
+                // stopped part-way on purpose; carry on at once if a reader asked for more meanwhile
+                synchronized(dl.lock) {
+                    if (dl.available < dl.want) { dl.lastProgress = System.currentTimeMillis(); pool.execute { run(ctx, dl) } }
+                    else { dl.running = false; dl.lock.notifyAll() }
+                }
+                return
+            }
             if (dl.size > 0 && dl.part.length() != dl.size) throw IOException("download incomplete (${dl.part.length()} of ${dl.size} bytes)")
             dl.part.renameTo(dl.done)
-            synchronized(dl.lock) { dl.available = dl.done.length(); dl.complete = true; dl.lock.notifyAll() }
+            synchronized(dl.lock) { dl.available = dl.done.length(); dl.complete = true; dl.running = false; dl.lock.notifyAll() }
+            synchronized(active) { if (active[key(dl.entry)] === dl) active.remove(key(dl.entry)) }
             try { RemoteRepo.onDownloaded(ctx, dl.entry, dl.done) } catch (_: Throwable) {}
             trim(ctx)
         } catch (e: Exception) {
-            synchronized(dl.lock) { dl.error = e; dl.lock.notifyAll() }
-        } finally {
+            synchronized(dl.lock) { dl.error = e; dl.running = false; dl.lock.notifyAll() }
             synchronized(active) { if (active[key(dl.entry)] === dl) active.remove(key(dl.entry)) }
         }
     }
@@ -117,6 +194,7 @@ object StreamCache {
      * arrived for [timeoutMs]: a slow download that still moves is waited for (not a fixed time for each piece).
      */
     fun waitFor(dl: Download, pos: Long, timeoutMs: Long = STALL_MS): Boolean {
+        need(dl, pos)   // the download goes on (or starts again) far enough for this reader
         synchronized(dl.lock) {
             while (dl.available < pos && !dl.complete && dl.error == null) {
                 if (System.currentTimeMillis() - dl.lastProgress > timeoutMs) return false
@@ -132,6 +210,7 @@ object StreamCache {
         var dl = start(ctx, e)
         var retries = 0
         while (true) {
+            need(dl, Long.MAX_VALUE)   // all of it
             if (cancelled()) throw IOException("cancelled")
             synchronized(dl.lock) { if (!dl.complete && dl.error == null) dl.lock.wait(500) }
             if (dl.size > 0) pct((dl.available * 100 / dl.size).toInt().coerceIn(0, 100))
@@ -151,6 +230,14 @@ object StreamCache {
         val root = File(ctx.cacheDir, "remote")
         val files = root.listFiles()?.flatMap { File(it, "clips").listFiles()?.toList() ?: emptyList() }
             ?.filter { it.isFile && !it.name.endsWith(".part") } ?: return
+        // parts of clips that were left unfinished and not touched for a day
+        val now = System.currentTimeMillis()
+        root.listFiles()?.forEach { d -> File(d, "clips").listFiles()?.forEach { f ->
+            if (f.name.endsWith(".part") && now - f.lastModified() > 86_400_000L) synchronized(active) {
+                val dl = active.values.firstOrNull { it.part == f }
+                if (dl == null || !dl.running) { if (dl != null) active.remove(key(dl.entry)); f.delete() }
+            }
+        } }
         var total = files.sumOf { it.length() }
         if (total <= MAX_CACHE) return
         val busy = active.values.map { it.done.path }.toSet()
@@ -168,7 +255,12 @@ object StreamCache {
 
     fun clearAll(ctx: Context) {
         File(ctx.cacheDir, "remote").listFiles()?.forEach { src ->
-            File(src, "clips").listFiles()?.forEach { f -> if (active.values.none { it.part == f || it.done == f }) f.delete() }
+            File(src, "clips").listFiles()?.forEach { f ->
+                synchronized(active) {
+                    val dl = active.values.firstOrNull { it.part == f || it.done == f }
+                    if (dl == null || !dl.running) { if (dl != null) active.remove(key(dl.entry)); f.delete() }
+                }
+            }
         }
     }
 }

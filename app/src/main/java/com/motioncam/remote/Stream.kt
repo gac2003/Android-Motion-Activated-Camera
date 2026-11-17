@@ -24,7 +24,7 @@ import java.util.concurrent.Executors
  *  - a short clip (up to [SMALL]) is fetched whole at once, so going from clip to clip stays seamless;
  *  - the clip being watched ([watching]) is fetched whole too, whatever its size;
  *  - any other longer clip is fetched only as far as it is being read plus a few MB ahead: its start when the player
- *    prepares it as the next clip. When nobody reads on (skipped, the player left), the download stops and keeps what
+ *    fetches the clips either side of the watched one in advance. When nobody reads on (skipped, the player left), the download stops and keeps what
  *    it has; it carries on from there when the clip is read or watched again;
  *  - a clip that is almost complete (90 %, or under [TAIL] to go) is finished anyway, and so is one that is being
  *    saved to the phone or copied.

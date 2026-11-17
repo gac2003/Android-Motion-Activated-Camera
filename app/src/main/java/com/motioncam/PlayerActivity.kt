@@ -1075,6 +1075,11 @@ class PlayerActivity : Activity() {
         if (i != watchedIndex) {
             watchedIndex = i
             try { com.motioncam.remote.StreamCache.watching(this, com.motioncam.remote.RemoteRepo.entry(clips[i].id)) } catch (_: Exception) {}
+            // the clips either side are fetched in advance (whole when short, their start when long), so going back
+            // is as quick as going forward
+            for (n in intArrayOf(i - 1, i + 1)) clips.getOrNull(n)?.let { c ->
+                try { com.motioncam.remote.RemoteRepo.entry(c.id)?.let { com.motioncam.remote.StreamCache.start(this, it) } } catch (_: Exception) {}
+            }
         }
         // while a jump is still loading/seeking, keep showing where the user landed (no jitter)
         if (holdMs >= 0 && System.currentTimeMillis() - holdSince > 2500) holdMs = -1

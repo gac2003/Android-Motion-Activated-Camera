@@ -1288,7 +1288,7 @@ class MainActivity : Activity() {
         panel.removeAllViews()
         if (on) {
             panel.orientation = LinearLayout.VERTICAL
-            panel.addView(autoBtn, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.END; bottomMargin = Ui.dp(this, 4) })
+            panel.addView(autoBtn, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.END; bottomMargin = Ui.dp(this@MainActivity, 4) })
             panel.addView(valueTv, LinearLayout.LayoutParams(-1, -2))
             panel.addView(seek, LinearLayout.LayoutParams(-1, -2))
             seek.visibility = View.GONE

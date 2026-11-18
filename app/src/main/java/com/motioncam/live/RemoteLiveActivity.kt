@@ -906,8 +906,31 @@ class RemoteLiveActivity : Activity() {
             "THUMB" -> setAutoBtn("RESET", false)
         }
         seek.visibility = if (selected == "CROP" || selected == "THUMB") View.INVISIBLE else View.VISIBLE
+        panelStacked(selected == "THUMB")
+        if (selected == "THUMB") seek.visibility = View.GONE
         updating = false
         tickPanel(st)
+    }
+
+    /**
+     * The Clip picture tool has a long hint and no slider: its RESET goes above the text (right-aligned) so the text
+     * can't push it off screen; the other tools keep text · slider · button in one row.
+     */
+    private fun panelStacked(on: Boolean) {
+        if (on == (panel.orientation == LinearLayout.VERTICAL)) return
+        panel.removeAllViews()
+        if (on) {
+            panel.orientation = LinearLayout.VERTICAL
+            panel.addView(autoBtn, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.END; bottomMargin = d(4) })
+            panel.addView(valueTv, LinearLayout.LayoutParams(-1, -2))
+            panel.addView(seek, LinearLayout.LayoutParams(-1, -2))
+            seek.visibility = View.GONE
+        } else {
+            panel.orientation = LinearLayout.HORIZONTAL
+            panel.addView(valueTv, LinearLayout.LayoutParams(-2, -2))
+            panel.addView(seek, LinearLayout.LayoutParams(0, -2, 1f))
+            panel.addView(autoBtn, LinearLayout.LayoutParams(-2, -2))
+        }
     }
 
     /** Value label; while a control is on AUTO the slider follows the camera's live value. */

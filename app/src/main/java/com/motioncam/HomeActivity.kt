@@ -91,7 +91,9 @@ class HomeActivity : Activity(), Nav.Reselect {
         Live.listeners += changed
         AlertInbox.listeners += changed
         StatusBus.add(statusL)
-        CameraService.ensureStandby(this)
+        // no standby from here: Home is where you watch your cameras, so opening it must not turn this phone into a
+        // camera on standby (a foreground service with an always-on connection) just because it recorded this week.
+        // Standby starts from camera mode, or when monitoring stops.
         feed = ActivityFeed(this, 40) { fillRecent() }
         render()
         ui.postDelayed(tick, 30_000)
